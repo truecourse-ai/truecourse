@@ -101,7 +101,7 @@ describe('session transcript events', () => {
         ...envelope,
         type: 'child-session',
         phase: 'completed',
-        child: { sessionId: 's2', kind: 'spec-scan.overlap', workItem: 'core/auth' },
+        child: { sessionId: 's2', kind: 'spec-scan.conflicts', workItem: 'core/auth' },
         status: 'completed',
         spent: { turns: 3, tokens: 1200, costUsd: 0.2 },
       },

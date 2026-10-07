@@ -14,7 +14,7 @@
  * conflict's resolution detail. Claims live HERE and nowhere else: a section says
  * what it promises, and one of those promises drills into the claim itself -
  * both traces included, without leaving the document.
- * A conflict tab renders the full-pane SpecOverlapDetail (the same five-option
+ * A conflict tab renders the full-pane SpecConflictDetail (the same five-option
  * resolver Context's conflicts use). Doc/conflict selection mirrors
  * `?doc`/`?conflict`; the within-doc section detail is `?section`, and the
  * claim read inside it `?claim`.
@@ -26,7 +26,7 @@ import { Loader2, PlayCircle } from 'lucide-react';
 import type { CorpusConflict, GuardClaimsView, GuardCoveragePlainStatus, GuardStaleness } from '@truecourse/shared';
 import { buildCorpusConflicts, isConflictId, resolveConflictId } from '@truecourse/shared';
 import { parseSpecKey, type SpecCorpusState } from '@/components/spec/SpecCorpusView';
-import { SpecOverlapDetail } from '@/components/spec/SpecOverlapDetail';
+import { SpecConflictDetail } from '@/components/spec/SpecConflictDetail';
 import { DocMarkdown } from '@/components/spec/DocMarkdown';
 import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import * as api from '@/lib/api';
@@ -73,7 +73,7 @@ export function GuardCoveragePage({
   onDecision?: () => void;
 }) {
   const { activeId, openTabs, open, section, selectSection, claim, selectClaim, focusClaim } = tabs;
-  // The active tab is a conflict (its overlap key) or a doc (its ref); null = nothing open.
+  // The active tab is a conflict (its key) or a doc (its ref); null = nothing open.
   const activeConflict = activeId && isConflictId(activeId) ? activeId : null;
   const doc = activeId && !activeConflict ? activeId : null;
 
@@ -119,15 +119,15 @@ export function GuardCoveragePage({
     reloadKey,
   );
 
-  // The open conflict (if any) as its overlap parts, the spec curation surface
+  // The open conflict (if any) as its key's parts, the spec curation surface
   // works whenever there's a corpus, so a conflict can be resolved before guards
   // are even generated.
-  const overlapSel = useMemo(() => {
+  const conflictSel = useMemo(() => {
     if (!activeConflict) return null;
     const k = parseSpecKey(activeConflict);
-    return k.kind === 'overlap' ? k : null;
+    return k.kind === 'conflict' ? k : null;
   }, [activeConflict]);
-  const showConflict = overlapSel != null && corpus.data != null;
+  const showConflict = conflictSel != null && corpus.data != null;
 
   // The shared derivation over the whole corpus, the ONE conflict list this page
   // addresses by id, for both the resolution pane and the in-doc heading markers.
@@ -141,10 +141,8 @@ export function GuardCoveragePage({
         : [],
     [corpus.data],
   );
-  // The dispute the URL names. A doc PAIR can carry several genuine disputes, so
+  // The conflict the URL names. A doc PAIR can carry several genuine conflicts, so
   // this must resolve the ID, a lookup by pair would always land on the first.
-  // Legacy `?conflict=` links (minted before ids carried a section discriminator)
-  // still resolve, to the first dispute of their pair: the row they always opened.
   const activeConflictRecord = useMemo(
     () => (activeConflict ? resolveConflictId(conflicts, activeConflict) : undefined),
     [conflicts, activeConflict],
@@ -210,9 +208,9 @@ export function GuardCoveragePage({
     [coverage],
   );
 
-  // Headings in the current doc flagged by a within-area overlap → the conflict
-  // key that resolves them. Reuses the same overlap `sections` the Spec doc viewer
-  // marks (normalized heading text → overlap key). A heading carries one tag, and
+  // Headings in the current doc a conflict points at → the conflict key that
+  // resolves them. Reuses the same conflict `sections` the Spec doc viewer marks
+  // (normalized heading text → conflict key). A heading carries one tag, and
   // one section can hold many conflicts, so the tag opens the one being viewed
   // when it is on that heading, else the first still open, else the first.
   const conflictHeadings = useMemo(() => {
@@ -239,11 +237,11 @@ export function GuardCoveragePage({
     // context, so no doc center renders beside it. Closing returns to the doc.
     if (showConflict) {
       return (
-        <SpecOverlapDetail
+        <SpecConflictDetail
           repoId={repoId}
-          area={activeConflictRecord?.area ?? overlapSel!.area}
-          docA={activeConflictRecord?.a ?? overlapSel!.a}
-          docB={activeConflictRecord?.b ?? overlapSel!.b}
+          area={activeConflictRecord?.area ?? conflictSel!.area}
+          docA={activeConflictRecord?.a ?? conflictSel!.a}
+          docB={activeConflictRecord?.b ?? conflictSel!.b}
           conflict={activeConflictRecord}
           data={corpus.data!}
           onResolved={(res) => {

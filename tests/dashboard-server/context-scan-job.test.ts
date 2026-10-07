@@ -97,7 +97,7 @@ function corpus(opts: { extra?: string; conflict?: boolean } = {}): CuratedCorpu
       : []),
   ];
   return {
-    version: 3,
+    version: 5,
     generatedAt: '2026-01-01T00:00:00Z',
     docs,
     areas: [
@@ -106,7 +106,7 @@ function corpus(opts: { extra?: string; conflict?: boolean } = {}): CuratedCorpu
         product: 'p',
         concern: 'c',
         docRefs: docs.map((d) => d.ref),
-        overlaps: opts.conflict
+        conflicts: opts.conflict
           ? [
               {
                 docs: [ref(SRC_A, 'one.md'), ref(SRC_B, 'site.md')],
@@ -207,21 +207,21 @@ describe('the context.scan job', () => {
   });
 
   it('on Claude Code hands the scan a computer and has it compare facts; in API mode it pairs', async () => {
-    const asked: Array<Pick<WorkspaceContextScanOptions, 'computer' | 'conflictMethod'>> = [];
+    const asked: Array<Pick<WorkspaceContextScanOptions, 'computer'>> = [];
     for (const mode of ['api', 'claude-code'] as const) {
       await runScan(scanResult(), {
         deps: {
           startLlm: async () => ({ ...testLlm, mode }),
           runScan: async (options) => {
-            asked.push({ computer: options.computer, conflictMethod: options.conflictMethod });
+            asked.push({ computer: options.computer });
             return scanResult();
           },
         },
       });
     }
     expect(asked).toEqual([
-      { computer: undefined, conflictMethod: undefined },
-      { computer: true, conflictMethod: 'facts' },
+      { computer: undefined },
+      { computer: true },
     ]);
   });
 

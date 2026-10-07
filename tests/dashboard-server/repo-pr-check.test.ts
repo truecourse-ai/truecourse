@@ -335,7 +335,7 @@ beforeEach(async () => {
     run: async () => ({ status: 'ok', latest: latestOf('run-head', HEAD, 'pass') }) as never,
     scan: async () => {
       seen.scanned = true;
-      return { corpus: { version: 3, generatedAt: '', docs: [], areas: [], skippedDocs: [] } } as never;
+      return { corpus: { version: 5, generatedAt: '', docs: [], areas: [], skippedDocs: [] } } as never;
     },
   };
   await db.delete(schema.guardRuns);
@@ -370,10 +370,10 @@ beforeEach(async () => {
   // The repository reads one document of the workspace corpus: generate needs a slice.
   await setContextBindings(ORG, REPO, [SOURCE]);
   await saveWorkspaceSpec({ workspaceOrgId: ORG }, 'corpus', {
-    version: 3,
+    version: 5,
     generatedAt: '',
     docs: [{ ref: `context/${SOURCE}/docs/orgs.md`, kind: 'prd', lastTouched: '', areaTags: ['p/c'], sourceId: SOURCE }],
-    areas: [{ id: 'p/c', product: 'p', concern: 'c', docRefs: [`context/${SOURCE}/docs/orgs.md`], overlaps: [] }],
+    areas: [{ id: 'p/c', product: 'p', concern: 'c', docRefs: [`context/${SOURCE}/docs/orgs.md`], conflicts: [] }],
     skippedDocs: [],
   } as CuratedCorpus);
   jobs = mountJobs();
@@ -521,7 +521,7 @@ describe('the pull request check', () => {
     });
     changedFiles = ['docs/orgs.md', 'src/index.ts'];
     const disputed: CuratedCorpus = {
-      version: 3,
+      version: 5,
       generatedAt: '',
       docs: [
         { ref: `context/${SOURCE}/docs/orgs.md`, kind: 'prd', lastTouched: '', areaTags: ['p/c'], sourceId: SOURCE },
@@ -533,7 +533,7 @@ describe('the pull request check', () => {
           product: 'p',
           concern: 'c',
           docRefs: [`context/${SOURCE}/docs/orgs.md`, `context/${SOURCE}/docs/other.md`],
-          overlaps: [
+          conflicts: [
             {
               docs: [`context/${SOURCE}/docs/orgs.md`, `context/${SOURCE}/docs/other.md`],
               note: 'one org vs many',
@@ -594,7 +594,7 @@ describe('the pull request check', () => {
     engines.scan = async () =>
       ({
         corpus: {
-          version: 3,
+          version: 5,
           generatedAt: '',
           docs: [other, orgs].map((ref) => ({ ref, kind: 'prd', lastTouched: '', areaTags: ['p/c'], sourceId: SOURCE })),
           areas: [
@@ -604,7 +604,7 @@ describe('the pull request check', () => {
               concern: 'c',
               docRefs: [other, orgs],
               // The unchanged document is the conflict's first side.
-              overlaps: [
+              conflicts: [
                 {
                   docs: [other, orgs],
                   note: 'one org vs many',
@@ -637,17 +637,17 @@ describe('the pull request check', () => {
       config: { repoFullName: REPO, installationId: 5, include: ['docs/**'], exclude: [], branch: 'main' },
     });
     changedFiles = ['docs/orgs.md'];
-    const asked: Array<{ computer?: boolean; conflictMethod?: string }> = [];
+    const asked: Array<{ computer?: boolean }> = [];
     engines.scan = async (opts) => {
-      asked.push({ computer: opts.computer, conflictMethod: opts.conflictMethod });
-      return { corpus: { version: 3, generatedAt: '', docs: [], areas: [], skippedDocs: [] } } as never;
+      asked.push({ computer: opts.computer });
+      return { corpus: { version: 5, generatedAt: '', docs: [], areas: [], skippedDocs: [] } } as never;
     };
     await check();
     checkLlmMode = 'claude-code';
     await check(pr({ number: 8, headSha: 'c'.repeat(40) }));
     expect(asked).toEqual([
-      { computer: undefined, conflictMethod: undefined },
-      { computer: true, conflictMethod: 'facts' },
+      { computer: undefined },
+      { computer: true },
     ]);
   });
 

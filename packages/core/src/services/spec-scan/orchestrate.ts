@@ -7,7 +7,7 @@
  *
  * SCOPE-ONLY, deliberately (a recorded deviation from the plan prose, noted in
  * section 06): the orchestrator does NOT `dispatchChild` the curation/settle/
- * overlap pools. `dispatchChild` runs children serially, and the scan's pools
+ * conflicts pools. `dispatchChild` runs children serially, and the scan's pools
  * are network-bound — they need the session pool's concurrency, throttle
  * governor and transient re-queue. So the run (`run.ts`) chains the pools
  * itself; this session only produces the scope + instructions they run under.

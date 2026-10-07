@@ -1,7 +1,7 @@
 /**
  * The guard-generate conflict gate: `guardGenerateInProcess` hard-fails BEFORE
- * the estimate/confirm when the corpus has an unresolved within-area overlap —
- * extracting both sides would birth a paid finding that is really the dispute.
+ * the estimate/confirm when the corpus has an unresolved within-area conflict —
+ * extracting both sides would birth a paid red test that is really the conflict.
  * Only a resolution on the disagreement itself (a verdict/dismissal, or a
  * force-exclude of one side) lets generate proceed past the gate to the
  * estimate; a doc→doc relation never does.
@@ -27,9 +27,9 @@ let repo: string;
 
 const NOTE = 'auth0_id vs auth0_sub for the user identity';
 
-function seedCorpusWithOverlap(): void {
+function seedCorpusWithConflict(): void {
   const corpus = {
-    version: 3,
+    version: 5,
     generatedAt: '2026-01-01T00:00:00Z',
     docs: [
       { ref: 'docs/v1.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/users-entity'] },
@@ -41,7 +41,16 @@ function seedCorpusWithOverlap(): void {
         product: 'booking',
         concern: 'users-entity',
         docRefs: ['docs/v1.md', 'docs/v2.md'],
-        overlaps: [{ docs: ['docs/v1.md', 'docs/v2.md'], note: NOTE, sections: [] }],
+        conflicts: [
+          {
+            docs: ['docs/v1.md', 'docs/v2.md'],
+            note: NOTE,
+            sections: [
+              { doc: 'docs/v1.md', heading: null, sentence: 's-v1' },
+              { doc: 'docs/v2.md', heading: null, sentence: 's-v2' },
+            ],
+          },
+        ],
       },
     ],
     relations: [],
@@ -53,7 +62,7 @@ function seedCorpusWithOverlap(): void {
 function writeDecisions(decisions: Record<string, unknown>): void {
   fs.writeFileSync(
     path.join(repo, '.truecourse', 'specs', 'decisions.json'),
-    JSON.stringify({ version: 1, manualIncludes: [], manualExcludes: [], relations: [], manualAreas: [], ...decisions }),
+    JSON.stringify({ version: 3, manualIncludes: [], manualExcludes: [], manualAreas: [], ...decisions }),
   );
 }
 
@@ -74,8 +83,8 @@ afterEach(() => {
 });
 
 describe('guard generate — open-conflict gate', () => {
-  it('hard-fails on an open overlap with the full conflict list, before any estimate', async () => {
-    seedCorpusWithOverlap();
+  it('hard-fails on an open conflict with the full conflict list, before any estimate', async () => {
+    seedCorpusWithConflict();
     // The estimate must NEVER be reached (never ask to spend, then fail).
     let estimateReached = false;
     const err = await guardGenerateInProcess(repo, {
@@ -102,7 +111,7 @@ describe('guard generate — open-conflict gate', () => {
   });
 
   it('still FAILS under a covering relation — relations are lifecycle, never conflict resolution', async () => {
-    seedCorpusWithOverlap();
+    seedCorpusWithConflict();
     writeDecisions({
       relations: [{ type: 'precedence', older: 'docs/v1.md', newer: 'docs/v2.md', scope: 'booking/users-entity', detectedFrom: 'manual' }],
     });
@@ -111,24 +120,26 @@ describe('guard generate — open-conflict gate', () => {
     expect((err as OpenConflictsError).conflicts).toHaveLength(1);
   });
 
-  it('proceeds past the gate when a force-exclude drops one side of the overlap', async () => {
-    seedCorpusWithOverlap();
+  it('proceeds past the gate when a force-exclude drops one side of the conflict', async () => {
+    seedCorpusWithConflict();
     writeDecisions({ manualExcludes: ['docs/v1.md'] });
     const err = await guardGenerateInProcess(repo, { onLlmEstimate: async () => false }).catch((e: unknown) => e);
     expect(err).not.toBeInstanceOf(OpenConflictsError);
     expect(err).toBeInstanceOf(EstimateDeclined);
   });
 
-  it('proceeds past the gate when a SIDE VERDICT resolves the overlap', async () => {
-    seedCorpusWithOverlap();
-    // The seeded overlap is sectionless → a null-anchor verdict matches its identity.
+  it('proceeds past the gate when a SIDE VERDICT resolves the conflict', async () => {
+    seedCorpusWithConflict();
+    // The seeded conflict is sectionless → a null-anchor verdict matches its identity.
     writeDecisions({
       conflictResolutions: [
         {
           docA: 'docs/v1.md',
           anchorA: null,
+          sentenceA: 's-v1',
           docB: 'docs/v2.md',
           anchorB: null,
+          sentenceB: 's-v2',
           verdict: 'b',
           resolvedAt: '2026-07-10T00:00:00Z',
         },
@@ -140,10 +151,10 @@ describe('guard generate — open-conflict gate', () => {
   });
 
   it('proceeds past the gate when the conflict is DISMISSED', async () => {
-    seedCorpusWithOverlap();
+    seedCorpusWithConflict();
     writeDecisions({
       conflictResolutions: [
-        { docA: 'docs/v1.md', anchorA: null, docB: 'docs/v2.md', anchorB: null, verdict: 'dismissed', resolvedAt: '' },
+        { docA: 'docs/v1.md', anchorA: null, sentenceA: 's-v1', docB: 'docs/v2.md', anchorB: null, sentenceB: 's-v2', verdict: 'dismissed', resolvedAt: '' },
       ],
     });
     const err = await guardGenerateInProcess(repo, { onLlmEstimate: async () => false }).catch((e: unknown) => e);

@@ -286,7 +286,7 @@ describe('runAgentLoop completion', () => {
     await runAgentLoop({
       def: makeDef({
         budget: { turns: 1, maxResumes: 0, tokenCeiling: 1_000_000 },
-        outcomePrecondition: { tool: 'check_findings', message: 'run it' },
+        outcomePrecondition: { tool: 'check_conflicts', message: 'run it' },
       }),
       workItem: 'w',
       initialMessages: [],
@@ -294,8 +294,8 @@ describe('runAgentLoop completion', () => {
       persistence,
       sessionId: 's1',
     }).outcome;
-    expect(seenSteers).toEqual([wrapUpMessage('check_findings')]);
-    expect(seenSteers[0]).toContain('check_findings');
+    expect(seenSteers).toEqual([wrapUpMessage('check_conflicts')]);
+    expect(seenSteers[0]).toContain('check_conflicts');
   });
 
   it('grants a fresh budget automatically up to maxResumes, without interrupting', async () => {
@@ -673,11 +673,11 @@ describe('runAgentLoop tool wrapping', () => {
 // ---------------------------------------------------------------------------
 
 describe('runAgentLoop sub-sessions', () => {
-  const childDef = makeDef({ kind: 'spec-scan.overlap' });
+  const childDef = makeDef({ kind: 'spec-scan.conflicts' });
 
   const delegateSpec = defineToolSpec({
     name: 'delegate',
-    description: 'run the overlap child',
+    description: 'run the conflict child',
     kind: 'dispatch',
     readOnly: true,
     destructive: false,
@@ -692,7 +692,7 @@ describe('runAgentLoop sub-sessions', () => {
 
   it('runs a child on its own transcript and links it from the parent', async () => {
     const { driver, runs } = fakeDriver(async ({ input, emit }) => {
-      if (input.def.kind === 'spec-scan.overlap') {
+      if (input.def.kind === 'spec-scan.conflicts') {
         await emit({ type: 'assistant-turn', text: 'child work', usage: usage(5) });
         return { kind: 'outcome', value: { verdict: 'child-done' } };
       }
@@ -719,12 +719,12 @@ describe('runAgentLoop sub-sessions', () => {
     // The child ran through the same driver, on its own transcript.
     expect(runs).toHaveLength(2);
     const childEvents = persistence.readEvents('child-1');
-    expect(childEvents[0]).toMatchObject({ type: 'session-start', kind: 'spec-scan.overlap' });
+    expect(childEvents[0]).toMatchObject({ type: 'session-start', kind: 'spec-scan.conflicts' });
     expect(childEvents.at(-1)).toMatchObject({ type: 'outcome', value: { verdict: 'child-done' } });
     expect(index.get('child-1')?.status).toBe('completed');
     // Parent transcript carries full linkage on BOTH child events (stream
     // folding must be order-robust).
-    const linkage = { sessionId: 'child-1', kind: 'spec-scan.overlap', workItem: 'docs/a.md' };
+    const linkage = { sessionId: 'child-1', kind: 'spec-scan.conflicts', workItem: 'docs/a.md' };
     const childRefs = persistence.readEvents('parent').filter((e) => e.type === 'child-session');
     expect(childRefs).toHaveLength(2);
     expect(childRefs[0]).toMatchObject({ phase: 'started', child: linkage });
@@ -740,7 +740,7 @@ describe('runAgentLoop sub-sessions', () => {
 
   it('indexes when each session opened, when it ended, and who started it', async () => {
     const { driver } = fakeDriver(async ({ input, emit }) => {
-      if (input.def.kind === 'spec-scan.overlap') {
+      if (input.def.kind === 'spec-scan.conflicts') {
         await emit({ type: 'assistant-turn', text: 'child work', usage: usage(5) });
         return { kind: 'outcome', value: { verdict: 'child-done' } };
       }
@@ -801,7 +801,7 @@ describe('runAgentLoop sub-sessions', () => {
         return { content: JSON.stringify(out) };
       },
     });
-    const nestedChildDef = makeDef({ kind: 'spec-scan.overlap', tools: [deeper] });
+    const nestedChildDef = makeDef({ kind: 'spec-scan.conflicts', tools: [deeper] });
     const delegateNested = delegateSpec.bind({
       async execute(_args, ctx) {
         const out = await ctx.dispatchChild(nestedChildDef, []);
@@ -810,7 +810,7 @@ describe('runAgentLoop sub-sessions', () => {
     });
 
     const { driver, runs } = fakeDriver(async ({ input, emit }) => {
-      if (input.def.kind === 'spec-scan.overlap') {
+      if (input.def.kind === 'spec-scan.conflicts') {
         const res = await input.def.tools[0].execute({}, dummyToolCtx());
         const grandchild = JSON.parse(res.content);
         expect(grandchild).toMatchObject({
@@ -1822,7 +1822,7 @@ describe('runAgentLoop presentation', () => {
   it('survives a schema round-trip — the event schemas strip what they do not declare', () => {
     const start = SessionEventBodySchema.parse({
       type: 'session-start',
-      kind: 'spec-scan.overlap',
+      kind: 'spec-scan.conflicts',
       workItem: 'billing',
       systemPrompt: 'you compare docs',
       toolNames: ['read_doc'],
@@ -1841,14 +1841,14 @@ describe('runAgentLoop presentation', () => {
       display: {
         blocks: [
           {
-            kind: 'finding',
+            kind: 'conflict',
             claim: 'The two docs disagree on the refund window.',
             quotes: [
               { doc: 'a.md', heading: 'Refunds', quote: '30 days' },
               { doc: 'b.md', quote: '14 days' },
             ],
             recommendation: { doc: 'a.md', rationale: 'newer', confidence: 'high' },
-            dispute: { docA: 'a.md', anchorA: 'refunds', docB: 'b.md', anchorB: null },
+            conflict: { docA: 'a.md', anchorA: 'refunds', sentenceA: 's-a', docB: 'b.md', anchorB: null, sentenceB: 's-b' },
           },
         ],
       },
@@ -1858,14 +1858,14 @@ describe('runAgentLoop presentation', () => {
       display: {
         blocks: [
           {
-            kind: 'finding',
+            kind: 'conflict',
             claim: 'The two docs disagree on the refund window.',
             quotes: [
               { doc: 'a.md', heading: 'Refunds', quote: '30 days' },
               { doc: 'b.md', quote: '14 days' },
             ],
             recommendation: { doc: 'a.md', rationale: 'newer', confidence: 'high' },
-            dispute: { docA: 'a.md', anchorA: 'refunds', docB: 'b.md', anchorB: null },
+            conflict: { docA: 'a.md', anchorA: 'refunds', sentenceA: 's-a', docB: 'b.md', anchorB: null, sentenceB: 's-b' },
           },
         ],
       },
@@ -2088,7 +2088,7 @@ describe('live outcome validation', () => {
     const { persistence } = memoryPersistence();
     const result = await runAgentLoop({
       def: {
-        kind: 'spec-scan.overlap',
+        kind: 'spec-scan.conflicts',
         systemPrompt: 'compare docs',
         tools: [],
         outcomeSchema: z.object({ pair: z.tuple([z.string(), z.string()]) }),

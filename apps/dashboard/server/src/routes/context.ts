@@ -21,7 +21,7 @@
  *   GET    /api/context/corpus                the workspace corpus + its decisions
  *   POST|DELETE /api/context/includes         force-include / un-include a document
  *   POST|DELETE /api/context/excludes         force-exclude / restore a document
- *   POST|DELETE /api/context/conflict-resolution   a section-scoped conflict verdict
+ *   POST|DELETE /api/context/conflict-resolution   a conflict verdict
  *
  * A source belongs to the workspace, not to a repository, so this router mounts
  * ABOVE the repository routers and behind the auth gate alone — there is no
@@ -218,8 +218,8 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   });
 
   // GET — what changed between two corpus versions: the documents added,
-  // removed and re-tagged, the areas that appeared or emptied, the overlap
-  // flags that opened or closed. `?from=` and `?to=` are version ids.
+  // removed and re-tagged, the areas that appeared or emptied, the conflicts
+  // that opened or closed. `?from=` and `?to=` are version ids.
   router.get('/versions/diff', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);

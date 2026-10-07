@@ -213,8 +213,8 @@ router.post('/:id/guard/generate', async (req: Request, res: Response, next: Nex
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
     const resumeRunId: unknown = req.body?.resumeRunId;
     const resume = resumeRunId === undefined ? undefined : await readGuardGenerateResume(repo.path, resumeRunId);
-    // Extracting both sides of an unresolved overlap births a paid finding that
-    // is really the dispute. Answered BEFORE the provider check: nothing about a
+    // Extracting both sides of an unresolved conflict births a paid finding that
+    // is really the conflict. Answered BEFORE the provider check: nothing about a
     // blocked corpus is fixed by a provider, and the full report is the remedy.
     const { corpus, decisions } = await readRepoCorpusSlice(orgOf(req), repo.path);
     if (corpus) {

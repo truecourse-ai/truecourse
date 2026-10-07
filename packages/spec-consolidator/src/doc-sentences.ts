@@ -1,24 +1,26 @@
 /**
- * A doc's UNITS: the smallest numbered pieces of a document the scan points
- * at. A session that records what a doc states is handed its units, numbered,
- * and has to account for every one of them: cite it in a fact or skip it with
- * a reason. A unit's `text` is an exact slice of the body (`body.slice(start,
+ * A doc's SENTENCES: the smallest numbered pieces of a document the scan
+ * points at. Most are sentences of prose; a list item, a table row, a run of
+ * code lines and a frontmatter value count as one each. A session that
+ * records what a doc states is handed its sentences, numbered, and has to
+ * account for every one of them: cite it in a fact or skip it with a reason.
+ * A sentence's `text` is an exact slice of the body (`body.slice(start,
  * end)`), so a quote cut from it is verbatim by construction.
  *
  * Deterministic. Numbering is 1-based in document order, so an edit renumbers
- * only the units at and after it. The heading a unit sits under is the text
+ * only the sentences at and after it. The heading a sentence sits under is the text
  * `parseHeadings` gives for the nearest ATX heading above it (what a doc's
  * outline lists and a section pointer names), `null` above the first heading.
  *
- * What is a unit:
+ * What is a sentence:
  *
- * - FRONTMATTER: the top-level `title` and `description` values, one unit
+ * - FRONTMATTER: the top-level `title` and `description` values, one sentence
  *   each, without their quotes. Every other line of the frontmatter is cut the
  *   way a fenced block is: each run of them between those two values (a token
- *   tree, `version`, `slug`) is cut into parts of {@link CODE_UNIT_LINES}
- *   lines, each part a unit, so what a design system declares in its
+ *   tree, `version`, `slug`) is cut into parts of {@link CODE_LINES_PER_SENTENCE}
+ *   lines, each part a sentence, so what a design system declares in its
  *   frontmatter can be cited too.
- * - SENTENCE: a paragraph is cut at sentence ends: `.`, `!`, `?` or `…`
+ * - PROSE: a paragraph is cut at sentence ends: `.`, `!`, `?` or `…`
  *   (closing quotes, brackets, emphasis markers and closing tags may follow),
  *   then whitespace, then anything but a lowercase letter or `,;:)`. The lines
  *   of a hard-wrapped paragraph join; a hard line break (two trailing spaces,
@@ -26,35 +28,35 @@
  *   inside an inline code span, an inline link or image, a tag, a comment or
  *   a `{…}` expression never ends one: a code span ending in a period is a
  *   literal (`.env`, `v5.1.0`), so the sentence runs on. Merging two sentences
- *   is the safe error, since a unit may state two facts. A period after a
+ *   is the safe error, since a sentence may state two facts. A period after a
  *   common abbreviation (`e.g.`, `i.e.`, `vs.`, `cf.`, `approx.`, `Dr.`, …) or
  *   after a single capital initial does not end a sentence. A sentence with no
- *   letter or digit (a `·` between two links) is not a unit.
+ *   letter or digit (a `·` between two links) is not a sentence.
  * - Blockquotes and callouts are prose: a `>` quote's paragraphs and the text
  *   of a component (`<Info>…</Info>`, `<Tip>`, `<Note>`, a `<Card>` body) are
  *   cut into sentences like any other paragraph. A GitHub alert marker line
- *   (`> [!NOTE]`) is not a unit.
+ *   (`> [!NOTE]`) is not a sentence.
  * - ITEM: one sentence of a list item's first paragraph, lazy continuation
- *   lines included, cut the way a paragraph is. The first sentence is the unit
- *   the list marker opens; every sentence of the item names the unit
+ *   lines included, cut the way a paragraph is. The first sentence is the sentence
+ *   the list marker opens; every sentence of the item names the sentence
  *   introducing its list. A nested item is cut the same way under its own
  *   marker, and a later paragraph inside an item is cut into sentences. Deeper
  *   indentation than the parent's marker nests, as authors mean it, even where
  *   CommonMark would not. An ordered marker other than `1.` does not interrupt
  *   a paragraph.
  * - ROW: one table row, from its first to its last non-space character. The
- *   header row and the separator row are not units, nor is a row of empty
+ *   header row and the separator row are not sentences, nor is a row of empty
  *   cells. A table continues while its lines carry a `|`.
  * - CODE: the content lines of one fenced block (a fence at any indentation,
  *   so a block inside a component counts), cut into parts of
- *   {@link CODE_UNIT_LINES} lines; each part is a unit. A block with no content
+ *   {@link CODE_LINES_PER_SENTENCE} lines; each part is a sentence. A block with no content
  *   is none. Indented code blocks are not recognized: MDX has none, and
  *   indented lines inside a component are prose.
  * - TAG: the quoted `title`, `caption`, `label` or `description` attribute of
  *   a tag that opens its line (`<Step title="Create an Account">`), the value
  *   without its quotes.
  *
- * Not units: headings (ATX, and an HTML `<h1>`…`<h6>` line), blank lines,
+ * Not sentences: headings (ATX, and an HTML `<h1>`…`<h6>` line), blank lines,
  * thematic breaks and setext underlines (the text above an underline stays a
  * sentence: the outline lists no setext heading), lines of tags only, `{…}` expression
  * lines, HTML comments and `{/* … *\/}` comments (whatever shares a line with
@@ -64,23 +66,23 @@
  * element like `<p>`); an inline tag (`<a>`, `<strong>`) stays in its sentence.
  */
 
-import { parseHeadings } from '@truecourse/shared';
+import { normalizeQuote, parseHeadings } from '@truecourse/shared';
 
-/** Bumped by hand whenever a change here moves a unit's number or text. */
-export const UNIT_SPLITTER_VERSION = 2;
+/** Bumped by hand whenever a change here moves a sentence's number, text or repeat. */
+export const SENTENCE_SPLITTER_VERSION = 3;
 
 /**
- * Lines of a fenced block's content (or of a run of frontmatter) one unit
+ * Lines of a fenced block's content (or of a run of frontmatter) one sentence
  * holds at most. Small enough that a fact cites the lines that state it and a
  * conflict's quote comes from them, rather than a part so long it can only be
  * summarized.
  */
-export const CODE_UNIT_LINES = 12;
+export const CODE_LINES_PER_SENTENCE = 12;
 
-interface UnitBase {
+interface SentenceBase {
   /** 1-based, in document order. */
   n: number;
-  /** The heading the unit sits under, as the outline lists it; `null` above the first heading. */
+  /** The heading the sentence sits under, as the outline lists it; `null` above the first heading. */
   heading: string | null;
   /** 1-based line range, inclusive. */
   startLine: number;
@@ -89,35 +91,42 @@ interface UnitBase {
   start: number;
   end: number;
   text: string;
+  /**
+   * How many earlier sentences of the doc have the same words (after
+   * `normalizeQuote`): 0 for the first. With the words, what identifies the
+   * sentence across renumbering, so two identical table rows under different
+   * headings stay two sentences.
+   */
+  repeat: number;
 }
 
-/** What distinguishes each kind of unit, beside the fields every unit has. */
-type UnitShape =
+/** What distinguishes each kind of sentence, beside the fields every sentence has. */
+type SentenceShape =
   | { kind: 'frontmatter'; field: 'title' | 'description' }
   /** A run of the frontmatter's other lines, or one part of a long run. */
   | { kind: 'frontmatter'; field: null; part: number; parts: number }
-  | { kind: 'sentence' }
+  | { kind: 'prose' }
   | {
       kind: 'item';
       /** 0 for a top-level item. */
       depth: number;
       /**
-       * The unit introducing the list (for a nested item, its parent item's
+       * The sentence introducing the list (for a nested item, its parent item's
        * first sentence), or `null`. Every sentence of one item names the same.
        */
       intro: number | null;
-      /** Whether the unit is the item's first sentence, the one its list marker opens. */
+      /** Whether the sentence is the item's first sentence, the one its list marker opens. */
       marker: boolean;
     }
   | { kind: 'row'; columns: readonly string[] }
   | { kind: 'code'; lang: string | null; part: number; parts: number }
   | { kind: 'tag'; tag: string; attribute: string };
 
-export type DocUnit = UnitBase & UnitShape;
-export type DocUnitKind = DocUnit['kind'];
+export type DocSentence = SentenceBase & SentenceShape;
+export type DocSentenceKind = DocSentence['kind'];
 
-/** A unit before it is numbered and placed. */
-type UnitDraft = UnitShape & { start: number; end: number };
+/** A sentence before it is numbered and placed. */
+type SentenceDraft = SentenceShape & { start: number; end: number };
 
 // ---------------------------------------------------------------------------
 // Lines
@@ -473,34 +482,34 @@ function sentenceSpans(body: string, segments: readonly Segment[]): Array<{ star
 // Frontmatter
 // ---------------------------------------------------------------------------
 
-/** The non-blank lines of `lines`, cut into parts of at most {@link CODE_UNIT_LINES}, each as a body span. */
+/** The non-blank lines of `lines`, cut into parts of at most {@link CODE_LINES_PER_SENTENCE}, each as a body span. */
 function blockParts(body: string, lines: readonly Line[]): Array<{ start: number; end: number }> {
   const parts: Array<{ start: number; end: number }> = [];
-  for (let at = 0; at < lines.length; at += CODE_UNIT_LINES) {
-    const filled = lines.slice(at, at + CODE_UNIT_LINES).filter((l) => body.slice(l.start, l.end).trim() !== '');
+  for (let at = 0; at < lines.length; at += CODE_LINES_PER_SENTENCE) {
+    const filled = lines.slice(at, at + CODE_LINES_PER_SENTENCE).filter((l) => body.slice(l.start, l.end).trim() !== '');
     if (filled.length > 0) parts.push({ start: filled[0]!.start, end: filled[filled.length - 1]!.end });
   }
   return parts;
 }
 
 /**
- * The frontmatter's units in line order, and the line the document resumes at:
+ * The frontmatter's sentences in line order, and the line the document resumes at:
  * the `title` and `description` values, and between them the runs of every
  * other line, each run cut into parts as a fenced block is.
  */
-function frontmatterUnits(body: string, lines: readonly Line[]): { units: UnitDraft[]; next: number } {
+function frontmatterSentences(body: string, lines: readonly Line[]): { sentences: SentenceDraft[]; next: number } {
   const lineText = (i: number): string => body.slice(lines[i]!.start, lines[i]!.end);
-  if (lines.length < 2 || lineText(0) !== '---') return { units: [], next: 0 };
+  if (lines.length < 2 || lineText(0) !== '---') return { sentences: [], next: 0 };
   let close = 1;
   while (close < lines.length && lineText(close).trimEnd() !== '---') close++;
-  if (close >= lines.length) return { units: [], next: 0 };
+  if (close >= lines.length) return { sentences: [], next: 0 };
   const blockEnd = lines[close]!.start;
 
-  const units: UnitDraft[] = [];
+  const sentences: SentenceDraft[] = [];
   let rest: Line[] = [];
   const flushRest = (): void => {
     const parts = blockParts(body, rest);
-    parts.forEach((part, p) => units.push({ kind: 'frontmatter', field: null, part: p + 1, parts: parts.length, ...part }));
+    parts.forEach((part, p) => sentences.push({ kind: 'frontmatter', field: null, part: p + 1, parts: parts.length, ...part }));
     rest = [];
   };
   for (let i = 1; i < close; i++) {
@@ -524,7 +533,7 @@ function frontmatterUnits(body: string, lines: readonly Line[]): { units: UnitDr
         else j++;
       }
       const start = valueAt + 1;
-      if (j < blockEnd && hasWord(body.slice(start, j))) units.push({ kind: 'frontmatter', field, start, end: j });
+      if (j < blockEnd && hasWord(body.slice(start, j))) sentences.push({ kind: 'frontmatter', field, start, end: j });
       while (i + 1 < close && lines[i + 1]!.start <= j) i++;
       continue;
     }
@@ -537,10 +546,10 @@ function frontmatterUnits(body: string, lines: readonly Line[]): { units: UnitDr
       if (start === -1) start = at;
       end = trimEnd(body, at, lines[i + 1]!.end);
     }
-    if (start !== -1 && hasWord(body.slice(start, end))) units.push({ kind: 'frontmatter', field, start, end });
+    if (start !== -1 && hasWord(body.slice(start, end))) sentences.push({ kind: 'frontmatter', field, start, end });
   }
   flushRest();
-  return { units, next: close + 1 };
+  return { sentences, next: close + 1 };
 }
 
 // ---------------------------------------------------------------------------
@@ -549,18 +558,18 @@ function frontmatterUnits(body: string, lines: readonly Line[]): { units: UnitDr
 
 interface ListLevel {
   markerIndent: number;
-  /** The unit of this level's latest item: the intro of what nests under it. */
-  unit: number | null;
+  /** The sentence of this level's latest item: the intro of what nests under it. */
+  sentence: number | null;
 }
 
 /**
  * Split a doc body (the whole file, frontmatter included) into its numbered
- * units. Pure and deterministic.
+ * sentences. Pure and deterministic.
  */
-export function splitDocUnits(body: string): DocUnit[] {
+export function splitDocSentences(body: string): DocSentence[] {
   const lines = lineSpans(body);
   const headingAt = new Map(parseHeadings(body.split('\n')).map((h) => [h.line, h.text]));
-  const units: DocUnit[] = [];
+  const sentences: DocSentence[] = [];
   let heading: string | null = null;
 
   const lineOf = (offset: number): number => {
@@ -573,15 +582,16 @@ export function splitDocUnits(body: string): DocUnit[] {
     }
     return lo;
   };
-  const push = (draft: UnitDraft): number => {
-    const n = units.length + 1;
-    units.push({
+  const push = (draft: SentenceDraft): number => {
+    const n = sentences.length + 1;
+    sentences.push({
       ...draft,
       n,
       heading,
       startLine: lineOf(draft.start) + 1,
       endLine: lineOf(Math.max(draft.start, draft.end - 1)) + 1,
       text: body.slice(draft.start, draft.end),
+      repeat: 0,
     });
     return n;
   };
@@ -596,7 +606,7 @@ export function splitDocUnits(body: string): DocUnit[] {
 
   const flushParagraph = (): void => {
     for (const span of sentenceSpans(body, paragraph)) {
-      if (hasWord(body.slice(span.start, span.end))) push({ kind: 'sentence', ...span });
+      if (hasWord(body.slice(span.start, span.end))) push({ kind: 'prose', ...span });
     }
     paragraph = [];
   };
@@ -609,7 +619,7 @@ export function splitDocUnits(body: string): DocUnit[] {
     for (const span of sentenceSpans(body, segments)) {
       if (!hasWord(body.slice(span.start, span.end))) continue;
       const n = push({ kind: 'item', depth, intro, marker: first, ...span });
-      if (first) level.unit = n;
+      if (first) level.sentence = n;
       first = false;
     }
   };
@@ -621,13 +631,13 @@ export function splitDocUnits(body: string): DocUnit[] {
     flushItem();
     list = null;
   };
-  /** What introduces a list starting now: the last unit, when it is prose under this heading. */
+  /** What introduces a list starting now: the last sentence, when it is prose under this heading. */
   const listIntro = (): number | null => {
-    const last = units[units.length - 1];
-    return last && (last.kind === 'sentence' || last.kind === 'tag') && last.heading === heading ? last.n : null;
+    const last = sentences[sentences.length - 1];
+    return last && (last.kind === 'prose' || last.kind === 'tag') && last.heading === heading ? last.n : null;
   };
-  /** The human attributes of the opening tags among `tags`, as units. */
-  const tagUnits = (tags: readonly TagSpan[]): void => {
+  /** The human attributes of the opening tags among `tags`, as sentences. */
+  const tagSentences = (tags: readonly TagSpan[]): void => {
     for (const tag of tags) {
       if (tag.closing) continue;
       for (const attr of tag.attributes) {
@@ -684,8 +694,8 @@ export function splitDocUnits(body: string): DocUnit[] {
     }
     return { tags, onlyTags: false, leading, resume, resumeLine: lineOf(resume) };
   };
-  /** Emit a fenced block's content as code units; the line after its closing fence. */
-  const codeUnits = (open: number, fence: string, lang: string | null, quote: number): number => {
+  /** Emit a fenced block's content as code sentences; the line after its closing fence. */
+  const codeSentences = (open: number, fence: string, lang: string | null, quote: number): number => {
     const content: Line[] = [];
     let i = open + 1;
     for (; i < lines.length; i++) {
@@ -703,8 +713,8 @@ export function splitDocUnits(body: string): DocUnit[] {
     return i;
   };
 
-  const front = frontmatterUnits(body, lines);
-  for (const draft of front.units) push(draft);
+  const front = frontmatterSentences(body, lines);
+  for (const draft of front.sentences) push(draft);
 
   let i = front.next;
   while (i < lines.length) {
@@ -738,7 +748,7 @@ export function splitDocUnits(body: string): DocUnit[] {
       flushText();
       table = null;
       if (outdented()) endList();
-      i = codeUnits(i, fence[1]!, fence[2]!.trim().split(/\s+/)[0] || null, quote);
+      i = codeSentences(i, fence[1]!, fence[2]!.trim().split(/\s+/)[0] || null, quote);
       continue;
     }
     if (rest.startsWith('<!--') || rest.startsWith('{/*')) {
@@ -796,10 +806,10 @@ export function splitDocUnits(body: string): DocUnit[] {
       const levels = list.levels;
       while (levels.length > 0 && indent < levels[levels.length - 1]!.markerIndent) levels.pop();
       const top = levels[levels.length - 1];
-      const level = top && indent <= top.markerIndent ? top : { markerIndent: indent, unit: null };
+      const level = top && indent <= top.markerIndent ? top : { markerIndent: indent, sentence: null };
       if (level !== top) levels.push(level);
       const depth = levels.length - 1;
-      const intro = depth > 0 ? (levels[depth - 1]!.unit ?? list.intro) : list.intro;
+      const intro = depth > 0 ? (levels[depth - 1]!.sentence ?? list.intro) : list.intro;
       item = { segments: [], depth, intro, level };
       const contentAt = skipSpaces(body, at + marker[1]!.length, line.end);
       if (contentAt < line.end) {
@@ -840,11 +850,11 @@ export function splitDocUnits(body: string): DocUnit[] {
     if (opened && (opened.onlyTags || opened.leading.length > 0)) {
       flushParagraph();
       if (opened.onlyTags) {
-        if (!opened.tags.some((t) => !t.closing && HTML_HEADINGS.has(t.name))) tagUnits(opened.tags);
+        if (!opened.tags.some((t) => !t.closing && HTML_HEADINGS.has(t.name))) tagSentences(opened.tags);
         i = opened.resumeLine + 1;
         continue;
       }
-      tagUnits(opened.leading);
+      tagSentences(opened.leading);
       i = opened.resumeLine + 1;
       if (opened.leading.some((t) => !t.closing && HTML_HEADINGS.has(t.name))) continue;
       const seg = segmentOf(opened.resume, lines[opened.resumeLine]!.end);
@@ -865,43 +875,50 @@ export function splitDocUnits(body: string): DocUnit[] {
     i++;
   }
   flushText();
-  return units;
+  // Repeats of one text, numbered in doc order.
+  const seen = new Map<string, number>();
+  for (const sentence of sentences) {
+    const words = normalizeQuote(sentence.text);
+    sentence.repeat = seen.get(words) ?? 0;
+    seen.set(words, sentence.repeat + 1);
+  }
+  return sentences;
 }
 
 // ---------------------------------------------------------------------------
 // Windows
 // ---------------------------------------------------------------------------
 
-/** Consecutive units of one doc, `from` to `to` inclusive: the work of one session. */
-export interface UnitWindow {
+/** Consecutive sentences of one doc, `from` to `to` inclusive: the work of one session. */
+export interface SentenceWindow {
   /** 1-based, in doc order. */
   index: number;
   from: number;
   to: number;
 }
 
-export interface UnitWindowBounds {
-  maxUnits: number;
-  /** The bound on the summed text length of a window's units. */
+export interface SentenceWindowBounds {
+  maxSentences: number;
+  /** The bound on the summed text length of a window's sentences. */
   maxChars: number;
 }
 
 /**
- * Pack a doc's units into windows: whole sections (the consecutive units under
+ * Pack a doc's sentences into windows: whole sections (the consecutive sentences under
  * one heading) in doc order, as many as fit both bounds. A section over either
- * bound is cut at unit boundaries, and its last piece may share a window with
- * the sections after it; a single unit over the character bound is a window
- * alone. Deterministic: the same units always give the same windows.
+ * bound is cut at sentence boundaries, and its last piece may share a window with
+ * the sections after it; a single sentence over the character bound is a window
+ * alone. Deterministic: the same sentences always give the same windows.
  */
-export function planUnitWindows(units: readonly DocUnit[], bounds: UnitWindowBounds): UnitWindow[] {
-  const sections: DocUnit[][] = [];
-  for (const unit of units) {
+export function planSentenceWindows(sentences: readonly DocSentence[], bounds: SentenceWindowBounds): SentenceWindow[] {
+  const sections: DocSentence[][] = [];
+  for (const sentence of sentences) {
     const last = sections[sections.length - 1];
-    if (last && last[0]!.heading === unit.heading) last.push(unit);
-    else sections.push([unit]);
+    if (last && last[0]!.heading === sentence.heading) last.push(sentence);
+    else sections.push([sentence]);
   }
-  const fits = (count: number, chars: number): boolean => count <= bounds.maxUnits && chars <= bounds.maxChars;
-  const windows: UnitWindow[] = [];
+  const fits = (count: number, chars: number): boolean => count <= bounds.maxSentences && chars <= bounds.maxChars;
+  const windows: SentenceWindow[] = [];
   let open: { from: number; to: number; count: number; chars: number } | null = null;
   for (const section of sections) {
     const chars = section.reduce((sum, u) => sum + u.text.length, 0);
@@ -909,16 +926,16 @@ export function planUnitWindows(units: readonly DocUnit[], bounds: UnitWindowBou
       windows.push({ index: windows.length + 1, from: open.from, to: open.to });
       open = null;
     }
-    for (const unit of section) {
-      if (open && !fits(open.count + 1, open.chars + unit.text.length)) {
+    for (const sentence of section) {
+      if (open && !fits(open.count + 1, open.chars + sentence.text.length)) {
         windows.push({ index: windows.length + 1, from: open.from, to: open.to });
         open = null;
       }
       if (open) {
-        open.to = unit.n;
+        open.to = sentence.n;
         open.count += 1;
-        open.chars += unit.text.length;
-      } else open = { from: unit.n, to: unit.n, count: 1, chars: unit.text.length };
+        open.chars += sentence.text.length;
+      } else open = { from: sentence.n, to: sentence.n, count: 1, chars: sentence.text.length };
     }
   }
   if (open) windows.push({ index: windows.length + 1, from: open.from, to: open.to });
@@ -929,7 +946,7 @@ export function planUnitWindows(units: readonly DocUnit[], bounds: UnitWindowBou
 // Presentation
 // ---------------------------------------------------------------------------
 
-/** The longest intro an item quotes when the unit introducing it is outside the window. */
+/** The longest intro an item quotes when the sentence introducing it is outside the window. */
 const INTRO_CHARS = 160;
 
 const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
@@ -944,47 +961,47 @@ function dedent(text: string): string {
 }
 
 /**
- * One unit as a briefing shows it, numbered, with what it needs to be read
- * alone: a row names its columns, an item the unit introducing its list (by
- * number when that unit is in the window, quoted when it is not), a code part
+ * One sentence as a briefing shows it, numbered, with what it needs to be read
+ * alone: a row names its columns, an item the sentence introducing its list (by
+ * number when that sentence is in the window, quoted when it is not), a code part
  * its language and place, a run of frontmatter its place. An item's first
- * sentence carries its marker; a later one is indented under it. `units` is
+ * sentence carries its marker; a later one is indented under it. `sentences` is
  * the doc's whole list.
  */
-export function presentUnit(unit: DocUnit, units: readonly DocUnit[], window: UnitWindow): string {
-  const label = `[${unit.n}]`;
+export function presentSentence(sentence: DocSentence, sentences: readonly DocSentence[], window: SentenceWindow): string {
+  const label = `[${sentence.n}]`;
   const indented = (text: string): string =>
     dedent(text)
       .split('\n')
       .map((l) => `    ${l}`)
       .join('\n');
-  switch (unit.kind) {
+  switch (sentence.kind) {
     case 'frontmatter':
-      if (unit.field === null) {
-        return `${label} frontmatter${unit.parts > 1 ? ` (part ${unit.part} of ${unit.parts})` : ''}:\n${indented(unit.text)}`;
+      if (sentence.field === null) {
+        return `${label} frontmatter${sentence.parts > 1 ? ` (part ${sentence.part} of ${sentence.parts})` : ''}:\n${indented(sentence.text)}`;
       }
-      return `${label} ${unit.field}: ${oneLine(unit.text)}`;
-    case 'sentence':
-      return `${label} ${oneLine(unit.text)}`;
+      return `${label} ${sentence.field}: ${oneLine(sentence.text)}`;
+    case 'prose':
+      return `${label} ${oneLine(sentence.text)}`;
     case 'tag':
-      return `${label} ${unit.tag} ${unit.attribute}: ${oneLine(unit.text)}`;
+      return `${label} ${sentence.tag} ${sentence.attribute}: ${oneLine(sentence.text)}`;
     case 'item': {
-      const intro = unit.intro === null ? undefined : units[unit.intro - 1];
+      const intro = sentence.intro === null ? undefined : sentences[sentence.intro - 1];
       const under =
         intro === undefined
           ? ''
           : intro.n >= window.from && intro.n <= window.to
             ? ` (under [${intro.n}])`
             : ` (under "${clip(oneLine(intro.text), INTRO_CHARS)}")`;
-      return `${label} ${'  '.repeat(unit.depth)}${unit.marker ? '- ' : '  '}${oneLine(unit.text)}${under}`;
+      return `${label} ${'  '.repeat(sentence.depth)}${sentence.marker ? '- ' : '  '}${oneLine(sentence.text)}${under}`;
     }
     case 'row': {
-      const named = tableCells(unit.text).map((cell, i) => `${unit.columns[i] || `column ${i + 1}`}: ${cell || '(empty)'}`);
+      const named = tableCells(sentence.text).map((cell, i) => `${sentence.columns[i] || `column ${i + 1}`}: ${cell || '(empty)'}`);
       return `${label} row · ${named.join(' · ')}`;
     }
     case 'code': {
-      const where = [unit.lang, unit.parts > 1 ? `part ${unit.part} of ${unit.parts}` : null].filter(Boolean).join(', ');
-      return `${label} code${where ? ` (${where})` : ''}:\n${indented(unit.text)}`;
+      const where = [sentence.lang, sentence.parts > 1 ? `part ${sentence.part} of ${sentence.parts}` : null].filter(Boolean).join(', ');
+      return `${label} code${where ? ` (${where})` : ''}:\n${indented(sentence.text)}`;
     }
   }
 }

@@ -39,14 +39,14 @@ import { repositoryDocumentsIn, sliceCorpus } from '@truecourse/core/services/co
 import { conflictsCreated } from '@truecourse/core/services/pr-check/compare';
 import { splitRepo, type OctokitClient } from '@truecourse/github-app';
 import {
-  disputeSides,
+  conflictSides,
   isForkPullRequest,
   openConflicts,
   parseHeadings,
   pullRequestWorkspaceScope,
   type CorpusConflict,
   type NotificationLevel,
-  type OverlapSectionLike,
+  type ConflictSideLike,
   type PullRequestCheckConclusion,
   type PullRequestCheckReason,
   type PullRequestCheckReport,
@@ -216,7 +216,7 @@ export function createRepoPullRequestCheckTask(
                   transportMode: llm.mode,
                   // On Claude Code the scan reviews the head's documents on
                   // disk and finds conflicts by comparing facts; in API mode it pairs.
-                  ...(llm.mode === 'claude-code' ? { computer: true, conflictMethod: 'facts' as const } : {}),
+                  ...(llm.mode === 'claude-code' ? { computer: true } : {}),
                   tracker: pipelineTracker(ctx, 'scan', CURATE_STEPS),
                   pullRequest: { repoFullName, number, headSha, checkId: opened.id, scope: workspaceScope, sourceId, documents },
                   ...(ctx.signal ? { signal: ctx.signal } : {}),
@@ -458,14 +458,14 @@ function reportConflict(
   repos: readonly { repoFullName: string; sourceIds: string[] }[],
 ): PullRequestCheckReport['conflictsCreated'][number] {
   const { source, documents } = scan;
-  const headings = (side: readonly OverlapSectionLike[]): string[] =>
+  const headings = (side: readonly ConflictSideLike[]): string[] =>
     side.flatMap((s) => (s.heading !== null ? [s.heading] : []));
-  const [sideA, sideB] = disputeSides(conflict.a, conflict.b, conflict.sections);
+  const [sideA, sideB] = conflictSides(conflict.a, conflict.b, conflict.sections);
   const ownSides = [conflict.a, conflict.b]
     .map((doc) => ({ doc, parsed: parseContextDocRef(doc) }))
     .filter(({ parsed }) => parsed !== null && source !== null && parsed.sourceId === source.id);
   const own = ownSides.find(({ parsed }) => scan.changed.has(parsed!.docPath)) ?? ownSides[0];
-  // A conflict inside one doc keeps its passages in order: there is no other doc to put first.
+  // A conflict inside one doc keeps its sentences in order: there is no other doc to put first.
   const flip = own?.doc === conflict.b && conflict.a !== conflict.b;
   const docs: [string, string] = flip ? [conflict.b, conflict.a] : [conflict.a, conflict.b];
   const sections: [string[], string[]] = flip

@@ -15,8 +15,8 @@ import {
   PROCESS_PRODUCT,
   CuratedCorpusSchema,
   CorpusDocSchema,
-  OverlapSchema,
-  OverlapSectionSchema,
+  ConflictSchema,
+  ConflictSideSchema,
 } from '../../packages/spec-consolidator/src/index.js';
 
 describe('slugifyAxis', () => {
@@ -87,7 +87,7 @@ describe('normalizeArea', () => {
 
 describe('canonicalizeConcern', () => {
   it('slugs a heading to the same concern the grouper produces', () => {
-    // Must line up with normalizeArea's concern axis so heading-widened overlap
+    // Must line up with normalizeArea's concern axis so heading-widened conflict
     // matching hits an area's `concern` exactly.
     expect(canonicalizeConcern('Pagination')).toBe('pagination');
     expect(canonicalizeConcern('Users Entity')).toBe('users-entity');
@@ -128,7 +128,7 @@ describe('splitArea / isProcessArea', () => {
 describe('CuratedCorpusSchema', () => {
   it('parses a minimal corpus (no relations field exists)', () => {
     const parsed = CuratedCorpusSchema.parse({
-      version: 3,
+      version: 5,
       generatedAt: '2026-06-26T00:00:00Z',
       docs: [],
       areas: [],
@@ -138,7 +138,7 @@ describe('CuratedCorpusSchema', () => {
 
   it('an older corpus carrying a relations array still parses; the field is dropped', () => {
     const parsed = CuratedCorpusSchema.parse({
-      version: 3,
+      version: 5,
       generatedAt: '2026-06-26T00:00:00Z',
       docs: [],
       areas: [],
@@ -147,9 +147,9 @@ describe('CuratedCorpusSchema', () => {
     expect((parsed as Record<string, unknown>).relations).toBeUndefined();
   });
 
-  it('parses an overlap whose section pointer is a preamble marker (null heading)', () => {
+  it('parses an conflict whose section pointer is a preamble marker (null heading)', () => {
     const parsed = CuratedCorpusSchema.parse({
-      version: 3,
+      version: 5,
       generatedAt: '2026-06-26T00:00:00Z',
       docs: [],
       areas: [
@@ -158,43 +158,38 @@ describe('CuratedCorpusSchema', () => {
           product: 'core',
           concern: 'languages',
           docRefs: ['README.md', 'docs/PLAN.md'],
-          overlaps: [
+          conflicts: [
             {
               docs: ['README.md', 'docs/PLAN.md'],
               note: 'README preamble lists C#; PLAN omits it',
               sections: [
-                { doc: 'README.md', heading: null },
-                { doc: 'docs/PLAN.md', heading: 'Tech Stack' },
+                { doc: 'README.md', heading: null, sentence: 's-readme' },
+                { doc: 'docs/PLAN.md', heading: 'Tech Stack', sentence: 's-plan' },
               ],
             },
           ],
         },
       ],
     });
-    expect(parsed.areas[0].overlaps[0].sections).toEqual([
-      { doc: 'README.md', heading: null },
-      { doc: 'docs/PLAN.md', heading: 'Tech Stack' },
+    expect(parsed.areas[0].conflicts[0].sections).toEqual([
+      { doc: 'README.md', heading: null, sentence: 's-readme' },
+      { doc: 'docs/PLAN.md', heading: 'Tech Stack', sentence: 's-plan' },
     ]);
   });
 });
 
-describe('OverlapSectionSchema (preamble-marker heading)', () => {
-  it('accepts a plain string heading (older corpora)', () => {
-    expect(OverlapSectionSchema.parse({ doc: 'a.md', heading: 'Tech Stack' })).toEqual({
-      doc: 'a.md',
-      heading: 'Tech Stack',
-    });
+describe('ConflictSideSchema', () => {
+  it('accepts a heading, or null for the preamble, beside the sentence key', () => {
+    expect(ConflictSideSchema.parse({ doc: 'a.md', heading: 'Tech Stack', sentence: 's' })).toEqual({ doc: 'a.md', heading: 'Tech Stack', sentence: 's' });
+    expect(ConflictSideSchema.parse({ doc: 'a.md', heading: null, sentence: 's' })).toEqual({ doc: 'a.md', heading: null, sentence: 's' });
   });
 
-  it('accepts a null heading (preamble pointer)', () => {
-    expect(OverlapSectionSchema.parse({ doc: 'a.md', heading: null })).toEqual({
-      doc: 'a.md',
-      heading: null,
-    });
+  it('refuses a side without its sentence', () => {
+    expect(() => ConflictSideSchema.parse({ doc: 'a.md', heading: null })).toThrow();
   });
 });
 
-describe('OverlapSchema (resolution brief)', () => {
+describe('ConflictSchema (resolution brief)', () => {
   const base = {
     docs: ['a.md', 'b.md'] as [string, string],
     note: 'default page size differs',
@@ -202,8 +197,8 @@ describe('OverlapSchema (resolution brief)', () => {
     areas: ['core/pagination'],
   };
 
-  it('parses an overlap carrying a review brief', () => {
-    const parsed = OverlapSchema.parse({
+  it('parses an conflict carrying a review brief', () => {
+    const parsed = ConflictSchema.parse({
       ...base,
       review: {
         explanation: 'doc A says the default page size is "20" while doc B says "50", so both cannot hold.',
@@ -215,7 +210,7 @@ describe('OverlapSchema (resolution brief)', () => {
   });
 
   it('parses a fix-doc recommendation that names the fix', () => {
-    const parsed = OverlapSchema.parse({
+    const parsed = ConflictSchema.parse({
       ...base,
       review: {
         explanation: 'doc A and doc B give different defaults for the same key.',
@@ -225,13 +220,13 @@ describe('OverlapSchema (resolution brief)', () => {
     expect(parsed.review!.recommendation.fix).toBe('have doc B cite the config default');
   });
 
-  it('parses an overlap with no review (older corpora, additive field)', () => {
-    const parsed = OverlapSchema.parse(base);
+  it('parses an conflict with no review (older corpora, additive field)', () => {
+    const parsed = ConflictSchema.parse(base);
     expect(parsed.review).toBeUndefined();
   });
 
   it('rejects an unknown recommendation action', () => {
-    const bad = OverlapSchema.safeParse({
+    const bad = ConflictSchema.safeParse({
       ...base,
       review: {
         explanation: 'x',
@@ -242,10 +237,10 @@ describe('OverlapSchema (resolution brief)', () => {
   });
 });
 
-describe('CuratedCorpusSchema (overlap resolution brief)', () => {
-  it('parses a corpus whose overlap carries a resolution brief', () => {
+describe('CuratedCorpusSchema (conflict resolution brief)', () => {
+  it('parses a corpus whose conflict carries a resolution brief', () => {
     const parsed = CuratedCorpusSchema.parse({
-      version: 3,
+      version: 5,
       generatedAt: '2026-06-26T00:00:00Z',
       docs: [],
       areas: [
@@ -254,7 +249,7 @@ describe('CuratedCorpusSchema (overlap resolution brief)', () => {
           product: 'core',
           concern: 'pagination',
           docRefs: ['a.md', 'b.md'],
-          overlaps: [
+          conflicts: [
             {
               docs: ['a.md', 'b.md'],
               note: 'default page size differs',
@@ -267,7 +262,7 @@ describe('CuratedCorpusSchema (overlap resolution brief)', () => {
         },
       ],
     });
-    expect(parsed.areas[0].overlaps[0].review!.recommendation.action).toBe('pick-b');
+    expect(parsed.areas[0].conflicts[0].review!.recommendation.action).toBe('pick-b');
   });
 });
 
@@ -278,20 +273,20 @@ describe('CorpusDocSchema (fact ledger counts)', () => {
     expect(CorpusDocSchema.parse(doc).ledger).toBeUndefined();
   });
 
-  it('parses a doc carrying its ledger counts, skipped units per reason', () => {
-    const ledger = { units: 61, facts: 34, skipped: { navigation: 20, example: 7 }, unrecorded: 0 };
+  it('parses a doc carrying its ledger counts, skipped sentences per reason', () => {
+    const ledger = { sentences: 61, facts: 34, skipped: { navigation: 20, example: 7 }, unrecorded: 0 };
     expect(CorpusDocSchema.parse({ ...doc, ledger }).ledger).toEqual(ledger);
   });
 
   it('rejects a skip reason that is not one of the reasons', () => {
-    const ledger = { units: 1, facts: 0, skipped: { boring: 1 }, unrecorded: 0 };
+    const ledger = { sentences: 1, facts: 0, skipped: { boring: 1 }, unrecorded: 0 };
     expect(CorpusDocSchema.safeParse({ ...doc, ledger }).success).toBe(false);
   });
 });
 
 describe('CuratedCorpusSchema (what comparing facts came to)', () => {
-  const area = { id: 'core/a', product: 'core', concern: 'a', docRefs: ['docs/a.md'], overlaps: [] };
-  const corpus = { version: 3 as const, generatedAt: '2026-01-01T00:00:00Z', docs: [], areas: [area], skippedDocs: [] };
+  const area = { id: 'core/a', product: 'core', concern: 'a', docRefs: ['docs/a.md'], conflicts: [] };
+  const corpus = { version: 5 as const, generatedAt: '2026-01-01T00:00:00Z', docs: [], areas: [area], skippedDocs: [] };
 
   it('parses a corpus written by any other scan, with no comparison fields', () => {
     const parsed = CuratedCorpusSchema.parse(corpus);

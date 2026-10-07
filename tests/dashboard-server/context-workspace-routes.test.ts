@@ -74,7 +74,7 @@ let jobs: StubJobs;
 let context: ContextStore;
 
 const corpus = (): CuratedCorpus => ({
-  version: 3,
+  version: 5,
   generatedAt: '2026-01-01T00:00:00Z',
   docs: [
     { ref: ref(SRC_A, 'one.md'), kind: 'prd', lastTouched: '', areaTags: ['p/c'], sourceId: SRC_A, sourceKind: 'repository' },
@@ -86,7 +86,7 @@ const corpus = (): CuratedCorpus => ({
       product: 'p',
       concern: 'c',
       docRefs: [ref(SRC_A, 'one.md'), ref(SRC_B, 'site.md')],
-      overlaps: [],
+      conflicts: [],
     },
   ],
   skippedDocs: [],
@@ -225,8 +225,10 @@ describe('an inclusion decision says a scan is needed', () => {
       .send({
         docA: ref(SRC_A, 'one.md'),
         anchorA: 'Cancellation',
+        sentenceA: 's-one',
         docB: ref(SRC_B, 'site.md'),
         anchorB: 'Cancellation',
+        sentenceB: 's-site',
         verdict: 'b',
       })
       .expect(200);
@@ -239,51 +241,50 @@ describe('an inclusion decision says a scan is needed', () => {
     });
   });
 
-  it('replaces a verdict re-recorded on the same dispute, whatever markers or case its anchors wear', async () => {
+  it('replaces a verdict re-recorded on the same two sentences, whatever its anchors say', async () => {
     await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', corpus());
-    const dispute = { docA: ref(SRC_A, 'one.md'), docB: ref(SRC_B, 'site.md') };
+    const conflict = { docA: ref(SRC_A, 'one.md'), sentenceA: 's-one', docB: ref(SRC_B, 'site.md'), sentenceB: 's-site' };
     await request(app)
       .post('/api/context/conflict-resolution')
-      .send({ ...dispute, anchorA: '`Cancellation`', anchorB: 'Cancellation', verdict: 'a' })
+      .send({ ...conflict, anchorA: '`Cancellation`', anchorB: 'Cancellation', verdict: 'a' })
       .expect(200);
-    // The same dispute, the anchors as a later scan lists them: one row, the new verdict.
+    // The same conflict, the anchors as a later scan lists them: one row, the new verdict.
     const again = await request(app)
       .post('/api/context/conflict-resolution')
-      .send({ ...dispute, anchorA: 'cancellation', anchorB: 'Cancellation', verdict: 'b' })
+      .send({ ...conflict, anchorA: 'cancellation', anchorB: 'Cancellation', verdict: 'b' })
       .expect(200);
     expect(again.body.conflictResolutions).toHaveLength(1);
     expect(again.body.conflictResolutions[0]).toMatchObject({ verdict: 'b', anchorA: 'cancellation' });
     // And the same key removes it, however the anchors are spelled.
     const removed = await request(app)
       .delete('/api/context/conflict-resolution')
-      .send({ ...dispute, anchorA: '`Cancellation`', anchorB: 'cancellation' })
+      .send({ ...conflict, anchorA: '`Cancellation`', anchorB: 'cancellation' })
       .expect(200);
     expect(removed.body.conflictResolutions).toEqual([]);
   });
 
-  it('keeps one verdict per pair of passages between the same two sections, and removes only the one named', async () => {
+  it('keeps one verdict per pair of sentences between the same two sections, and removes only the one named', async () => {
     await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', corpus());
     const sections = { docA: ref(SRC_A, 'one.md'), anchorA: 'Cancellation', docB: ref(SRC_B, 'site.md'), anchorB: 'Cancellation' };
     await request(app)
       .post('/api/context/conflict-resolution')
-      .send({ ...sections, passageA: 'p-hours', passageB: 'q-hours', verdict: 'a' })
+      .send({ ...sections, sentenceA: 'p-hours', sentenceB: 'q-hours', verdict: 'a' })
       .expect(200);
     const both = await request(app)
       .post('/api/context/conflict-resolution')
-      .send({ ...sections, passageA: 'p-fee', passageB: 'q-fee', verdict: 'b' })
+      .send({ ...sections, sentenceA: 'p-fee', sentenceB: 'q-fee', verdict: 'b' })
       .expect(200);
-    expect(both.body.conflictResolutions.map((r: { passageA?: string; verdict: string }) => [r.passageA, r.verdict])).toEqual([
+    expect(both.body.conflictResolutions.map((r: { sentenceA?: string; verdict: string }) => [r.sentenceA, r.verdict])).toEqual([
       ['p-hours', 'a'],
       ['p-fee', 'b'],
     ]);
-    // A verdict without passages is another dispute again, and leaves both in place.
-    const removed = await request(app).delete('/api/context/conflict-resolution').send(sections).expect(200);
-    expect(removed.body.conflictResolutions).toHaveLength(2);
+    // A withdrawal must name its two sentences.
+    await request(app).delete('/api/context/conflict-resolution').send(sections).expect(400);
     const left = await request(app)
       .delete('/api/context/conflict-resolution')
-      .send({ ...sections, passageA: 'p-hours', passageB: 'q-hours' })
+      .send({ ...sections, sentenceA: 'p-hours', sentenceB: 'q-hours' })
       .expect(200);
-    expect(left.body.conflictResolutions).toEqual([expect.objectContaining({ passageA: 'p-fee', passageB: 'q-fee' })]);
+    expect(left.body.conflictResolutions).toEqual([expect.objectContaining({ sentenceA: 'p-fee', sentenceB: 'q-fee' })]);
   });
 
   it('reports nothing for a verdict the route refuses', async () => {
@@ -301,8 +302,10 @@ describe('an inclusion decision says a scan is needed', () => {
       .send({
         docA: ref(SRC_A, 'one.md'),
         anchorA: 'Cancellation',
+        sentenceA: 's-one',
         docB: ref(SRC_B, 'site.md'),
         anchorB: 'Cancellation',
+        sentenceB: 's-site',
         verdict: 'a',
       })
       .expect(200);
@@ -384,8 +387,10 @@ describe('the workspace corpus and its decisions', () => {
     const verdict = {
       docA: ref(SRC_A, 'one.md'),
       anchorA: 'Cancellation',
+      sentenceA: 's-one',
       docB: ref(SRC_B, 'site.md'),
       anchorB: 'Cancellation policy',
+      sentenceB: 's-site',
       verdict: 'b',
     };
     const add = await request(app).post('/api/context/conflict-resolution').send(verdict).expect(200);
@@ -395,20 +400,20 @@ describe('the workspace corpus and its decisions', () => {
 
     const del = await request(app)
       .delete('/api/context/conflict-resolution')
-      .send({ docA: verdict.docA, anchorA: verdict.anchorA, docB: verdict.docB, anchorB: verdict.anchorB })
+      .send({ docA: verdict.docA, sentenceA: verdict.sentenceA, docB: verdict.docB, sentenceB: verdict.sentenceB })
       .expect(200);
     expect(del.body.conflictResolutions).toEqual([]);
     expect((await read()).conflictResolutions).toEqual([]);
   });
 
-  it('settles a conflict inside one document by its passage, and the other passage still disputes nothing', async () => {
+  it('settles a conflict inside one document by its sentence, and the other sentence still conflicts nothing', async () => {
     await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', corpus());
     const doc = ref(SRC_A, 'one.md');
-    const verdict = { docA: doc, anchorA: 'Cancellation', docB: doc, anchorB: 'Refunds', verdict: 'a' };
+    const verdict = { docA: doc, anchorA: 'Cancellation', sentenceA: 's-cancel', docB: doc, anchorB: 'Refunds', sentenceB: 's-refund', verdict: 'a' };
     const add = await request(app).post('/api/context/conflict-resolution').send(verdict).expect(200);
     expect(add.body.conflictResolutions).toEqual([expect.objectContaining(verdict)]);
-    // The same dispute named the other way round is the same verdict, replaced.
-    const flipped = { docA: doc, anchorA: 'Refunds', docB: doc, anchorB: 'Cancellation', verdict: 'b' };
+    // The same conflict named the other way round is the same verdict, replaced.
+    const flipped = { docA: doc, anchorA: 'Refunds', sentenceA: 's-refund', docB: doc, anchorB: 'Cancellation', sentenceB: 's-cancel', verdict: 'b' };
     const again = await request(app).post('/api/context/conflict-resolution').send(flipped).expect(200);
     expect(again.body.conflictResolutions).toEqual([expect.objectContaining(flipped)]);
   });
@@ -418,10 +423,10 @@ describe('the workspace corpus and its decisions', () => {
       .post('/api/context/conflict-resolution')
       .send({ docA: 'a', docB: 'a', verdict: 'b' })
       .expect(400);
-    // One passage named twice is no dispute.
+    // One sentence named twice is no conflict.
     await request(app)
       .post('/api/context/conflict-resolution')
-      .send({ docA: 'a', anchorA: 'X', quoteA: 'q', docB: 'a', anchorB: 'X', quoteB: 'q', verdict: 'b' })
+      .send({ docA: 'a', anchorA: 'X', sentenceA: 's', docB: 'a', anchorB: 'X', sentenceB: 's', verdict: 'b' })
       .expect(400);
     await request(app)
       .post('/api/context/conflict-resolution')
@@ -443,9 +448,9 @@ describe('the workspace corpus and its decisions', () => {
 describe('a workspace decision unblocks the generation it freed', () => {
   const SRC_C = 'internal-wiki';
 
-  /** Two disputes in one workspace: SRC_A vs SRC_B, and SRC_C against itself. */
+  /** Two conflicts in one workspace: SRC_A vs SRC_B, and SRC_C against itself. */
   const twoConflicts = (): CuratedCorpus => ({
-    version: 3,
+    version: 5,
     generatedAt: '2026-01-01T00:00:00Z',
     docs: [
       { ref: ref(SRC_A, 'one.md'), kind: 'prd', lastTouched: '', areaTags: ['p/c'], sourceId: SRC_A, sourceKind: 'repository' },
@@ -459,21 +464,21 @@ describe('a workspace decision unblocks the generation it freed', () => {
         product: 'p',
         concern: 'c',
         docRefs: [ref(SRC_A, 'one.md'), ref(SRC_B, 'site.md'), ref(SRC_C, 'w1.md'), ref(SRC_C, 'w2.md')],
-        overlaps: [
+        conflicts: [
           {
             docs: [ref(SRC_A, 'one.md'), ref(SRC_B, 'site.md')],
             note: '24h vs 48h',
             sections: [
-              { doc: ref(SRC_A, 'one.md'), heading: 'Cancellation' },
-              { doc: ref(SRC_B, 'site.md'), heading: 'Cancellation policy' },
+              { doc: ref(SRC_A, 'one.md'), heading: 'Cancellation', sentence: 's-one' },
+              { doc: ref(SRC_B, 'site.md'), heading: 'Cancellation policy', sentence: 's-site' },
             ],
           },
           {
             docs: [ref(SRC_C, 'w1.md'), ref(SRC_C, 'w2.md')],
             note: 'two refund windows',
             sections: [
-              { doc: ref(SRC_C, 'w1.md'), heading: 'Refunds' },
-              { doc: ref(SRC_C, 'w2.md'), heading: 'Refund window' },
+              { doc: ref(SRC_C, 'w1.md'), heading: 'Refunds', sentence: 's-w1' },
+              { doc: ref(SRC_C, 'w2.md'), heading: 'Refund window', sentence: 's-w2' },
             ],
           },
         ],
@@ -482,12 +487,14 @@ describe('a workspace decision unblocks the generation it freed', () => {
     skippedDocs: [],
   });
 
-  /** The verdict that settles the FIRST dispute, and nothing else. */
+  /** The verdict that settles the FIRST conflict, and nothing else. */
   const VERDICT = {
     docA: ref(SRC_A, 'one.md'),
     anchorA: 'Cancellation',
+    sentenceA: 's-one',
     docB: ref(SRC_B, 'site.md'),
     anchorB: 'Cancellation policy',
+    sentenceB: 's-site',
     verdict: 'b',
   };
 
@@ -513,7 +520,7 @@ describe('a workspace decision unblocks the generation it freed', () => {
     other = await setupTestFixture();
     await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', twoConflicts());
     // `blocked` reads the two documents the verdict settles; `other` reads the
-    // dispute nobody is settling here.
+    // conflict nobody is settling here.
     await setContextBindings(TEST_ORG, blocked.project.path, [SRC_A, SRC_B]);
     await setContextBindings(TEST_ORG, other.project.path, [SRC_C]);
     enqueued = [];
@@ -569,7 +576,7 @@ describe('a workspace decision unblocks the generation it freed', () => {
   it('starts nothing while the repository still has a conflict of its own', async () => {
     stubReports({ [blocked.project.path]: 'open-conflicts', [other.project.path]: 'open-conflicts' });
 
-    // A force-include settles no dispute, so both repositories stay blocked.
+    // A force-include settles no conflict, so both repositories stay blocked.
     await request(app)
       .post('/api/context/includes')
       .send({ ref: ref(SRC_A, 'one.md') })
@@ -718,7 +725,7 @@ describe('the corpus versions', () => {
     await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', corpus(), { producedByRun: 'scan-1', model: 'm1' });
     const next = corpus();
     next.docs.push({ ref: ref(SRC_A, 'two.md'), kind: 'prd', lastTouched: '', areaTags: ['p/d'], sourceId: SRC_A, sourceKind: 'repository' });
-    next.areas.push({ id: 'p/d', product: 'p', concern: 'd', docRefs: [ref(SRC_A, 'two.md')], overlaps: [] });
+    next.areas.push({ id: 'p/d', product: 'p', concern: 'd', docRefs: [ref(SRC_A, 'two.md')], conflicts: [] });
     await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', next, { producedByRun: 'scan-2', model: 'm2' });
 
     const list = await request(app).get('/api/context/versions').expect(200);

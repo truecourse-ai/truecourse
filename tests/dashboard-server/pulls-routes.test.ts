@@ -199,7 +199,7 @@ describe('POST /api/context/conflict-resolution', () => {
     });
     await request(app)
       .post('/api/context/conflict-resolution')
-      .send({ docA: 'context/s/a.md', anchorA: 'A', docB: 'context/s/b.md', anchorB: 'B', verdict: 'a' })
+      .send({ docA: 'context/s/a.md', anchorA: 'A', sentenceA: 's-a', docB: 'context/s/b.md', anchorB: 'B', sentenceB: 's-b', verdict: 'a' })
       .expect(200);
     expect(rechecked).toEqual([TEST_ORG]);
   });

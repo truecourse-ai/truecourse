@@ -11,11 +11,11 @@ import { createRepoSpecSource, useSpecSource } from '@/components/spec/spec-sour
 
 // Docs are listed once (keyed by their plain ref). A conflict is keyed by the id
 // `buildCorpusConflicts` stamps on it, NEVER rebuilt here, because the pair alone
-// cannot tell two disputes on the same two docs apart (see `conflictId`).
+// cannot tell two conflicts on the same two docs apart (see `conflictId`).
 
 export type SpecKey =
   | { kind: 'doc'; ref: string }
-  | { kind: 'overlap'; area: string; a: string; b: string };
+  | { kind: 'conflict'; area: string; a: string; b: string };
 
 /** Parse a corpus key (a doc ref or a conflict id) into the item it addresses. A conflict id's
  *  trailing discriminator is not needed to LABEL it, so the first four segments
@@ -24,7 +24,7 @@ export type SpecKey =
 export function parseSpecKey(key: string): SpecKey {
   if (isConflictId(key)) {
     const [, area, a, b] = key.split('::');
-    return { kind: 'overlap', area: area ?? '', a: a ?? '', b: b ?? '' };
+    return { kind: 'conflict', area: area ?? '', a: a ?? '', b: b ?? '' };
   }
   // Back-compat: an older area-scoped `doc::<area>::<ref>` URL still resolves.
   if (key.startsWith('doc::')) {

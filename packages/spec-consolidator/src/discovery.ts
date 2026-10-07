@@ -360,7 +360,7 @@ function makeOpenApiCandidate(
 /**
  * A STRUCTURAL (non-prose) spec source — currently only an OpenAPI document.
  * Structural docs are admitted into the corpus deterministically: they skip the
- * LLM relevance filter and every prose-only stage (area tagging, vocab, overlap).
+ * LLM relevance filter and every prose-only stage (area tagging, vocab, conflicts).
  * The single predicate both the runtime (the scan run's `prefilterDocs` pass)
  * and the pre-flight estimate use to exclude them identically.
  */

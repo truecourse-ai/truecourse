@@ -8,9 +8,9 @@
  * - a prior step's cache MISS fails loud (`ScanStepNotReadyError`, naming the
  *   step to run first) instead of silently spending its sessions — a silent
  *   re-run would mask exactly the cache-key drift stepwise runs exist to expose;
- * - corpus.json is written only by the final step (`overlap`); every earlier
+ * - corpus.json is written only by the final step (`conflict`); every earlier
  *   stop returns `stoppedAfter` and touches no corpus;
- * - the stepwise chain (curate → settle → overlap) reaches the same corpus a
+ * - the stepwise chain (curate → settle → conflict) reaches the same corpus a
  *   whole scan writes, each leg served from the previous leg's cache.
  */
 
@@ -26,7 +26,10 @@ import {
 import { SPEC_SCAN_ORCHESTRATE_SESSION_KIND } from '../../packages/core/src/services/spec-scan/orchestrate'
 import { CURATE_DOC_SESSION_KIND } from '../../packages/core/src/services/spec-scan/curate-doc'
 import { SETTLE_AREAS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-areas'
-import { OVERLAP_SESSION_KIND } from '../../packages/core/src/services/spec-scan/overlap'
+import { RECORD_FACTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/record-facts'
+import { SETTLE_SUBJECTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-subjects'
+import { COMPARE_FACTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/compare-facts'
+import { compare, record, settle } from './spec-scan-facts-stub'
 import { readDecisions, writeDecisions, type DecisionsFile } from '../../packages/spec-consolidator/src/index.js'
 import {
   docPathOf,
@@ -96,16 +99,19 @@ async function anyKind(call: StubCall): Promise<DriverResult> {
     case SETTLE_AREAS_SESSION_KIND:
       await call.emit(toolResult('check_settlement', 'valid'))
       return outcome(EMPTY_SETTLEMENT)
-    case OVERLAP_SESSION_KIND:
-      await call.emit(toolResult('check_findings', 'The draft is valid.'))
-      return outcome({ overlaps: [], notReached: [] })
+    case RECORD_FACTS_SESSION_KIND:
+      return record(call, () => null)
+    case SETTLE_SUBJECTS_SESSION_KIND:
+      return settle(call)
+    case COMPARE_FACTS_SESSION_KIND:
+      return compare(call)
     default:
       throw new Error(`unscripted session kind: ${call.kind}`)
   }
 }
 
 async function runOnly(
-  only: 'orchestrate' | 'curate' | 'settle' | 'overlap',
+  only: 'orchestrate' | 'curate' | 'settle' | 'conflicts',
   script: (call: StubCall) => DriverResult | Promise<DriverResult>,
 ) {
   const stub = stubDriver(script)
@@ -216,7 +222,7 @@ describe('a prior step not yet run', () => {
     expect((error as ScanStepNotReadyError).message).toContain('curate step')
   })
 
-  it('only: overlap after curation but before settling throws for the settle step', async () => {
+  it('only: conflict after curation but before settling throws for the settle step', async () => {
     seedDecisions()
     await runOnly('curate', anyKind)
     const error = await runSpecScanSessions({
@@ -224,7 +230,7 @@ describe('a prior step not yet run', () => {
       driver: async () => forbiddenDriver('a cache-only replay must not spend sessions'),
       persistence: memoryPersistence().persistence,
       skipGit: true,
-      only: 'overlap',
+      only: 'conflicts',
     }).catch((e: unknown) => e)
     expect(error).toBeInstanceOf(ScanStepNotReadyError)
     expect((error as ScanStepNotReadyError).step).toBe('settle')
@@ -233,7 +239,7 @@ describe('a prior step not yet run', () => {
 })
 
 // ---------------------------------------------------------------------------
-// the chain: curate → settle → overlap reaches a written corpus
+// the chain: curate → settle → conflict reaches a written corpus
 // ---------------------------------------------------------------------------
 
 describe('the stepwise chain', () => {
@@ -256,15 +262,15 @@ describe('the stepwise chain', () => {
     expect(fs.existsSync(corpusFile())).toBe(false)
 
     // The final step completes the scan: earlier steps from cache, corpus written.
-    const overlapLeg = await runOnly('overlap', async (call) => {
+    const conflictsLeg = await runOnly('conflicts', async (call) => {
       if (call.kind === CURATE_DOC_SESSION_KIND || call.kind === SETTLE_AREAS_SESSION_KIND) {
-        throw new Error(`${call.kind} must replay from cache in only: 'overlap'`)
+        throw new Error(`${call.kind} must replay from cache in only: 'conflicts'`)
       }
       return anyKind(call)
     })
-    expect(overlapLeg.result.stoppedAfter).toBeUndefined()
+    expect(conflictsLeg.result.stoppedAfter).toBeUndefined()
     expect(fs.existsSync(corpusFile())).toBe(true)
-    expect(overlapLeg.result.corpus.docs.map((d) => d.ref).sort()).toEqual(['docs/a.md', 'docs/b.md'])
-    expect(overlapLeg.result.corpus.areas).toHaveLength(2)
+    expect(conflictsLeg.result.corpus.docs.map((d) => d.ref).sort()).toEqual(['docs/a.md', 'docs/b.md'])
+    expect(conflictsLeg.result.corpus.areas).toHaveLength(2)
   })
 })

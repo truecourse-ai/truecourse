@@ -5,7 +5,7 @@
  * The `curate()` orchestration itself retired with the spec-scan SESSIONS:
  * the run now lives in `@truecourse/core`'s
  * `services/spec-scan/run.ts`, one agent session per doc (curation), at most
- * one per corpus (area settling) and one per area (overlap) — replacing the
+ * one per corpus (area settling) and one per collision cluster (conflicts) — replacing the
  * five one-shot LLM stages this module used to chain. What stays here is the
  * part that was never a call and that the new run folds through unchanged:
  *
@@ -33,29 +33,22 @@ import {
   type ConflictResolution,
   type DecisionsFile,
 } from './types.js';
-import { type CuratedCorpus, type Overlap } from './corpus-types.js';
+import { type CuratedCorpus } from './corpus-types.js';
 import { specDecisionsPath } from '@truecourse/shared/work-tree';
 
 export interface CurateStats {
   docsScanned: number;
   docsKept: number;
   areaCount: number;
-  overlapFlags: number;
-  /**
-   * Flagged overlaps a verify pass pruned as detector false positives. Always 0
-   * on a session scan — the overlap session flags and adjudicates in ONE pass,
-   * so there is no recall-biased detector to prune behind. Kept in the shape so
-   * older engines' results still parse and the stats render either way.
-   */
-  overlapRefuted: number;
+  conflictCount: number;
   /**
    * Conflicts the scan resolved ITSELF by applying a high-confidence verify-pass
    * recommendation (`resolvedBy: 'auto'` in decisions.json — visible, undoable).
    * Surfaced per conflict so the summary can say what was decided, not just count.
    */
   autoResolvedConflicts: Array<{ area: string; a: string; b: string; verdict: 'a' | 'b' | 'dismissed' }>;
-  /** Flagged overlaps — refs only; passages + resolved state derived at display. */
-  openOverlaps: Array<{ area: string; a: string; b: string }>;
+  /** The conflicts found — refs only; sentences + resolved state derived at display. */
+  openConflicts: Array<{ area: string; a: string; b: string }>;
   skippedDocs: Array<{ path: string; reason: string; category?: string }>;
   /**
    * Docs the classifier dropped as belonging to a THIRD-PARTY product. Broken
@@ -102,16 +95,16 @@ export interface CurateResult {
  * Drop stored conflict verdicts whose DOCS left the corpus, in the SAME write
  * cycle the corpus rides. That is the only staleness this prune acts on: a
  * resolution naming a doc the corpus no longer holds cannot ever match a
- * flagged dispute again, so dropping it is deterministic and safe.
+ * flagged conflict again, so dropping it is deterministic and safe.
  *
- * A resolution that merely matches no CURRENT overlap flag is KEPT, dormant.
- * The overlap session is a stochastic judge (~50–60% pair recall run-to-run),
- * so a verdict whose dispute this scan did not re-flag is not wrong, only
+ * A resolution that merely matches no CURRENT conflict is KEPT, dormant.
+ * A session is a stochastic judge (~50–60% pair recall run-to-run),
+ * so a verdict whose conflict this scan did not re-flag is not wrong, only
  * unexercised: the next scan may flag it again, and the verdict must still be
  * there to match. Dormant rows stay in `decisions.json` (surfaced by
  * `orphanedConflictResolutions` and offered as reapply hints on the pair's
  * conflicts via `dormantResolutionForPair`). A verdict recorded before
- * conflicts named their passages is such a row on a pair whose conflicts now
+ * conflicts named their sentences is such a row on a pair whose conflicts now
  * do: it matches none of them, and stays until a doc of it leaves.
  *
  * The returned entries are the caller's own array elements, so identity
@@ -139,7 +132,7 @@ export function pruneOrphanedConflictResolutions(
  * verdict doesn't leave it as homework. Rules:
  *
  *   - only an OPEN conflict (a stored verdict, a dismissal, or a covering
- *     exclude always wins — auto-apply never touches a resolved dispute);
+ *     exclude always wins — auto-apply never touches a resolved conflict);
  *   - only `confidence: 'high'` (the judge grades knowing high means unsupervised
  *     application); lower grades stay advisory and surfaces show the grade;
  *   - only an actionable recommendation — pick-a / pick-b / dismiss. A `fix-doc`
@@ -162,8 +155,9 @@ export function autoApplyHighConfidenceRecommendations(
   const added: ConflictResolution[] = [];
 
   for (const c of open) {
-    const review = reviewForConflict(corpus, c);
-    const rec = review?.recommendation;
+    // The record is the representative conflict, its docs order `[c.a, c.b]`,
+    // so a `pick-a`/`pick-b` recommendation orients exactly as `c.a`/`c.b`.
+    const rec = c.review?.recommendation;
     if (!rec || rec.confidence !== 'high' || rec.action === 'fix-doc') continue;
     const verdict: 'a' | 'b' | 'dismissed' =
       rec.action === 'pick-a' ? 'a' : rec.action === 'pick-b' ? 'b' : 'dismissed';
@@ -183,40 +177,6 @@ export function autoApplyHighConfidenceRecommendations(
   };
   writeDecisions(repoRoot, next);
   return { decisions: next, applied };
-}
-
-/**
- * The judge's review for a conflict, resolved from its REPRESENTATIVE
- * overlap — the record whose docs order is exactly `[c.a, c.b]` and whose section
- * pointers match — so a `pick-a`/`pick-b` recommendation orients exactly as
- * `c.a`/`c.b` (inside one doc, as the first and second pointer the conflict
- * carries, which are the representative's own). The merged conflict record
- * deliberately does not carry the review itself. A pointer's passage key is
- * part of the match, so where several conflicts share two docs and two
- * headings each takes its own review.
- */
-function reviewForConflict(corpus: CuratedCorpus, c: CorpusConflict): Overlap['review'] {
-  const sectionKeys = (
-    sections: readonly { doc: string; heading: string | null; passage?: string }[] | undefined,
-  ): string[] =>
-    (sections ?? [])
-      .map(
-        (s) =>
-          `${s.doc}\x00${s.heading === null || s.heading === undefined ? '\x00lead' : s.heading}${s.passage !== undefined ? `\x00${s.passage}` : ''}`,
-      )
-      .sort();
-  const want = sectionKeys(c.sections);
-  const areaIds = [c.area, ...c.areas.filter((a) => a !== c.area)];
-  for (const areaId of areaIds) {
-    const area = corpus.areas.find((a) => a.id === areaId);
-    if (!area) continue;
-    for (const ov of area.overlaps) {
-      if (ov.docs[0] !== c.a || ov.docs[1] !== c.b) continue;
-      const have = sectionKeys(ov.sections);
-      if (have.length === want.length && have.every((k, i) => k === want[i]) && ov.review) return ov.review;
-    }
-  }
-  return undefined;
 }
 
 // ---------------------------------------------------------------------------

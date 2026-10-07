@@ -7,7 +7,7 @@ import { mergeDecisions } from '../../packages/core/src/commands/spec-in-process
 import type { DecisionsFile } from '@truecourse/spec-consolidator';
 
 const empty: DecisionsFile = {
-  version: 1,
+  version: 3,
   manualIncludes: [],
   manualExcludes: [],
   manualAreas: [],
@@ -77,10 +77,10 @@ describe('mergeDecisions — empty overlay is a no-op', () => {
   });
 });
 
-// Decisions v2: the overlay wins per SCOPE PATH — normalized,
-// so `docs/` and `docs` are one row — and instructions union, base order kept.
-// The merge always stamps version 2, whatever the inputs still carry.
-describe('mergeDecisions — scope verdicts and instructions (v2)', () => {
+// The overlay wins per SCOPE PATH — normalized, so `docs/` and `docs` are one
+// row — and instructions union, base order kept. The merge always stamps the
+// current version.
+describe('mergeDecisions — scope verdicts and instructions', () => {
   const row = (path: string, verdict: 'keep' | 'exclude', reason: string) => ({
     path,
     verdict,
@@ -118,9 +118,9 @@ describe('mergeDecisions — scope verdicts and instructions (v2)', () => {
     expect(merged.instructions).toEqual(['a', 'b', 'c']);
   });
 
-  it('always yields version 2, and defaults the v2 fields for a v1 input', () => {
+  it('always yields the current version, and defaults the lists an input lacks', () => {
     const merged = mergeDecisions(empty, empty);
-    expect(merged.version).toBe(2);
+    expect(merged.version).toBe(3);
     expect(merged.scopeVerdicts).toEqual([]);
     expect(merged.instructions).toEqual([]);
   });

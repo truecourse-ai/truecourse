@@ -18,7 +18,7 @@
  * `highlight` marks the conflicting sections in place: the WHOLE section (its
  * heading + body up to the next heading) gets an amber band, so the user sees
  * exactly where two docs disagree, right on the document. `highlightPreamble`
- * bands the doc's LEAD — the disputed opening passage — the same way: content
+ * bands the doc's LEAD — the disputed opening sentence — the same way: content
  * before the first heading when the doc has such a preamble (a badge/tagline
  * block), else the opening heading's own section (the H1 line + its body up to
  * the next heading) for the common README shape that starts with an H1 title.

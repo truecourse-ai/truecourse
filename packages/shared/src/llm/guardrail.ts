@@ -1,7 +1,7 @@
 /**
  * Output-only guardrail — one shared line, embedded near the top of every
  * output-only LLM system prompt (guard extract/recipe, spec-scan
- * relevance/area-tag/vocab/overlap/chain). It closes the action space: some
+ * relevance/area-tag/vocab/conflicts/chain). It closes the action space: some
  * models still EMIT tool-call-shaped text when told to answer with JSON, trying
  * to inspect the repo before asserting. The transport already runs `claude` with
  * no tools (`--tools ''`) and a fully-replaced system prompt (`--system-prompt`,

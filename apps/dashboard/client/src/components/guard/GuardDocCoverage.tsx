@@ -7,8 +7,8 @@
  * the matching section into view, the deep-link target for the drifts page.
  *
  * A section can be both covered and conflicted. A conflicted heading (one flagged
- * by a within-area spec overlap) gets a small "conflict" TAG alongside its status
- * dot, never a second band, that opens the overlap's resolution detail. When a
+ * by a spec conflict) gets a small "conflict" TAG alongside its status
+ * dot, never a second band, that opens the conflict's resolution detail. When a
  * conflict is the active selection, its heading scrolls into view too.
  *
  * Rendering is per-section-chunk and memoized: each chunk parses its markdown
@@ -85,7 +85,7 @@ function MixBar({ mix }: { mix: SectionMix }) {
 
 import { headingMatchKey as norm } from '@/lib/heading-match';
 
-/** A small "conflict" tag that opens the overlap resolution detail. */
+/** A small "conflict" tag that opens the conflict resolution detail. */
 function ConflictTag({ onClick }: { onClick: () => void }) {
   return (
     <HoverPopover portal align="end" content="Flagged spec conflict, click to resolve">
@@ -112,7 +112,7 @@ interface CoverageBlockProps {
   reason: string | undefined;
   /** Present when the section mixes failing and passing flows. */
   mix: SectionMix | null;
-  /** The overlap key of a conflict flagging this heading, if any. */
+  /** The key of a conflict flagging this heading, if any. */
   conflictKey: string | undefined;
   selected: boolean;
   /** Blur mode: dim as a non-match. */
@@ -217,7 +217,7 @@ export function GuardDocCoverage({
   filterMode?: CoverageFilterMode;
   selectedAnchor: string | null;
   onSelectSection: (anchor: string) => void;
-  /** Normalized heading text → the overlap key of the conflict flagging it. */
+  /** Normalized heading text → the key of the conflict flagging it. */
   conflictHeadings?: Map<string, string>;
   /** The open conflict's key, its heading scrolls into view when set. */
   activeConflictKey?: string | null;

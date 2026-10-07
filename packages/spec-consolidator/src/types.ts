@@ -3,7 +3,7 @@
  *
  * The engine reads docs (PRDs, ADRs, RFCs, READMEs, design notes,
  * anything markdown), tags each with the AREAS it covers, groups them,
- * flags within-area overlaps, and lets the user resolve overlaps into
+ * flags the conflicts within each area, and lets the user resolve them into
  * curation decisions. These types are the shared contracts the corpus
  * stages and the curated `decisions.json` talk through.
  */
@@ -53,12 +53,11 @@ export const DocKindSchema = z.enum([
 export type DocKind = z.infer<typeof DocKindSchema>;
 
 /**
- * A SECTION-scoped conflict resolution — the redesign's verdict on ONE
- * disagreement between two specific sections, as opposed to a doc-wide verdict.
- * Keyed by the *dispute identity*: the unordered doc pair plus each side's section
- * anchor, and each side's passage key when the conflict named its passages.
- * This identity re-matches the same dispute across a rescan even though the corpus's
- * `overlaps[]` are regenerated each scan.
+ * A conflict resolution — the verdict on ONE disagreement between two
+ * sentences, as opposed to a doc-wide verdict. Keyed by the *conflict
+ * identity*: each side's doc and sentence key. This identity re-matches the
+ * same conflict across a rescan even though the corpus's `conflicts[]` are
+ * regenerated each scan.
  *
  * The verdict is a claim-level call, never a document-wide one:
  *   - "a"         docA's section is right; docB's disputed claim is stale and is
@@ -67,30 +66,28 @@ export type DocKind = z.infer<typeof DocKindSchema>;
  *   - "dismissed" a detector false-positive — not a real conflict. Resolves the
  *                 gate (visible, reversible) but suppresses NOTHING.
  *
- * `anchorA`/`anchorB` are the conflicting section's heading text (or `null` for a
- * doc's preamble/lead), mirroring {@link OverlapSectionSchema.heading}; `quoteA`/
- * `quoteB` are the verbatim disputed sentence when the detector supplied one;
- * `passageA`/`passageB` the passage keys, when the conflict named its passages.
- * A verdict with passages matches only the conflict on those two passages; one
- * without matches only a conflict without them.
+ * `anchorA`/`anchorB` are the heading each sentence sat under when the verdict
+ * was recorded (or `null` for a doc's preamble/lead) and `quoteA`/`quoteB` its
+ * words, both for display; `sentenceA`/`sentenceB` are the sentence keys, the
+ * identity.
  */
 export const ConflictResolutionSchema = z.object({
-  /** Repo-relative path / DocRef of the first doc in the dispute. */
+  /** Repo-relative path / DocRef of the first doc in the conflict. */
   docA: z.string(),
-  /** docA's conflicting section heading, or `null` for its preamble/lead. */
+  /** The heading docA's sentence sat under, or `null` for its preamble/lead. Display only. */
   anchorA: z.string().nullable(),
-  /** docA's verbatim disputed sentence, when the detector captured one. */
+  /** docA's disputed words, as quoted when the verdict was recorded. Display only. */
   quoteA: z.string().optional(),
-  /** docA's passage key, when the conflict named its passages. */
-  passageA: z.string().optional(),
-  /** Repo-relative path / DocRef of the second doc in the dispute. */
+  /** docA's sentence key: with the doc, side a's identity. */
+  sentenceA: z.string(),
+  /** Repo-relative path / DocRef of the second doc in the conflict. */
   docB: z.string(),
-  /** docB's conflicting section heading, or `null` for its preamble/lead. */
+  /** The heading docB's sentence sat under, or `null` for its preamble/lead. Display only. */
   anchorB: z.string().nullable(),
-  /** docB's verbatim disputed sentence, when the detector captured one. */
+  /** docB's disputed words, as quoted when the verdict was recorded. Display only. */
   quoteB: z.string().optional(),
-  /** docB's passage key, when the conflict named its passages. */
-  passageB: z.string().optional(),
+  /** docB's sentence key: with the doc, side b's identity. */
+  sentenceB: z.string(),
   /** Which side wins, or `dismissed` (not a real conflict). */
   verdict: z.enum(['a', 'b', 'dismissed']),
   /** ISO timestamp the resolution was recorded. */
@@ -151,20 +148,18 @@ export type ScopeVerdict = z.infer<typeof ScopeVerdictSchema>;
  *   - `manualAreas[]`   per-doc area-tag overrides
  *   - `manualIncludes[]` relevance-filter force-includes
  *   - `manualExcludes[]` force-excludes (drop an otherwise-kept doc)
- *   - `conflictResolutions[]` section-scoped conflict verdicts
- *   - `scopeVerdicts[]` subtree keep/exclude calls (v2 — see {@link ScopeVerdictSchema})
- *   - `instructions[]`  standing scan instructions (v2) — they ride EVERY scan
+ *   - `conflictResolutions[]` conflict verdicts
+ *   - `scopeVerdicts[]` subtree keep/exclude calls (see {@link ScopeVerdictSchema})
+ *   - `instructions[]`  standing scan instructions — they ride EVERY scan
  *     session's briefing and enter every scan cache key, so editing one
  *     re-scans the corpus (deliberate: an instruction changes every judgment)
  *
- * VERSIONING: v1 and v2 both parse (v1 simply has no scope rows and no
- * instructions — the defaults fill in); writers always stamp version 2
- * (`writeDecisions`). Unknown fields in an older decisions.json (e.g. a
- * `relations` array from a version that had doc→doc relations) are dropped on
- * parse — nothing consumes them and they are not rewritten.
+ * VERSIONING: version 3 alone parses, and every writer stamps it
+ * (`writeDecisions`). Unknown fields are dropped on parse — nothing consumes
+ * them and they are not rewritten.
  */
 export const DecisionsFileSchema = z.object({
-  version: z.union([z.literal(1), z.literal(2)]),
+  version: z.literal(3),
   /**
    * Doc paths the user has manually marked "always include" — these
    * bypass the LLM relevance filter so the user can override a wrong
@@ -180,24 +175,20 @@ export const DecisionsFileSchema = z.object({
   manualExcludes: z.array(z.string()).default([]),
   /** User overrides of a doc's auto-assigned area tags. */
   manualAreas: z.array(ManualAreaSchema).default([]),
-  /**
-   * SECTION-scoped conflict verdicts — pick-a-side / dismissal on one flagged
-   * disagreement, keyed by dispute identity. Optional with a `[]` default so a
-   * decisions.json written before conflict verdicts existed still parses.
-   */
+  /** Conflict verdicts — pick-a-side / dismissal on one conflict, keyed by conflict identity. */
   conflictResolutions: z.array(ConflictResolutionSchema).default([]),
   /**
-   * Subtree keep/exclude verdicts over the doc universe (v2). Applied BEFORE
+   * Subtree keep/exclude verdicts over the doc universe. Applied BEFORE
    * discovery-cost stages; user rows are never overwritten by auto rows.
    */
   scopeVerdicts: z.array(ScopeVerdictSchema).default([]),
   /**
-   * Standing scan instructions (v2). Briefed to EVERY scan session and folded
+   * Standing scan instructions. Briefed to EVERY scan session and folded
    * into every scan cache key — an edit re-scans, which is correct.
    */
   instructions: z.array(z.string()).default([]),
 });
 export type DecisionsFile = z.infer<typeof DecisionsFileSchema>;
 
-/** The version every writer stamps (readers accept 1 and 2). */
-export const DECISIONS_FILE_VERSION = 2 as const;
+/** The version every writer stamps and the one reader accepts. */
+export const DECISIONS_FILE_VERSION = 3 as const;

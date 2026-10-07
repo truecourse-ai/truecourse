@@ -92,7 +92,7 @@ const PULL: WorkspacePullRequestRow = {
 /** The workspace's own corpus, with one open conflict of its own between the two documents. */
 const CORPUS = {
   corpus: {
-    version: 3,
+    version: 5,
     generatedAt: '2026-09-02T00:00:00.000Z',
     docs: [
       { ref: REFUNDS_REF, kind: 'prd', lastTouched: '', areaTags: ['acme/payments'] },
@@ -104,7 +104,7 @@ const CORPUS = {
         product: 'acme',
         concern: 'payments',
         docRefs: [REFUNDS_REF, PAYOUTS_REF],
-        overlaps: [{ docs: [REFUNDS_REF, PAYOUTS_REF], note: 'who owns the refund window', sections: [] }],
+        conflicts: [{ docs: [REFUNDS_REF, PAYOUTS_REF], note: 'who owns the refund window', sections: [] }],
       },
     ],
     relations: [],

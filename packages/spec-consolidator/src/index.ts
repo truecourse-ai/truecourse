@@ -2,7 +2,7 @@
  * Public surface of the spec-consolidator package (corpus path).
  *
  * The scan pipeline curates docs into a `CuratedCorpus` (areas +
- * overlaps); this index re-exports the type contracts and stage entry
+ * conflicts); this index re-exports the type contracts and stage entry
  * points the dashboard server talks through.
  */
 
@@ -31,11 +31,9 @@ export {
   DocRefSchema,
   AreaTagSchema,
   CorpusDocSchema,
-  OverlapSchema,
-  OverlapSectionSchema,
-  OverlapReviewSchema,
-  CandidateSectionRefSchema,
-  CandidatePairSchema,
+  ConflictSchema,
+  ConflictSideSchema,
+  ConflictReviewSchema,
   AreaSchema,
   CuratedCorpusSchema,
   FactSkipReasonSchema,
@@ -55,11 +53,9 @@ export type {
   DocRef,
   AreaTag,
   CorpusDoc,
-  Overlap,
-  OverlapSection,
-  OverlapReview,
-  CandidateSectionRef,
-  CandidatePair,
+  Conflict,
+  ConflictSide,
+  ConflictReview,
   Area,
   CuratedCorpus,
   VocabMap,
@@ -69,18 +65,7 @@ export type {
   CorpusComparison,
 } from './corpus-types.js';
 
-export {
-  deriveCollisionPairs,
-  assignPairArea,
-  assignDocPairArea,
-  clusterPairs,
-  pairsFingerprint,
-  extractClaimTokens,
-  PAIR_GEN_DF_CAP,
-} from './collision-pairing.js';
-export type { CollisionPair, CollisionSectionRef } from './collision-pairing.js';
-
-export { partitionByAffinity, clusterByAffinity, affinityTokens } from './affinity-partition.js';
+export { partitionByAffinity, clusterByAffinity, affinityTokens, extractClaimTokens, PAIR_GEN_DF_CAP } from './affinity-partition.js';
 export type { AffinityOptions, AffinityPartition } from './affinity-partition.js';
 
 export {
@@ -104,35 +89,24 @@ export type { DocAreaTags } from './area-tagger.js';
 export { readDocFrontmatter } from '@truecourse/shared';
 export type { DocFrontmatter, StatusTransition } from '@truecourse/shared';
 
-export { groupByArea } from './area-grouper.js';
+export { groupByArea, assignDocPairArea } from './area-grouper.js';
 export type { GroupResult } from './area-grouper.js';
 
 export { VOCAB_NORMALIZER_SYSTEM_PROMPT } from './vocab-normalizer.js';
 
-export {
-  OVERLAP_DETECTOR_SYSTEM_PROMPT,
-  OVERLAP_WINDOW_CHARS,
-} from './overlap-detector.js';
-
-export { verifyOverlapSections, splitDocSections, locateQuote } from './pointer-verifier.js';
+export { verifyConflictSides, splitDocSections, locateQuote } from './pointer-verifier.js';
 export type { VerifyPointersInput, DocSection } from './pointer-verifier.js';
 
 export {
-  splitDocUnits,
-  planUnitWindows,
-  presentUnit,
-  UNIT_SPLITTER_VERSION,
-  CODE_UNIT_LINES,
-} from './doc-units.js';
-export type { DocUnit, DocUnitKind, UnitWindow, UnitWindowBounds } from './doc-units.js';
+  splitDocSentences,
+  planSentenceWindows,
+  presentSentence,
+  SENTENCE_SPLITTER_VERSION,
+  CODE_LINES_PER_SENTENCE,
+} from './doc-sentences.js';
+export type { DocSentence, DocSentenceKind, SentenceWindow, SentenceWindowBounds } from './doc-sentences.js';
 
-export {
-  headingOutline,
-  leadText,
-  sectionText,
-  VERIFY_OVERLAP_SYSTEM_PROMPT,
-  VERIFY_DOC_BUDGET_CHARS,
-} from './overlap-verifier.js';
+export { headingOutline, leadText, sectionText } from './doc-sections.js';
 
 export {
   readCorpusDecisions,

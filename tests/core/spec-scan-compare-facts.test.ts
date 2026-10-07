@@ -1,6 +1,6 @@
 /**
  * THE FACT COMPARISON — `spec-scan.compare-facts`, one session per batch of
- * recorded facts, the second half of finding conflicts by comparing facts.
+ * recorded facts, the second half of conflict conflicts by comparing facts.
  *
  * What is under test:
  * - batch planning: whole areas packed in id order up to the bound, an area
@@ -8,22 +8,22 @@
  *   joined by a rare word of their names, subject batches only for families
  *   whose facts sit in different area batches, and the order and ids within a
  *   batch;
- * - a pointer's evidence: the unit and the window of words that share the
+ * - a pointer's evidence: the sentence and the window of words that share the
  *   most with the fact's statement, verbatim;
  * - the gate: a fact placed twice, a fact placed nowhere, a group of one, a
- *   conflict pair outside its group, a pair that is one passage; a
+ *   conflict pair outside its group, a pair that is one sentence; a
  *   wrapping-up outcome is accepted with its unplaced facts stamped;
  * - the cache key moves with each named input and with nothing else;
- * - `read_context` shows a fact's passage in its document;
- * - a pointer's passage key, and the fold of findings that name the same two
- *   passages: every note kept, the recommendation as confident as the members
- *   that agree with it, the passage carried through re-anchoring;
+ * - `read_context` shows a fact's sentence in its document;
+ * - a pointer's sentence key, and the fold of conflicts that name the same two
+ *   sentences: every note kept, the recommendation as confident as the members
+ *   that agree with it, the sentence carried through re-anchoring;
  * - through the real `runSpecScanSessions`, from docs to corpus: a conflict
- *   folds into an overlap entry whose verbatim quotes the pointer verifier
+ *   folds into an conflict entry whose verbatim quotes the pointer verifier
  *   anchors where they are; a conflict inside one doc; the same conflict
  *   found by an area batch and a subject batch folds to one; several
  *   conflicts between the same two sections stay several; two fact pairs on
- *   the same two passages fold into one that keeps both notes; a failed
+ *   the same two sentences fold into one that keeps both notes; a failed
  *   session lands its docs in `notReached`; the checklist carries the new
  *   steps.
  */
@@ -43,7 +43,7 @@ import { CURATE_DOC_SESSION_KIND } from '../../packages/core/src/services/spec-s
 import { SETTLE_AREAS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-areas'
 import { RECORD_FACTS_SESSION_KIND, type RecordedFact } from '../../packages/core/src/services/spec-scan/record-facts'
 import { SETTLE_SUBJECTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-subjects'
-import { buildCorpusConflicts, passageKey } from '../../packages/shared/src/spec/overlap-resolution.js'
+import { buildCorpusConflicts, sentenceKey } from '../../packages/shared/src/spec/conflict-resolution.js'
 import {
   COMPARE_FACTS_BUDGET,
   COMPARE_FACTS_SESSION_KIND,
@@ -58,7 +58,7 @@ import {
   groupsRefusal,
   evidenceWindow,
   factPointer,
-  foldSamePassages,
+  foldSameSentences,
   planCompareBatches,
   type CompareBatch,
   type CompareItem,
@@ -66,14 +66,14 @@ import {
 } from '../../packages/core/src/services/spec-scan/compare-facts'
 import { instructionsFingerprint } from '../../packages/core/src/services/spec-scan/tools'
 import {
-  splitDocUnits,
-  verifyOverlapSections,
+  splitDocSentences,
+  verifyConflictSides,
   writeDecisions,
   type DecisionsFile,
   type DocCandidate,
 } from '../../packages/spec-consolidator/src/index.js'
 import { docPathOf, malformedFailure, memoryPersistence, outcome, stubDriver, type StubCall } from './spec-scan-session-stub'
-import { compare, compareBriefing, record, settle, useTool, type BriefedFact, type UnitFact } from './spec-scan-facts-stub'
+import { compare, compareBriefing, record, settle, useTool, type BriefedFact, type SentenceFact } from './spec-scan-facts-stub'
 
 // ---------------------------------------------------------------------------
 // fixtures
@@ -93,24 +93,24 @@ function doc(ref: string, content: string, over: Partial<DocCandidate> = {}): Do
   }
 }
 
-/** Facts of `body`, one per spec: the units it cites, its subject, statement and areas. */
+/** Facts of `body`, one per spec: the sentences it cites, its subject, statement and areas. */
 function factsOf(
   ref: string,
   body: string,
-  specs: ReadonlyArray<{ units: number[]; subject: string; statement?: string; areas: string[] }>,
+  specs: ReadonlyArray<{ sentences: number[]; subject: string; statement?: string; areas: string[] }>,
 ): RecordedFact[] {
-  const units = splitDocUnits(body)
+  const sentences = splitDocSentences(body)
   return specs.map((spec) => ({
     doc: ref,
-    units: spec.units.map((n) => units[n - 1]!),
+    sentences: spec.sentences.map((n) => sentences[n - 1]!),
     subject: spec.subject,
-    statement: spec.statement ?? `${spec.subject} is stated in unit ${spec.units.join(',')}.`,
+    statement: spec.statement ?? `${spec.subject} is stated in sentence ${spec.sentences.join(',')}.`,
     areas: spec.areas,
   }))
 }
 
 const sentences = (n: number, word: string): string => Array.from({ length: n }, (_, i) => `${word} ${i} holds.`).join('\n\n')
-const ids = (batch: CompareBatch): string[] => batch.facts.map((bf) => `${bf.id} ${bf.fact.doc}#${bf.fact.units[0]!.n}`)
+const ids = (batch: CompareBatch): string[] => batch.facts.map((bf) => `${bf.id} ${bf.fact.doc}#${bf.fact.sentences[0]!.n}`)
 const bySubject = (fact: RecordedFact): string => fact.subject
 
 // ---------------------------------------------------------------------------
@@ -123,16 +123,16 @@ describe('planCompareBatches', () => {
   /** a/x: 3 facts (one also in a/y), a/y: 2, a/z: 4; "Export my data" in a/x and a/z. */
   const FACTS: RecordedFact[] = [
     ...factsOf('docs/a.md', A, [
-      { units: [1], subject: 'Export my data', areas: ['a/x'] },
-      { units: [2], subject: 'PDF export', areas: ['a/x'] },
-      { units: [3], subject: 'PDF export', areas: ['a/x', 'a/y'] },
-      { units: [4], subject: 'Themes', areas: ['a/y'] },
+      { sentences: [1], subject: 'Export my data', areas: ['a/x'] },
+      { sentences: [2], subject: 'PDF export', areas: ['a/x'] },
+      { sentences: [3], subject: 'PDF export', areas: ['a/x', 'a/y'] },
+      { sentences: [4], subject: 'Themes', areas: ['a/y'] },
     ]),
     ...factsOf('docs/b.md', B, [
-      { units: [1], subject: 'Export my data', areas: ['a/z'] },
-      { units: [2], subject: 'Webhooks', areas: ['a/z'] },
-      { units: [3], subject: 'Webhooks', areas: ['a/z'] },
-      { units: [4], subject: 'API keys', areas: ['a/z'] },
+      { sentences: [1], subject: 'Export my data', areas: ['a/z'] },
+      { sentences: [2], subject: 'Webhooks', areas: ['a/z'] },
+      { sentences: [3], subject: 'Webhooks', areas: ['a/z'] },
+      { sentences: [4], subject: 'API keys', areas: ['a/z'] },
     ]),
   ]
 
@@ -144,7 +144,7 @@ describe('planCompareBatches', () => {
     expect(splitAreas.size).toBe(0)
   })
 
-  it('orders a batch by settled subject, then doc, then unit, and numbers it F1 on', () => {
+  it('orders a batch by settled subject, then doc, then sentence, and numbers it F1 on', () => {
     const [first] = planCompareBatches(FACTS, bySubject, 5).batches
     expect(ids(first!)).toEqual(['F1 docs/a.md#1', 'F2 docs/a.md#2', 'F3 docs/a.md#3', 'F4 docs/a.md#4'])
     expect(first!.facts.map((bf) => bf.subject)).toEqual(['Export my data', 'PDF export', 'PDF export', 'Themes'])
@@ -163,14 +163,14 @@ describe('planCompareBatches', () => {
 
   it('joins one control named two ways in two areas into one family, and compares them together', () => {
     const builder = factsOf('docs/builder.md', sentences(4, 'Builder'), [
-      { units: [1], subject: 'Download PDF button', areas: ['core/builder-layout'] },
-      { units: [2], subject: 'Sidebar', areas: ['core/builder-layout'] },
-      { units: [3], subject: 'Sidebar', areas: ['core/builder-layout'] },
+      { sentences: [1], subject: 'Download PDF button', areas: ['core/builder-layout'] },
+      { sentences: [2], subject: 'Sidebar', areas: ['core/builder-layout'] },
+      { sentences: [3], subject: 'Sidebar', areas: ['core/builder-layout'] },
     ])
     const exports = factsOf('docs/exports.md', sentences(4, 'Exports'), [
-      { units: [1], subject: 'Download button', areas: ['core/exports'] },
-      { units: [2], subject: 'Download dialog', areas: ['core/exports'] },
-      { units: [3], subject: 'Export history', areas: ['core/exports'] },
+      { sentences: [1], subject: 'Download button', areas: ['core/exports'] },
+      { sentences: [2], subject: 'Download dialog', areas: ['core/exports'] },
+      { sentences: [3], subject: 'Export history', areas: ['core/exports'] },
     ])
     const plan = planCompareBatches([...builder, ...exports], bySubject, 3)
     expect(plan.batches.filter((b) => b.kind === 'area').map((b) => (b.kind === 'area' ? b.areas : []))).toEqual([
@@ -186,7 +186,7 @@ describe('planCompareBatches', () => {
 
   it('joins no family by a word more subject names share than the vocabulary cap', () => {
     const many = Array.from({ length: SUBJECT_FAMILY_DF_CAP + 1 }, (_, i) => ({
-      units: [i + 1],
+      sentences: [i + 1],
       subject: `Panel${String.fromCharCode(97 + i)} settings`,
       areas: [i % 2 === 0 ? 'core/even' : 'core/odd'],
     }))
@@ -200,7 +200,7 @@ describe('planCompareBatches', () => {
       'docs/big.md',
       sentences(9, 'Gamma'),
       Array.from({ length: 9 }, (_, i) => ({
-        units: [i + 1],
+        sentences: [i + 1],
         subject: i < 5 ? 'Retention window' : 'Audit log',
         statement: i < 5 ? `The retention window is ${i + 1} days.` : `The audit log keeps entry ${i}.`,
         areas: ['a/big'],
@@ -253,13 +253,13 @@ Export my data is under Settings, Danger Zone. It runs weekly.
 function gateBatch(): CompareBatch {
   const facts = [
     ...factsOf('docs/export.md', EXPORT_MD, [
-      { units: [1], subject: 'Export my data', areas: ['core/exports'] },
-      { units: [2], subject: 'Export schedule', areas: ['core/exports'] },
-      { units: [2], subject: 'Export schedule', statement: 'Exports run every night.', areas: ['core/exports'] },
+      { sentences: [1], subject: 'Export my data', areas: ['core/exports'] },
+      { sentences: [2], subject: 'Export schedule', areas: ['core/exports'] },
+      { sentences: [2], subject: 'Export schedule', statement: 'Exports run every night.', areas: ['core/exports'] },
     ]),
     ...factsOf('docs/privacy.md', PRIVACY_MD, [
-      { units: [1], subject: 'Export my data', areas: ['core/exports'] },
-      { units: [2], subject: 'Export schedule', areas: ['core/exports'] },
+      { sentences: [1], subject: 'Export my data', areas: ['core/exports'] },
+      { sentences: [2], subject: 'Export schedule', areas: ['core/exports'] },
     ]),
   ]
   return planCompareBatches(facts, bySubject).batches[0]!
@@ -292,12 +292,12 @@ describe('the comparison gate', () => {
     alone: [],
   }
 
-  it('lets a complete comparison stand, its conflicts as findings with verbatim quotes', () => {
+  it('lets a complete comparison stand, its conflicts as conflicts with verbatim quotes', () => {
     const check = checkGroups(COMPLETE, batch)
     expect(check.problems).toEqual([])
     expect(check.unplaced).toEqual([])
     expect(groupsRefusal(check)).toBeUndefined()
-    expect(check.findings[0]).toEqual({
+    expect(check.conflicts[0]).toEqual({
       docs: ['docs/export.md', 'docs/privacy.md'],
       note: 'F1 vs F2',
       sections: [
@@ -305,13 +305,13 @@ describe('the comparison gate', () => {
           doc: 'docs/export.md',
           heading: 'Where',
           quote: 'Export my data is under Settings, Account.',
-          passage: passageKey('Export my data is under Settings, Account.'),
+          sentence: sentenceKey('Export my data is under Settings, Account.'),
         },
         {
           doc: 'docs/privacy.md',
           heading: 'Where',
           quote: 'Export my data is under Settings, Danger Zone.',
-          passage: passageKey('Export my data is under Settings, Danger Zone.'),
+          sentence: sentenceKey('Export my data is under Settings, Danger Zone.'),
         },
       ],
       review: REVIEW,
@@ -340,7 +340,7 @@ describe('the comparison gate', () => {
     expect(check.groups).toEqual([])
   })
 
-  it('refuses a conflict pair outside its group, and one that is a single passage', () => {
+  it('refuses a conflict pair outside its group, and one that is a single sentence', () => {
     const check = checkGroups(
       {
         groups: [
@@ -353,9 +353,9 @@ describe('the comparison gate', () => {
     )
     expect(check.problems).toEqual([
       'groups[0].conflicts[0] pairs F5, not in this group; a conflict is between two facts of its group',
-      'groups[1].conflicts[0]: F3 and F4 are one passage of docs/export.md; a conflict is between two passages (two documents, or two places in one)',
+      'groups[1].conflicts[0]: F3 and F4 are one sentence of docs/export.md; a conflict is between two sentences (two documents, or two places in one)',
     ])
-    expect(check.findings).toEqual([])
+    expect(check.conflicts).toEqual([])
   })
 
   it('refuses a conflict group that names no pair, and an agreeing group that names one', () => {
@@ -373,7 +373,7 @@ describe('the comparison gate', () => {
       'groups[0] is a conflict and names no pair of facts that cannot both be true',
       'groups[1] agrees and names conflicts; give it the verdict "conflict", or drop them',
     ])
-    expect(check.findings).toEqual([])
+    expect(check.conflicts).toEqual([])
   })
 
   it('refuses a conflict group that leaves a fact in neither a pair nor "consistent"', () => {
@@ -407,31 +407,31 @@ describe('the comparison gate', () => {
 })
 
 describe('a pointer\'s evidence', () => {
-  it('takes the cited unit that shares the most words with the statement, not the first one', () => {
+  it('takes the cited sentence that shares the most words with the statement, not the first one', () => {
     const body = 'You can:\n\n- Export your resume as a PDF.\n- Share a public link.\n'
     const [fact] = factsOf('docs/export.md', body, [
-      { units: [1, 2], subject: 'PDF export', statement: 'A resume can be exported as a PDF.', areas: ['core/exports'] },
+      { sentences: [1, 2], subject: 'PDF export', statement: 'A resume can be exported as a PDF.', areas: ['core/exports'] },
     ])
     expect(factPointer(fact!)).toEqual({
       doc: 'docs/export.md',
       heading: null,
       quote: 'Export your resume as a PDF.',
-      passage: passageKey('Export your resume as a PDF.'),
+      sentence: sentenceKey('Export your resume as a PDF.'),
     })
   })
 
-  it('names its passage by the whole unit it quotes, never by the unit\'s number', () => {
+  it('names its sentence by the whole sentence it quotes, never by the sentence\'s number', () => {
     const body = '## Where\n\nExport my data is under Settings, Account. It runs nightly.\n'
-    const [fact] = factsOf('docs/export.md', body, [{ units: [2], subject: 'Export schedule', statement: 'Exports run nightly.', areas: ['core/exports'] }])
-    expect(factPointer(fact!).passage).toBe(passageKey('It runs nightly.'))
-    // An edit above the passage renumbers it and leaves its key.
+    const [fact] = factsOf('docs/export.md', body, [{ sentences: [2], subject: 'Export schedule', statement: 'Exports run nightly.', areas: ['core/exports'] }])
+    expect(factPointer(fact!).sentence).toBe(sentenceKey('It runs nightly.'))
+    // An edit above the sentence renumbers it and leaves its key.
     const edited = `## Intro\n\nA new first sentence.\n\n${body}`
-    const [moved] = factsOf('docs/export.md', edited, [{ units: [3], subject: 'Export schedule', statement: 'Exports run nightly.', areas: ['core/exports'] }])
-    expect(moved!.units[0]!.n).not.toBe(fact!.units[0]!.n)
-    expect(factPointer(moved!).passage).toBe(factPointer(fact!).passage)
+    const [moved] = factsOf('docs/export.md', edited, [{ sentences: [3], subject: 'Export schedule', statement: 'Exports run nightly.', areas: ['core/exports'] }])
+    expect(moved!.sentences[0]!.n).not.toBe(fact!.sentences[0]!.n)
+    expect(factPointer(moved!).sentence).toBe(factPointer(fact!).sentence)
   })
 
-  it('takes the window of words that shares the most with the statement, as an exact slice of the unit', () => {
+  it('takes the window of words that shares the most with the statement, as an exact slice of the sentence', () => {
     const lines = [
       '# Generated stack for local testing, with PostgreSQL and SeaweedFS beside the server.',
       'services:',
@@ -448,36 +448,36 @@ describe('a pointer\'s evidence', () => {
     ]
     const body = `## Compose\n\n\`\`\`yaml\n${lines.join('\n')}\n\`\`\`\n`
     const [fact] = factsOf('docs/compose.md', body, [
-      { units: [1], subject: '/app/data volume', statement: 'The example Compose file bind-mounts ./data at /app/data.', areas: ['core/self-hosting'] },
+      { sentences: [1], subject: '/app/data volume', statement: 'The example Compose file bind-mounts ./data at /app/data.', areas: ['core/self-hosting'] },
     ])
-    const unit = fact!.units[0]!
-    expect(unit.kind).toBe('code')
+    const sentence = fact!.sentences[0]!
+    expect(sentence.kind).toBe('code')
     const pointer = factPointer(fact!)
     expect(pointer.heading).toBe('Compose')
-    expect(unit.text).toContain(pointer.quote)
+    expect(sentence.text).toContain(pointer.quote)
     expect(pointer.quote).toContain('./data:/app/data')
     expect(pointer.quote.trim().split(/\s+/).length).toBeLessThanOrEqual(POINTER_QUOTE_WORDS)
     // Longer than a quote, so a window of it, and not the block's first words, which say nothing about the volume.
-    expect(unit.text.split(/\s+/).length).toBeGreaterThan(POINTER_QUOTE_WORDS)
+    expect(sentence.text.split(/\s+/).length).toBeGreaterThan(POINTER_QUOTE_WORDS)
     expect(pointer.quote.startsWith('# Generated')).toBe(false)
   })
 
-  it('is deterministic: on a tie the first unit, and the earliest window', () => {
+  it('is deterministic: on a tie the first sentence, and the earliest window', () => {
     const words = Array.from({ length: 60 }, (_, i) => `w${i}`).join(' ')
     expect(evidenceWindow(words, new Set(['nothing']))).toBe(words.split(' ').slice(0, POINTER_QUOTE_WORDS).join(' '))
     expect(evidenceWindow('Short and whole.', new Set())).toBe('Short and whole.')
     const [fact] = factsOf('docs/a.md', 'First line here.\n\nSecond line here.\n', [
-      { units: [1, 2], subject: 'Lines', statement: 'Nothing in common.', areas: ['core/a'] },
+      { sentences: [1, 2], subject: 'Lines', statement: 'Nothing in common.', areas: ['core/a'] },
     ])
     expect(factPointer(fact!).quote).toBe('First line here.')
   })
 })
 
-describe('findings on the same two passages', () => {
-  const at = (doc: string, quote: string) => ({ doc, heading: 'Expense list', quote, passage: passageKey(quote) })
+describe('conflicts on the same two sentences', () => {
+  const at = (doc: string, quote: string) => ({ doc, heading: 'Expense list', quote, sentence: sentenceKey(quote) })
   const api = at('docs/api.md', 'Expenses are listed 20 per page, newest first.')
   const app = at('docs/app.md', 'Expenses are listed 50 per page, oldest first.')
-  const finding = (
+  const conflict = (
     note: string,
     action: 'pick-a' | 'pick-b' | 'fix-doc' | 'dismiss',
     confidence: 'low' | 'medium' | 'high' | undefined,
@@ -493,11 +493,11 @@ describe('findings on the same two passages', () => {
   })
 
   it('keeps every distinct note and explanation, in one order whatever order the sessions finished in', () => {
-    const size = finding('page size differs', 'pick-a', 'high')
-    const sort = finding('sort order differs', 'pick-a', 'medium')
-    const again = finding('page size differs', 'pick-a', 'high')
-    const folded = foldSamePassages([sort, size, again])
-    expect(foldSamePassages([size, again, sort])).toEqual(folded)
+    const size = conflict('page size differs', 'pick-a', 'high')
+    const sort = conflict('sort order differs', 'pick-a', 'medium')
+    const again = conflict('page size differs', 'pick-a', 'high')
+    const folded = foldSameSentences([sort, size, again])
+    expect(foldSameSentences([size, again, sort])).toEqual(folded)
     expect(folded.note).toBe(`page size differs${FOLDED_NOTE_SEPARATOR}sort order differs`)
     expect(folded.review.explanation).toBe('page size differs, explained. sort order differs, explained.')
     // As confident as the least confident member that agrees.
@@ -506,21 +506,21 @@ describe('findings on the same two passages', () => {
 
   it('reads a member listed the other way round from the lead\'s side', () => {
     // pick-b from app.md's side is pick-a from api.md's: the two agree.
-    const folded = foldSamePassages([finding('a', 'pick-a', 'high'), finding('b', 'pick-b', 'high', true)])
+    const folded = foldSameSentences([conflict('a', 'pick-a', 'high'), conflict('b', 'pick-b', 'high', true)])
     expect(folded.docs).toEqual(['docs/api.md', 'docs/app.md'])
     expect(folded.review.recommendation).toMatchObject({ action: 'pick-a', confidence: 'high' })
   })
 
   it('never lets a high pick decide a point another member would decide the other way', () => {
-    const folded = foldSamePassages([finding('a', 'pick-a', 'high'), finding('b', 'pick-b', 'high')])
+    const folded = foldSameSentences([conflict('a', 'pick-a', 'high'), conflict('b', 'pick-b', 'high')])
     expect(folded.review.recommendation).toMatchObject({ action: 'pick-a', confidence: 'low' })
     // A member with no grade leaves the fold with none, so nothing applies it unsupervised.
-    expect(foldSamePassages([finding('a', 'dismiss', 'high'), finding('b', 'dismiss', undefined)]).review.recommendation).not.toHaveProperty('confidence')
+    expect(foldSameSentences([conflict('a', 'dismiss', 'high'), conflict('b', 'dismiss', undefined)]).review.recommendation).not.toHaveProperty('confidence')
   })
 
-  it('carries the passage through a pointer the verifier re-anchors', () => {
+  it('carries the sentence through a pointer the verifier re-anchors', () => {
     const body = '# API\n\n## Paging\n\nNothing here.\n\n## Expense list\n\nExpenses are listed 20 per page, newest first.\n'
-    const [moved] = verifyOverlapSections({
+    const [moved] = verifyConflictSides({
       docs: ['docs/api.md', 'docs/app.md'],
       note: 'page size',
       sections: [{ ...api, heading: 'Paging' }],
@@ -539,22 +539,22 @@ describe('compareFactsCacheKey', () => {
     batch: planCompareBatches(facts, subjectOf).batches[0]!,
     docs: new Map(docs.map((d) => [d.path, d])),
   })
-  const base = (over: Partial<{ ref: string; body: string; units: number[]; subject: string; statement: string; areas: string[] }> = {}) =>
+  const base = (over: Partial<{ ref: string; body: string; sentences: number[]; subject: string; statement: string; areas: string[] }> = {}) =>
     factsOf(over.ref ?? 'docs/export.md', over.body ?? EXPORT_MD, [
       {
-        units: over.units ?? [1],
+        sentences: over.sentences ?? [1],
         subject: over.subject ?? 'Export my data',
         statement: over.statement ?? 'Export my data is under Settings, Account.',
         areas: over.areas ?? ['core/exports'],
       },
-      { units: [3], subject: 'Export formats', areas: ['core/exports'] },
+      { sentences: [3], subject: 'Export formats', areas: ['core/exports'] },
     ])
   const key = (it: CompareItem, instructions: string[] = []) => compareFactsCacheKey(it, [instructionsFingerprint(instructions)])
   const KEY = key(item(base()))
 
   it('moves with every named input', () => {
     expect(key(item(base({ ref: 'docs/export-2.md' })))).not.toBe(KEY)
-    expect(key(item(base({ units: [2] })))).not.toBe(KEY)
+    expect(key(item(base({ sentences: [2] })))).not.toBe(KEY)
     expect(key(item(base({ body: EXPORT_MD.replace('Settings, Account', 'Settings, Profile') })))).not.toBe(KEY)
     expect(key(item(base({ subject: 'Data export' })))).not.toBe(KEY)
     expect(key(item(base({ statement: 'Export my data sits under Settings.' })))).not.toBe(KEY)
@@ -569,7 +569,7 @@ describe('compareFactsCacheKey', () => {
     const tracked = doc('docs/export.md', `---\nstatus: In Progress\n---\n\n${EXPORT_MD}`)
     const facts = base({ body: tracked.content! })
     expect(key(item(facts, [tracked]))).not.toBe(key(item(facts, [{ ...tracked, content: tracked.content!.replace('In Progress', 'Done') }])))
-    // An appended section and a renamed heading change no unit a fact cites.
+    // An appended section and a renamed heading change no sentence a fact cites.
     const edited = EXPORT_MD.replace('## Formats', '## File formats') + '\n## Later\n\nA new sentence.\n'
     expect(key(item(base({ body: edited })))).toBe(KEY)
   })
@@ -582,14 +582,14 @@ describe('the comparison session', () => {
   const def = compareFactsSessionDef({ batch, docs: new Map([exportDoc, privacyDoc].map((d) => [d.path, d])) })
   const ctx = { workItem: '', signal: new AbortController().signal, dispatchChild: () => Promise.reject(new Error('unused')) }
 
-  it('has closed tools only: the passages of its own facts, and the gate', () => {
+  it('has closed tools only: the sentences of its own facts, and the gate', () => {
     expect(def.computer).toBeUndefined()
     expect(def.tools.map((t) => t.name)).toEqual(['read_context', 'check_groups'])
     expect(def.outcomePrecondition?.tool).toBe('check_groups')
   })
 
-  it('briefs each earlier conflict between its docs, quoting the passages of one that names them', () => {
-    const where = (quote: string, doc: string) => ({ doc, heading: 'Where', quote, passage: passageKey(quote) })
+  it('briefs each earlier conflict between its docs, quoting the sentences of one that names them', () => {
+    const where = (quote: string, doc: string) => ({ doc, heading: 'Where', quote, sentence: sentenceKey(quote) })
     const keyed = {
       docs: ['docs/export.md', 'docs/privacy.md'] as [string, string],
       note: 'where',
@@ -606,7 +606,7 @@ describe('the comparison session', () => {
     expect(briefing).toContain('  2. docs/export.md · Where  <->  docs/privacy.md · Where  : schedule')
   })
 
-  it('reads the section around each fact, one block per passage', async () => {
+  it('reads the section around each fact, one block per sentence', async () => {
     const read = def.tools[0]!
     const result = await read.execute({ facts: ['F1', 'F3', 'F2'] }, ctx)
     expect(result.isError).toBeUndefined()
@@ -654,7 +654,7 @@ function writeDocs(files: Record<string, string>): void {
 }
 
 /** Where Export my data lives, by the words a sentence uses for it; every other sentence states nothing. */
-const exportFact: UnitFact = ({ line }) =>
+const exportFact: SentenceFact = ({ line }) =>
   /Export my data is under/.test(line) ? { subject: 'Export my data', statement: line } : null
 
 /** Two facts conflict when both place Export my data, in different places. */
@@ -663,7 +663,7 @@ const differentPlace = (a: BriefedFact, b: BriefedFact): boolean =>
 
 interface ScanScript {
   tags: Record<string, Array<{ product: string; concern: string }>>
-  factOf?: UnitFact
+  factOf?: SentenceFact
   compareWith?: (call: StubCall) => DriverResult | Promise<DriverResult>
 }
 
@@ -694,7 +694,6 @@ async function scan(script: ScanScript) {
     driver: async () => stub.driver,
     persistence: memoryPersistence().persistence,
     skipGit: true,
-    conflictMethod: 'facts',
     onFact: (step, line) => facts.push([step, line]),
   })
   return { result, stub, facts }
@@ -704,36 +703,36 @@ const EXPORTS = { product: 'core', concern: 'exports' }
 const USAGE = { inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheCreateTokens: 0, costUsd: 0, costSource: 'unpriced' as const }
 
 describe('a scan that compares facts, from docs to corpus', () => {
-  it('folds a conflict into an overlap entry whose verbatim quotes anchor where they are', async () => {
+  it('folds a conflict into an conflict entry whose verbatim quotes anchor where they are', async () => {
     writeDocs({ 'docs/export.md': EXPORT_MD, 'docs/privacy.md': PRIVACY_MD })
     const { result, stub, facts } = await scan({ tags: { 'docs/export.md': [EXPORTS], 'docs/privacy.md': [EXPORTS] } })
     expect(stub.kinds.filter((k) => k === COMPARE_FACTS_SESSION_KIND)).toHaveLength(1)
 
     const [area] = result.corpus.areas
     expect(area!.id).toBe('core/exports')
-    expect(area!.overlaps).toHaveLength(1)
-    const overlap = area!.overlaps[0]!
-    expect(overlap.docs).toEqual(['docs/export.md', 'docs/privacy.md'])
-    expect(overlap.sections).toEqual([
+    expect(area!.conflicts).toHaveLength(1)
+    const conflict = area!.conflicts[0]!
+    expect(conflict.docs).toEqual(['docs/export.md', 'docs/privacy.md'])
+    expect(conflict.sections).toEqual([
       {
         doc: 'docs/export.md',
         heading: 'Where',
         quote: 'Export my data is under Settings, Account.',
-        passage: passageKey('Export my data is under Settings, Account.'),
+        sentence: sentenceKey('Export my data is under Settings, Account.'),
       },
       {
         doc: 'docs/privacy.md',
         heading: 'Where',
         quote: 'Export my data is under Settings, Danger Zone.',
-        passage: passageKey('Export my data is under Settings, Danger Zone.'),
+        sentence: sentenceKey('Export my data is under Settings, Danger Zone.'),
       },
     ])
     // Verbatim by construction, so the verifier anchors each pointer where it already is.
     const bodies: Record<string, string> = { 'docs/export.md': EXPORT_MD, 'docs/privacy.md': PRIVACY_MD }
-    for (const section of overlap.sections) expect(bodies[section.doc]).toContain(section.quote)
-    expect(verifyOverlapSections({ docs: overlap.docs, note: overlap.note, sections: overlap.sections, bodyOf: (ref) => bodies[ref] })).toEqual(overlap.sections)
-    expect(overlap.review?.recommendation.action).toBe('fix-doc')
-    expect(result.stats.overlapFlags).toBe(1)
+    for (const section of conflict.sections) expect(bodies[section.doc]).toContain(section.quote)
+    expect(verifyConflictSides({ docs: conflict.docs, note: conflict.note, sections: conflict.sections, bodyOf: (ref) => bodies[ref] })).toEqual(conflict.sections)
+    expect(conflict.review?.recommendation.action).toBe('fix-doc')
+    expect(result.stats.conflictCount).toBe(1)
 
     expect(area!.comparison).toEqual({ facts: 2, groups: 1 })
     expect(result.corpus.comparison).toEqual({
@@ -745,20 +744,18 @@ describe('a scan that compares facts, from docs to corpus', () => {
       unplacedFacts: 0,
     })
     expect(facts).toContainEqual(['compare', 'core/exports: 2 facts, 1 group, 1 conflict'])
-    expect(facts).toContainEqual(['overlap', 'docs/export.md vs docs/privacy.md: docs/export.md and docs/privacy.md disagree on Export my data'])
+    expect(facts).toContainEqual(['conflicts', 'docs/export.md vs docs/privacy.md: docs/export.md and docs/privacy.md disagree on Export my data'])
     expect(facts).toContainEqual(['subjects', '1 subject name, nothing to settle'])
     // No skim signal and no unchecked pairs on this path.
-    expect(area!.sectionsOpened).toBeUndefined()
-    expect(area!.uncheckedPairs).toBeUndefined()
   })
 
-  it('folds a conflict inside one doc, its first passage side a', async () => {
+  it('folds a conflict inside one doc, its first sentence side a', async () => {
     const SETTINGS_MD = `# Settings\n\n## Account\n\nExport my data is under Settings, Account.\n\n## Danger Zone\n\nExport my data is under Settings, Danger Zone.\n`
     writeDocs({ 'docs/settings.md': SETTINGS_MD })
     const { result } = await scan({ tags: { 'docs/settings.md': [EXPORTS] } })
-    const overlap = result.corpus.areas[0]!.overlaps[0]!
-    expect(overlap.docs).toEqual(['docs/settings.md', 'docs/settings.md'])
-    expect(overlap.sections.map((s) => s.heading)).toEqual(['Account', 'Danger Zone'])
+    const conflict = result.corpus.areas[0]!.conflicts[0]!
+    expect(conflict.docs).toEqual(['docs/settings.md', 'docs/settings.md'])
+    expect(conflict.sections.map((s) => s.heading)).toEqual(['Account', 'Danger Zone'])
   })
 
   it('folds one conflict found by an area batch and by a subject batch into one', async () => {
@@ -775,10 +772,10 @@ describe('a scan that compares facts, from docs to corpus', () => {
     const compared: Array<{ kind: string; ids: string[] }> = []
     const { result, facts } = await scan({
       tags: { 'docs/a-bulk.md': [A], 'docs/b-bulk.md': [B], 'docs/export.md': [A], 'docs/shared.md': [A, B], 'docs/privacy.md': [B] },
-      factOf: (unit, ref) => {
-        if (/Export my data is under/.test(unit.line)) return { subject: 'Export my data', statement: unit.line }
-        const setting = /(Alpha|Beta) setting (\d+)/.exec(unit.line)
-        return setting ? { subject: `${setting[1]} setting ${setting[2]}`, statement: `${ref}: ${unit.line}` } : null
+      factOf: (sentence, ref) => {
+        if (/Export my data is under/.test(sentence.line)) return { subject: 'Export my data', statement: sentence.line }
+        const setting = /(Alpha|Beta) setting (\d+)/.exec(sentence.line)
+        return setting ? { subject: `${setting[1]} setting ${setting[2]}`, statement: `${ref}: ${sentence.line}` } : null
       },
       // Only export.md against shared.md is flagged, wherever the two meet.
       compareWith: (call) => {
@@ -793,18 +790,18 @@ describe('a scan that compares facts, from docs to corpus', () => {
       { kind: 'area', ids: ['docs/privacy.md', 'docs/shared.md'] },
       { kind: 'subject', ids: ['docs/export.md', 'docs/privacy.md', 'docs/shared.md'] },
     ])
-    expect(facts.filter(([step, line]) => step === 'overlap' && line.startsWith('docs/export.md vs docs/shared.md'))).toHaveLength(2)
-    const overlaps = result.corpus.areas.flatMap((a) => a.overlaps)
-    expect(overlaps).toHaveLength(1)
-    expect(overlaps[0]!.docs).toEqual(['docs/export.md', 'docs/shared.md'])
-    expect(overlaps[0]!.areas).toEqual(['core/a'])
-    // The same two passages, named once, with the one note both batches wrote.
-    expect(overlaps[0]!.sections.map((s) => s.passage)).toEqual([
-      passageKey('Export my data is under Settings, Account.'),
-      passageKey('Export my data is under Settings, Danger Zone.'),
+    expect(facts.filter(([step, line]) => step === 'conflicts' && line.startsWith('docs/export.md vs docs/shared.md'))).toHaveLength(2)
+    const conflicts = result.corpus.areas.flatMap((a) => a.conflicts)
+    expect(conflicts).toHaveLength(1)
+    expect(conflicts[0]!.docs).toEqual(['docs/export.md', 'docs/shared.md'])
+    expect(conflicts[0]!.areas).toEqual(['core/a'])
+    // The same two sentences, named once, with the one note both batches wrote.
+    expect(conflicts[0]!.sections.map((s) => s.sentence)).toEqual([
+      sentenceKey('Export my data is under Settings, Account.'),
+      sentenceKey('Export my data is under Settings, Danger Zone.'),
     ])
-    expect(overlaps[0]!.note).toBe('docs/export.md and docs/shared.md disagree on Export my data')
-    expect(facts).toContainEqual(['verify', 'docs/export.md vs docs/shared.md: 2 conflicts on the same two passages, folded into one'])
+    expect(conflicts[0]!.note).toBe('docs/export.md and docs/shared.md disagree on Export my data')
+    expect(facts).toContainEqual(['verify', 'docs/export.md vs docs/shared.md: 2 conflicts on the same two sentences, folded into one'])
     expect(result.corpus.comparison).toMatchObject({ subjectBatchFamilies: 1, subjectBatchFacts: 3, unplacedFacts: 0 })
   })
 
@@ -816,7 +813,7 @@ describe('a scan that compares facts, from docs to corpus', () => {
     /per page/.test(line) ? 'Expense page size' : /sorted/.test(line) ? 'Expense sort order' : /empty list/i.test(line) ? 'Empty expense list' : null
   const apiAgainstApp = (call: StubCall) => compare(call, (a, b) => a.doc === 'docs/api.md' && b.doc === 'docs/app.md')
 
-  it('files every conflict between the same two sections as an overlap of its own', async () => {
+  it('files every conflict between the same two sections as a conflict of its own', async () => {
     writeDocs({ 'docs/api.md': API_MD, 'docs/app.md': APP_MD })
     const { result } = await scan({
       tags: { 'docs/api.md': [EXPENSES], 'docs/app.md': [EXPENSES] },
@@ -826,22 +823,22 @@ describe('a scan that compares facts, from docs to corpus', () => {
       },
       compareWith: apiAgainstApp,
     })
-    const overlaps = result.corpus.areas.flatMap((a) => a.overlaps)
-    expect(overlaps).toHaveLength(3)
-    expect(overlaps.every((o) => o.sections.every((s) => s.heading === 'Expense list'))).toBe(true)
-    expect(new Set(overlaps.map((o) => o.sections.map((s) => s.passage).join())).size).toBe(3)
-    expect(overlaps.flatMap((o) => o.sections.filter((s) => s.doc === 'docs/app.md').map((s) => s.quote)).sort()).toEqual([
+    const conflicts = result.corpus.areas.flatMap((a) => a.conflicts)
+    expect(conflicts).toHaveLength(3)
+    expect(conflicts.every((o) => o.sections.every((s) => s.heading === 'Expense list'))).toBe(true)
+    expect(new Set(conflicts.map((o) => o.sections.map((s) => s.sentence).join())).size).toBe(3)
+    expect(conflicts.flatMap((o) => o.sections.filter((s) => s.doc === 'docs/app.md').map((s) => s.quote)).sort()).toEqual([
       'An empty list shows a message.',
       'Expenses are sorted oldest first.',
       'The list shows 50 expenses per page.',
     ])
-    expect(result.stats.overlapFlags).toBe(3)
+    expect(result.stats.conflictCount).toBe(3)
     // Read back, they stay three conflicts, each with its own id.
-    const conflicts = buildCorpusConflicts(result.corpus, {})
-    expect(new Set(conflicts.map((c) => c.id)).size).toBe(3)
+    const rows = buildCorpusConflicts(result.corpus, {})
+    expect(new Set(rows.map((c) => c.id)).size).toBe(3)
   })
 
-  it('folds two fact pairs on the same two passages into one conflict that keeps both notes', async () => {
+  it('folds two fact pairs on the same two sentences into one conflict that keeps both notes', async () => {
     writeDocs({
       'docs/api.md': '# API\n\n## Expense list\n\nExpenses are listed 20 per page, newest first.\n',
       'docs/app.md': '# App\n\n## Expense list\n\nExpenses are listed 50 per page, oldest first.\n',
@@ -858,12 +855,12 @@ describe('a scan that compares facts, from docs to corpus', () => {
           : null,
       compareWith: apiAgainstApp,
     })
-    const overlaps = result.corpus.areas.flatMap((a) => a.overlaps)
-    expect(overlaps).toHaveLength(1)
-    expect(overlaps[0]!.note).toBe(
+    const conflicts = result.corpus.areas.flatMap((a) => a.conflicts)
+    expect(conflicts).toHaveLength(1)
+    expect(conflicts[0]!.note).toBe(
       `docs/api.md and docs/app.md disagree on Expense page size${FOLDED_NOTE_SEPARATOR}docs/api.md and docs/app.md disagree on Expense sort order`,
     )
-    expect(facts).toContainEqual(['verify', 'docs/api.md vs docs/app.md: 2 conflicts on the same two passages, folded into one'])
+    expect(facts).toContainEqual(['verify', 'docs/api.md vs docs/app.md: 2 conflicts on the same two sentences, folded into one'])
   })
 
   it('lands a failed comparison\'s docs in their areas\' notReached', async () => {
@@ -874,7 +871,7 @@ describe('a scan that compares facts, from docs to corpus', () => {
     })
     const [area] = result.corpus.areas
     expect(area!.notReached).toEqual(['docs/export.md', 'docs/privacy.md'])
-    expect(area!.overlaps).toEqual([])
+    expect(area!.conflicts).toEqual([])
     expect(area!.comparison).toEqual({ facts: 0, groups: 0 })
     expect(facts).toContainEqual(['compare', 'core/exports: session failed, its 2 facts from 2 docs left uncompared'])
     expect(result.stats.llmFailures).toEqual([expect.objectContaining({ stage: COMPARE_FACTS_SESSION_KIND, failures: 1 })])
@@ -905,7 +902,7 @@ describe('a scan that compares facts, from docs to corpus', () => {
     const { result, stub, facts } = await scan({ tags })
     expect(stub.kinds).toEqual([])
     expect(result.noChanges).toBe(true)
-    expect(result.corpus.areas[0]!.overlaps).toHaveLength(1)
+    expect(result.corpus.areas[0]!.conflicts).toHaveLength(1)
     expect(facts).toContainEqual(['compare', 'core/exports: 2 facts, 1 group, 1 conflict, from cache'])
   })
 
@@ -930,13 +927,13 @@ describe('a scan that compares facts, from docs to corpus', () => {
       ['record', 'Recording facts', 'done'],
       ['subjects', 'Settling subjects', 'done'],
       ['compare', 'Comparing facts', 'done'],
-      ['overlap', 'Flagging overlaps', 'done'],
+      ['conflicts', 'Finding conflicts', 'done'],
       ['verify', 'Verifying conflicts', 'done'],
     ])
     const step = (key: string) => steps.find((s) => s.key === key)!
     expect(step('subjects').detail).toBe('1 name · 1 subject')
     expect(step('compare').facts).toEqual(['core/exports: 2 facts, 1 group, 1 conflict'])
-    expect(step('overlap').facts).toEqual(['docs/export.md vs docs/privacy.md: docs/export.md and docs/privacy.md disagree on Export my data'])
+    expect(step('conflicts').facts).toEqual(['docs/export.md vs docs/privacy.md: docs/export.md and docs/privacy.md disagree on Export my data'])
 
     const [stored] = await listStoredSessionRuns(repo, 'spec-scan')
     const block = KnownDisplayBlockSchema.parse(RunRecordSchema.parse(stored).display?.blocks[0])
@@ -947,7 +944,7 @@ describe('a scan that compares facts, from docs to corpus', () => {
       ['record', [RECORD_FACTS_SESSION_KIND]],
       ['subjects', [SETTLE_SUBJECTS_SESSION_KIND]],
       ['compare', [COMPARE_FACTS_SESSION_KIND]],
-      ['overlap', []],
+      ['conflicts', []],
       ['verify', []],
     ])
   })

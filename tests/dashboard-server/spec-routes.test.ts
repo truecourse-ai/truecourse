@@ -98,7 +98,7 @@ async function seedWorkspaceCorpus(
 ): Promise<void> {
   const ref = (name: string) => `context/repo-src/docs/${name}`;
   await store.saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', {
-    version: 3,
+    version: 5,
     generatedAt: '2026-01-01T00:00:00Z',
     docs: [
       { ref: ref('v1.md'), kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/appointments'], sourceId: 'repo-src', sourceKind: 'repository' },
@@ -110,14 +110,14 @@ async function seedWorkspaceCorpus(
         product: 'booking',
         concern: 'appointments',
         docRefs: [ref('v1.md'), ref('v2.md')],
-        overlaps: opts.conflict
+        conflicts: opts.conflict
           ? [
               {
                 docs: [ref('v1.md'), ref('v2.md')],
                 note: '24h vs 48h',
                 sections: [
-                  { doc: ref('v1.md'), heading: 'Cancellation' },
-                  { doc: ref('v2.md'), heading: 'Cancellation policy' },
+                  { doc: ref('v1.md'), heading: 'Cancellation', sentence: 's-v1' },
+                  { doc: ref('v2.md'), heading: 'Cancellation policy', sentence: 's-v2' },
                 ],
               },
             ]
@@ -128,12 +128,14 @@ async function seedWorkspaceCorpus(
   });
 }
 
-/** The verdict that resolves the seeded workspace v1/v2 dispute. */
+/** The verdict that resolves the seeded workspace v1/v2 conflict. */
 const WS_VERDICT = {
   docA: 'context/repo-src/docs/v1.md',
   anchorA: 'Cancellation',
+  sentenceA: 's-v1',
   docB: 'context/repo-src/docs/v2.md',
   anchorB: 'Cancellation policy',
+  sentenceB: 's-v2',
   verdict: 'b',
 };
 
@@ -175,18 +177,18 @@ describe('corpus routes (spec-scan redesign)', () => {
    * the document bodies are files because the doc route reads them as such.
    */
   const seedCorpus = async (
-    overlaps: Array<{ docs: [string, string]; note: string }>,
+    conflicts: Array<{ docs: [string, string]; note: string }>,
     generatedAt = '2026-01-01T00:00:00Z',
   ): Promise<void> => {
     await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', {
-      version: 3,
+      version: 5,
       generatedAt,
       docs: [
         { ref: 'docs/v1.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/appointments'], sourceId: SOURCE },
         { ref: 'docs/v2.md', kind: 'prd', lastTouched: '2026-02-01T00:00:00Z', areaTags: ['booking/appointments'], sourceId: SOURCE },
       ],
       areas: [
-        { id: 'booking/appointments', product: 'booking', concern: 'appointments', docRefs: ['docs/v1.md', 'docs/v2.md'], overlaps },
+        { id: 'booking/appointments', product: 'booking', concern: 'appointments', docRefs: ['docs/v1.md', 'docs/v2.md'], conflicts },
       ],
       relations: [],
       skippedDocs: [{ ref: `context/${SOURCE}/archived.md`, reason: 'archived directory' }],
@@ -221,7 +223,7 @@ describe('corpus routes (spec-scan redesign)', () => {
     await seedCorpus([{ docs: ['docs/v1.md', 'docs/v2.md'], note: '24h vs 48h' }]);
     const res = await request(app).get(`/api/repos/${fixture.project.slug}/spec/corpus`).expect(200);
     expect(res.body.corpus.areas).toHaveLength(1);
-    expect(res.body.corpus.areas[0].overlaps).toHaveLength(1);
+    expect(res.body.corpus.areas[0].conflicts).toHaveLength(1);
   });
 
   it('GET /spec/doc → the markdown content; rejects traversal', async () => {
@@ -260,13 +262,13 @@ describe('corpus routes (spec-scan redesign)', () => {
 
     // A fresh scan drops the excluded doc → the pending signal clears.
     await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', {
-      version: 3,
+      version: 5,
       generatedAt: '2099-01-01T00:00:00Z',
       docs: [
         { ref: 'docs/v1.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/appointments'], sourceId: SOURCE },
       ],
       areas: [
-        { id: 'booking/appointments', product: 'booking', concern: 'appointments', docRefs: ['docs/v1.md'], overlaps: [] },
+        { id: 'booking/appointments', product: 'booking', concern: 'appointments', docRefs: ['docs/v1.md'], conflicts: [] },
       ],
       relations: [],
       skippedDocs: [{ ref: `context/${SOURCE}/archived.md`, reason: 'archived directory' }],
@@ -345,10 +347,10 @@ describe('spec docs-content staleness', () => {
   /** A one-doc workspace corpus curated at `generatedAt`. */
   const seed = (generatedAt: string): Promise<void> =>
     saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', {
-      version: 3,
+      version: 5,
       generatedAt,
       docs: [{ ref: DOC, kind: 'spec', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['core/persistence'], sourceId: SOURCE }],
-      areas: [{ id: 'core/persistence', product: 'core', concern: 'persistence', docRefs: [DOC], overlaps: [] }],
+      areas: [{ id: 'core/persistence', product: 'core', concern: 'persistence', docRefs: [DOC], conflicts: [] }],
       relations: [],
       skippedDocs: [],
     });

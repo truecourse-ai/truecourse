@@ -123,7 +123,7 @@ const LEGACY: ContextDocumentRow = {
 /** A workspace corpus with one area and one disagreement inside it. */
 const CORPUS = {
   corpus: {
-    version: 3,
+    version: 5,
     generatedAt: '2026-09-02T00:00:00.000Z',
     docs: [
       { ref: REFUNDS_REF, kind: 'prd', lastTouched: '', areaTags: ['acme/payments'] },
@@ -135,7 +135,7 @@ const CORPUS = {
         product: 'acme',
         concern: 'payments',
         docRefs: [REFUNDS_REF, PAYOUTS_REF],
-        overlaps: [
+        conflicts: [
           {
             docs: [REFUNDS_REF, PAYOUTS_REF],
             note: 'who owns the refund window',
@@ -485,7 +485,7 @@ describe('the conflicts of the workspace', () => {
 
     await waitFor(() =>
       expect(screen.getByTestId('address')).toHaveTextContent(
-        '/context/conflicts/overlap%3A%3A',
+        '/context/conflicts/conflict%3A%3A',
       ),
     );
     expect(
@@ -500,7 +500,7 @@ describe('the conflicts of the workspace', () => {
 
   it('says so at an address the corpus has no conflict at', async () => {
     serve();
-    renderAt('/context/conflicts/overlap%3A%3Anope%3A%3Aa%3A%3Ab%3A%3A0000');
+    renderAt('/context/conflicts/conflict%3A%3Anope%3A%3Aa%3A%3Ab%3A%3A0000');
     expect((await screen.findAllByText('No such conflict')).length).toBeGreaterThan(0);
   });
 });

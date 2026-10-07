@@ -1,7 +1,7 @@
 /**
- * SpecOverlapDetail, right-pane viewer for one flagged within-area overlap.
+ * SpecConflictDetail, right-pane viewer for one conflict.
  * Shows the two docs that may disagree (side-by-side, scrolled to + highlighting
- * the conflicting section) and the SECTION-scoped resolution: a
+ * the conflicting section) and the resolution: a
  * verdict on the disagreement, "<docA> is right" / "<docB> is right" (the loser's
  * disputed claim is suppressed at guard generate) or "Not a real conflict"
  * (dismissal). Verdicts are recorded instantly (no re-curate) and
@@ -11,8 +11,8 @@
  * opened inside a document.
  *
  * A contradiction inside ONE doc shows that doc in both columns, each scrolled
- * to and highlighting its own passage (the first passage left, the second
- * right), and names each side by its passage so the two verdicts differ.
+ * to and highlighting its own sentence (the first sentence left, the second
+ * right), and names each side by its sentence so the two verdicts differ.
  *
  * The pane reads top-down the way a guard test's does: the judge's ASSESSMENT
  * leads (reasoning and recommendation in one card), the verdict actions sit with
@@ -24,23 +24,23 @@ import { useEffect, useMemo, useState } from 'react';
 import { Check, ChevronDown, ChevronRight, Copy, Loader2 } from 'lucide-react';
 import {
   conflictVerdictFor,
-  disputeSides,
+  conflictSides,
   type ConflictResolutionLike,
   type CorpusConflict,
-  type OverlapSectionLike,
+  type ConflictSideLike,
 } from '@truecourse/shared';
 import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/dashboard/ui/hover-popover';
-import type { SpecConflictResolution, SpecCorpusResponse, SpecOverlap, SpecOverlapReview } from '@/lib/api';
+import type { SpecConflictResolution, SpecCorpusResponse, SpecConflict, SpecConflictReview } from '@/lib/api';
 import { SpecDocViewer } from '@/components/spec/SpecDocViewer';
 import { WorkspaceBadge } from '@/components/spec/WorkspaceBadge';
 import { createRepoSpecSource, useSpecSource } from '@/components/spec/spec-source';
-import { passageNames } from '@/lib/passage-names';
+import { sentenceNames } from '@/lib/sentence-names';
 
 /** Caption above a detail card, the label grammar the guard detail panes read in. */
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
 
-export function SpecOverlapDetail({
+export function SpecConflictDetail({
   repoId,
   area,
   docA,
@@ -56,13 +56,13 @@ export function SpecOverlapDetail({
   docA: string;
   docB: string;
   /**
-   * The dispute this pane is showing, already resolved from the URL's conflict id
+   * The conflict this pane is showing, already resolved from the URL's conflict id
    * by the page. Passed in rather than re-found here: a doc PAIR can carry several
-   * genuine disputes (disjoint sections), so any lookup by pair lands on the first
-   * one and this pane would read, and WRITE a verdict against, the wrong dispute.
+   * genuine conflicts (disjoint sections), so any lookup by pair lands on the first
+   * one and this pane would read, and WRITE a verdict against, the wrong conflict.
    * `undefined` when the id addresses nothing in the current corpus (a stale link).
    */
-  conflict: CorpusConflict<SpecOverlap> | undefined;
+  conflict: CorpusConflict<SpecConflict> | undefined;
   data: SpecCorpusResponse;
   /** A source that answers a verdict with the whole corpus; the page applies it. */
   onResolved: (res?: SpecCorpusResponse) => void;
@@ -95,48 +95,45 @@ export function SpecOverlapDetail({
   // Inert on a repo-local corpus.
   const isWorkspace = (ref: string): boolean => docMeta.get(ref)?.layer === 'workspace';
 
-  // The representative overlap of THIS dispute, carried by the conflict the
-  // shared derivation produced, so the note, the review and the section pointers
-  // all belong to the dispute the reader clicked rather than to whichever one
-  // happens to be listed first on the pair.
-  const overlap = conflict?.overlap;
-
+  // The conflict record the shared derivation produced, so the note, the review
+  // and the sides all belong to the conflict the reader clicked rather than to
+  // whichever one happens to be listed first on the pair.
   const derivedResolution = conflict?.resolution;
   const resolution = override !== undefined ? override : derivedResolution;
   const excludedRef = conflict?.excludedRef;
-  const note = overlap?.note;
-  const review = overlap?.review;
+  const note = conflict?.note;
+  const review = conflict?.review;
   const open = !resolution && !excludedRef;
 
-  // One doc on both sides: a contradiction inside it, its sides its passages.
+  // One doc on both sides: a contradiction inside it, its sides its sentences.
   const sameDoc = docA === docB;
 
   // The reviewer's action, resolved to a verdict against the PROPS' docA/docB
-  // (which may sit in either order vs overlap.docs): 'pick-a' backs the overlap's
+  // (which may sit in either order vs conflict.docs): 'pick-a' backs the conflict's
   // first doc, 'pick-b' the second, so key on the winning ref, not the letter.
-  // Inside one doc the letter is the passage, in the order the sections carry.
+  // Inside one doc the letter is the sentence, in the order the sections carry.
   // `null` = no apply shortcut (fix-doc, or an unreviewed flag).
   const recVerdict: 'a' | 'b' | 'dismissed' | null = (() => {
     const action = review?.recommendation.action;
-    if (!action || !overlap) return null;
+    if (!action || !conflict) return null;
     if (action === 'dismiss') return 'dismissed';
     if (action === 'fix-doc') return null;
     if (sameDoc) return action === 'pick-a' ? 'a' : 'b';
-    const winner = action === 'pick-a' ? overlap.docs[0] : overlap.docs[1];
+    const winner = action === 'pick-a' ? conflict.docs[0] : conflict.docs[1];
     return winner === docA ? 'a' : 'b';
   })();
 
-  // Each column's pointers: the doc's own, or inside one doc its passage.
-  const [pointersA, pointersB] = disputeSides(docA, docB, overlap?.sections);
-  // Heading pointers of a side (null pointers are preamble conflicts).
-  const headingsOf = (side: readonly OverlapSectionLike[]): string[] =>
+  // Each column's sides: the doc's own, or inside one doc its sentence.
+  const [pointersA, pointersB] = conflictSides(docA, docB, conflict?.sections ?? []);
+  // Headings of a side (a null heading is a preamble side).
+  const headingsOf = (side: readonly ConflictSideLike[]): string[] =>
     side.flatMap((s) => (s.heading !== null ? [s.heading] : []));
-  const preambleOf = (side: readonly OverlapSectionLike[]): boolean => side.some((s) => s.heading === null);
+  const preambleOf = (side: readonly ConflictSideLike[]): boolean => side.some((s) => s.heading === null);
 
-  // How each side is named: its doc, and inside one doc its passage too.
+  // How each side is named: its doc, and inside one doc its sentence too.
   const sideNames = (r: Pick<ConflictResolutionLike, 'docA' | 'anchorA' | 'docB' | 'anchorB'>): [string, string] => {
     if (r.docA !== r.docB) return [titleOf(r.docA), titleOf(r.docB)];
-    const [a, b] = passageNames(r.anchorA, r.anchorB);
+    const [a, b] = sentenceNames(r.anchorA, r.anchorB);
     return [`${titleOf(r.docA)} · ${a}`, `${titleOf(r.docB)} · ${b}`];
   };
   const [nameA, nameB] = sideNames({
@@ -146,9 +143,9 @@ export function SpecOverlapDetail({
     anchorB: pointersB[0]?.heading ?? null,
   });
 
-  // On open (or when the dispute changes), scroll each pane to its first
-  // conflicting section, and drop any stale optimistic verdict from a prior one.
-  // Keyed on the conflict ID, not the doc pair: two disputes on the SAME pair are
+  // On open (or when the conflict changes), scroll each pane to its first
+  // flagged section, and drop any stale optimistic verdict from a prior one.
+  // Keyed on the conflict ID, not the doc pair: two conflicts on the SAME pair are
   // distinct panes, and keying on the pair would leave the second showing the
   // first's scroll position and optimistic verdict.
   useEffect(() => {
@@ -169,10 +166,10 @@ export function SpecOverlapDetail({
   const source = ctxSource ?? repoSource;
 
   // Build the persisted verdict from the flagged sections: the heading per doc,
-  // and its passage when the conflict names one, is the identity a stored
+  // and its sentence when the conflict names one, is the identity a stored
   // verdict is matched by; the quote rides as evidence.
   const buildResolution = (verdict: 'a' | 'b' | 'dismissed'): SpecConflictResolution =>
-    conflictVerdictFor(overlap, docA, docB, verdict);
+    conflictVerdictFor(conflict ?? { sections: [] }, docA, docB, verdict);
 
   const recordVerdict = async (verdict: 'a' | 'b' | 'dismissed'): Promise<void> => {
     setBusy(verdict);
@@ -195,14 +192,12 @@ export function SpecOverlapDetail({
     if (!resolution) return;
     setBusy('undo');
     try {
-      // The verdict's own passages name it among the conflicts two sections can hold.
+      // The verdict's own sentences name it among the conflicts two sections can hold.
       const res = await source.deleteConflictResolution({
         docA: resolution.docA,
-        anchorA: resolution.anchorA,
-        ...(resolution.passageA !== undefined ? { passageA: resolution.passageA } : {}),
+        sentenceA: resolution.sentenceA,
         docB: resolution.docB,
-        anchorB: resolution.anchorB,
-        ...(resolution.passageB !== undefined ? { passageB: resolution.passageB } : {}),
+        sentenceB: resolution.sentenceB,
       });
       if ('corpus' in res) onResolved(res);
       else {
@@ -216,11 +211,11 @@ export function SpecOverlapDetail({
   };
 
   const winnerOf = (r: ConflictResolutionLike): string => sideNames(r)[r.verdict === 'a' ? 0 : 1];
-  // Newer or older says nothing about two passages of one doc.
+  // Newer or older says nothing about two sentences of one doc.
   const badgeOf = (doc: string): string | undefined => (sameDoc ? undefined : doc === newerDoc ? 'Newer' : 'Older');
 
   return (
-    <div data-testid="overlap-detail" className="flex h-full flex-col">
+    <div data-testid="conflict-detail" className="flex h-full flex-col">
       <div className="border-b border-border px-4 py-3">
         <div className="flex items-center gap-2 text-sm font-medium">
           <span className="flex items-center gap-1.5">
@@ -344,7 +339,7 @@ export function SpecOverlapDetail({
 }
 
 /** Human-readable label for the reviewer's recommended action. */
-function recActionLabel(action: SpecOverlapReview['recommendation']['action'], winner: string | null): string {
+function recActionLabel(action: SpecConflictReview['recommendation']['action'], winner: string | null): string {
   if (action === 'dismiss') return 'Dismiss, not a real conflict';
   if (action === 'fix-doc') return 'Fix the doc';
   return winner ? `${winner} is right` : action === 'pick-a' ? 'Pick the first doc' : 'Pick the second doc';
@@ -371,7 +366,7 @@ function ConflictAssessment({
   applying,
   onApply,
 }: {
-  review: SpecOverlapReview;
+  review: SpecConflictReview;
   winner: string | null;
   canApply: boolean;
   applyDisabled: boolean;

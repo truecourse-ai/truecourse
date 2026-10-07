@@ -78,7 +78,7 @@ export function groupByArea(
   const areas: Area[] = [...areaMembers.entries()]
     .map(([id, docRefs]): Area => {
       const { product, concern } = splitArea(id);
-      return { id, product, concern, docRefs: [...docRefs].sort(), overlaps: [] };
+      return { id, product, concern, docRefs: [...docRefs].sort(), conflicts: [] };
     })
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
@@ -105,4 +105,24 @@ function canonicalizeIds(idStrings: string[]): string[] {
     if (id) ids.add(id);
   }
   return [...ids].sort();
+}
+
+/**
+ * The one area a conflict between two docs is filed under. Deterministic: the
+ * lexicographically-first area BOTH docs carry; when they share none, the
+ * first area either carries. `null` only when neither doc landed in any area —
+ * such a conflict has no home in the corpus and is dropped.
+ */
+export function assignDocPairArea(
+  docA: string,
+  docB: string,
+  areasByDoc: ReadonlyMap<string, readonly string[]>,
+): string | null {
+  const a = areasByDoc.get(docA) ?? [];
+  const b = areasByDoc.get(docB) ?? [];
+  const bSet = new Set(b);
+  const shared = a.filter((id) => bSet.has(id)).sort();
+  if (shared.length > 0) return shared[0];
+  const union = [...new Set([...a, ...b])].sort();
+  return union[0] ?? null;
 }

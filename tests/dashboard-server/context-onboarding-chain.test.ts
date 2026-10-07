@@ -206,11 +206,11 @@ function corpusOf(docPaths: string[]): CuratedCorpus {
     sourceKind: 'repository',
   }));
   return {
-    version: 3,
+    version: 5,
     generatedAt: '2026-02-01T00:00:00.000Z',
     docs,
     areas: [
-      { id: 'p/c', product: 'p', concern: 'c', docRefs: docs.map((d) => d.ref), overlaps: [] },
+      { id: 'p/c', product: 'p', concern: 'c', docRefs: docs.map((d) => d.ref), conflicts: [] },
     ],
     skippedDocs: [],
   };

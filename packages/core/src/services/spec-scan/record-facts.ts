@@ -1,26 +1,26 @@
 /**
  * THE FACT RECORD — `spec-scan.record-facts`, one session per WINDOW of one
- * kept prose doc: consecutive sections of its units (`splitDocUnits`,
- * `planUnitWindows`). It is the first half of finding conflicts by comparing
+ * kept prose doc: consecutive sections of its sentences (`splitDocSentences`,
+ * `planSentenceWindows`). It is the first half of finding conflicts by comparing
  * facts: each session writes the LEDGER of one window, the concrete facts its
- * units state and the units it skips with a reason.
+ * sentences state and the sentences it skips with a reason.
  *
  * The session's whole attention is one window of one doc. It is briefed with
  * the doc's ref, title, lifecycle, outline and area tags, and the window's
- * units, numbered. Its tools are closed (`check_ledger`, and `read_section`
+ * sentences, numbered. Its tools are closed (`check_ledger`, and `read_section`
  * over the same doc only), so it runs on every driver; no other doc is
  * reachable.
  *
  * THE GATE is one function ({@link checkLedger}), run by `check_ledger` on a
  * draft, by `validateOutcome` on the outcome, and again by the run's fold:
- * every unit of the window is cited by a fact or lies inside a skip; a fact
- * cites 1 to {@link FACT_UNITS_MAX} units of the window, and one or more of the
- * doc's own area tags as curation wrote them; no unit is both cited and
+ * every sentence of the window is cited by a fact or lies inside a skip; a fact
+ * cites 1 to {@link FACT_SENTENCES_MAX} sentences of the window, and one or more of the
+ * doc's own area tags as curation wrote them; no sentence is both cited and
  * skipped; a skip for `other` carries a note. A wrapping-up session's outcome
  * is accepted as it stands, and what the gate finds uncovered there is
  * STAMPED into it as `unrecorded`, by the engine, before it is cached: the
  * model's own answer has no such field. An entry the gate refuses never
- * stands: its units count as unrecorded unless another entry covers them.
+ * stands: its sentences count as unrecorded unless another entry covers them.
  *
  * A fact carries the doc's RAW area tags; the run canonicalizes them through
  * the settled vocabulary exactly as it does the doc's own tags, so a change in
@@ -38,19 +38,19 @@ import {
 } from '@truecourse/agent-loop'
 import {
   FactSkipReasonSchema,
-  UNIT_SPLITTER_VERSION,
+  SENTENCE_SPLITTER_VERSION,
   docBody,
   headingOutline,
   normalizeArea,
-  planUnitWindows,
-  presentUnit,
-  splitDocUnits,
+  planSentenceWindows,
+  presentSentence,
+  splitDocSentences,
   type AreaTag,
   type DocCandidate,
   type DocLedgerCounts,
-  type DocUnit,
+  type DocSentence,
   type FactSkipReason,
-  type UnitWindow,
+  type SentenceWindow,
   type VocabMap,
 } from '@truecourse/spec-consolidator'
 import { canonicalDocTags, reconcileDocTagsWithPrior } from './settle-areas.js'
@@ -73,16 +73,16 @@ export const RECORD_FACTS_CACHE_NAME = 'consolidator/fact-record'
  * THE RECORD STEP'S VERSION, bumped by hand. A prompt change that fixes wrong
  * output bumps it in the same commit; any other prompt edit invalidates nothing.
  */
-export const RECORD_STAGE_VERSION = 1
+export const RECORD_STAGE_VERSION = 2
 
-/** Most units one window holds. */
-export const RECORD_WINDOW_UNITS = 120
+/** Most sentences one window holds. */
+export const RECORD_WINDOW_SENTENCES = 120
 
-/** Most characters of unit text one window holds. */
+/** Most characters of sentence text one window holds. */
 export const RECORD_WINDOW_CHARS = 24_000
 
-/** Most units one fact cites. */
-export const FACT_UNITS_MAX = 3
+/** Most sentences one fact cites. */
+export const FACT_SENTENCES_MAX = 3
 
 /**
  * The three numbers. A window is read whole from the briefing, so the work is
@@ -90,16 +90,16 @@ export const FACT_UNITS_MAX = 3
  * turn or two of `read_section` for context: about five turns, eight with
  * room for a second correction. One resume covers a window whose first check
  * comes back long. The ceiling is a context LEVEL: a full window briefed is
- * some 10k tokens, and each draft of a ledger over 120 units another 5k, so
+ * some 10k tokens, and each draft of a ledger over 120 sentences another 5k, so
  * three drafts and their checks sit well under it.
  */
 export const RECORD_FACTS_BUDGET: SessionBudget = { turns: 8, maxResumes: 1, tokenCeiling: 120_000 }
 
 const RecordedFactWireSchema = z
   .object({
-    units: z
+    sentences: z
       .array(z.number().int())
-      .describe(`The numbers of the units the fact is stated in: one, or up to ${FACT_UNITS_MAX} when it spans them.`),
+      .describe(`The numbers of the sentences the fact is stated in: one, or up to ${FACT_SENTENCES_MAX} when it spans them.`),
     subject: z
       .string()
       .describe(
@@ -115,10 +115,10 @@ type RecordedFactWire = z.infer<typeof RecordedFactWireSchema>
 
 const LedgerSkipWireSchema = z
   .object({
-    from: z.number().int().describe('The first unit of the range.'),
-    to: z.number().int().describe('The last unit of the range, inclusive: equal to `from` for one unit.'),
+    from: z.number().int().describe('The first sentence of the range.'),
+    to: z.number().int().describe('The last sentence of the range, inclusive: equal to `from` for one sentence.'),
     why: FactSkipReasonSchema,
-    note: z.string().optional().describe('What the units are. Required when `why` is "other".'),
+    note: z.string().optional().describe('What the sentences are. Required when `why` is "other".'),
   })
   .strict()
 type LedgerSkipWire = z.infer<typeof LedgerSkipWireSchema>
@@ -134,7 +134,7 @@ export type FactLedgerWire = z.infer<typeof FactLedgerWireSchema>
 
 export const FactLedgerSchema = FactLedgerWireSchema.extend({
   /**
-   * The window's units the gate found uncovered, ascending. STAMPED by the
+   * The window's sentences the gate found uncovered, ascending. STAMPED by the
    * engine when the outcome is accepted, before it is cached; empty unless the
    * session was wrapping up.
    */
@@ -149,9 +149,9 @@ export type FactLedger = z.infer<typeof FactLedgerSchema>
 /** One session's work: one window of one doc. */
 export interface RecordFactsItem {
   doc: DocCandidate
-  /** Every unit of the doc, numbered. */
-  units: readonly DocUnit[]
-  window: UnitWindow
+  /** Every sentence of the doc, numbered. */
+  sentences: readonly DocSentence[]
+  window: SentenceWindow
   /** How many windows the doc has. */
   windows: number
   /** The doc's area tags as curation wrote them, `product/concern`, sorted. */
@@ -199,18 +199,18 @@ export function factAreaIds(ctx: FactAreaContext, ref: string, raw: string): str
     .flatMap((t) => normalizeArea(t, ctx.vocab) ?? [])
 }
 
-/** A doc's units, and the windows the record step cuts them into. */
-export function recordWindows(doc: DocCandidate): { units: DocUnit[]; windows: UnitWindow[] } {
-  const units = splitDocUnits(docBody(doc))
-  return { units, windows: planUnitWindows(units, { maxUnits: RECORD_WINDOW_UNITS, maxChars: RECORD_WINDOW_CHARS }) }
+/** A doc's sentences, and the windows the record step cuts them into. */
+export function recordWindows(doc: DocCandidate): { sentences: DocSentence[]; windows: SentenceWindow[] } {
+  const sentences = splitDocSentences(docBody(doc))
+  return { sentences, windows: planSentenceWindows(sentences, { maxSentences: RECORD_WINDOW_SENTENCES, maxChars: RECORD_WINDOW_CHARS }) }
 }
 
-/** The record sessions one doc takes: one per window of its units. None for a doc with no area tag. */
+/** The record sessions one doc takes: one per window of its sentences. None for a doc with no area tag. */
 export function recordFactsItems(doc: DocCandidate, tags: readonly AreaTag[]): RecordFactsItem[] {
   const areas = rawAreaTags(tags)
   if (areas.length === 0) return []
-  const { units, windows } = recordWindows(doc)
-  return windows.map((window) => ({ doc, units, window, windows: windows.length, areas }))
+  const { sentences, windows } = recordWindows(doc)
+  return windows.map((window) => ({ doc, sentences, window, windows: windows.length, areas }))
 }
 
 /** The work item, as the session index and the transcript record it. */
@@ -220,16 +220,16 @@ export function recordFactsWorkItem(item: Pick<RecordFactsItem, 'doc' | 'window'
 
 /**
  * The cache key, over NAMED inputs only: the stage version, the splitter
- * version, the doc's ref, content hash and lifecycle, its frontmatter units
- * (the content hash leaves frontmatter out, and every line of it is a unit),
- * its raw area tags, the window's unit range, and the tail (the standing
+ * version, the doc's ref, content hash and lifecycle, its frontmatter sentences
+ * (the content hash leaves frontmatter out, and every line of it is a sentence),
+ * its raw area tags, the window's sentence range, and the tail (the standing
  * instructions).
  */
 export function recordFactsCacheKey(item: RecordFactsItem, extraParts: readonly string[] = []): string {
-  const frontmatter = item.units.flatMap((u) => (u.kind === 'frontmatter' ? [`${u.field ?? 'rest'}=${u.text}`] : []))
+  const frontmatter = item.sentences.flatMap((u) => (u.kind === 'frontmatter' ? [`${u.field ?? 'rest'}=${u.text}`] : []))
   return scanCacheKey([
     `record-facts-v${RECORD_STAGE_VERSION}`,
-    `units-v${UNIT_SPLITTER_VERSION}`,
+    `sentences-v${SENTENCE_SPLITTER_VERSION}`,
     item.doc.path,
     item.doc.contentHash,
     docLifecycleFingerprint(item.doc),
@@ -246,7 +246,7 @@ export function recordFactsCacheKey(item: RecordFactsItem, extraParts: readonly 
 
 /** What a ledger is checked against. */
 export interface LedgerScope {
-  window: UnitWindow
+  window: SentenceWindow
   /** The doc's raw area tags. */
   areas: readonly string[]
 }
@@ -254,37 +254,37 @@ export interface LedgerScope {
 export interface LedgerCheck {
   /** Each entry the gate refuses, and why. */
   problems: string[]
-  /** Window units no standing fact cites and no standing skip covers, ascending. */
+  /** Window sentences no standing fact cites and no standing skip covers, ascending. */
   uncovered: number[]
   /** The facts that stand, in ledger order. */
   facts: RecordedFactWire[]
-  /** Units of standing skips that no standing fact cites, per reason. */
+  /** Sentences of standing skips that no standing fact cites, per reason. */
   skipped: Partial<Record<FactSkipReason, number>>
 }
 
-/** `1-3, 5, 7-8`: ascending unit numbers as ranges, at most `max` of them. */
-export function unitRanges(units: readonly number[], max = Number.POSITIVE_INFINITY): string {
+/** `1-3, 5, 7-8`: ascending sentence numbers as ranges, at most `max` of them. */
+export function sentenceRanges(sentences: readonly number[], max = Number.POSITIVE_INFINITY): string {
   const ranges: string[] = []
   let shown = 0
-  for (let i = 0; i < units.length && ranges.length < max; ) {
+  for (let i = 0; i < sentences.length && ranges.length < max; ) {
     let j = i
-    while (j + 1 < units.length && units[j + 1] === units[j]! + 1) j++
-    ranges.push(i === j ? `${units[i]}` : `${units[i]}-${units[j]}`)
+    while (j + 1 < sentences.length && sentences[j + 1] === sentences[j]! + 1) j++
+    ranges.push(i === j ? `${sentences[i]}` : `${sentences[i]}-${sentences[j]}`)
     shown = j + 1
     i = j + 1
   }
-  const rest = units.length - shown
+  const rest = sentences.length - shown
   return rest > 0 ? `${ranges.join(', ')}, and ${rest} more` : ranges.join(', ')
 }
 
 function factProblems(fact: RecordedFactWire, scope: LedgerScope, known: ReadonlySet<string>): string[] {
   const { from, to } = scope.window
   const problems: string[] = []
-  if (fact.units.length === 0 || fact.units.length > FACT_UNITS_MAX) {
-    problems.push(`cites ${fact.units.length} units; a fact cites 1 to ${FACT_UNITS_MAX}`)
+  if (fact.sentences.length === 0 || fact.sentences.length > FACT_SENTENCES_MAX) {
+    problems.push(`cites ${fact.sentences.length} sentences; a fact cites 1 to ${FACT_SENTENCES_MAX}`)
   }
-  const outside = fact.units.filter((u) => u < from || u > to)
-  if (outside.length > 0) problems.push(`cites unit ${outside.join(', ')}, outside this window (${from}-${to})`)
+  const outside = fact.sentences.filter((u) => u < from || u > to)
+  if (outside.length > 0) problems.push(`cites sentence ${outside.join(', ')}, outside this window (${from}-${to})`)
   if (fact.statement.trim() === '') problems.push('has no statement')
   if (fact.subject.trim() === '') problems.push('has no subject')
   const unknown = fact.areas.filter((a) => !known.has(a))
@@ -300,13 +300,13 @@ function skipProblems(skip: LedgerSkipWire, scope: LedgerScope): string[] {
   const problems: string[] = []
   if (skip.from > skip.to) problems.push(`runs backwards (${skip.from} to ${skip.to})`)
   else if (skip.from < from || skip.to > to) problems.push(`reaches outside this window (${from}-${to})`)
-  if (skip.why === 'other' && !skip.note?.trim()) problems.push('is for "other" and has no note saying what the units are')
+  if (skip.why === 'other' && !skip.note?.trim()) problems.push('is for "other" and has no note saying what the sentences are')
   return problems
 }
 
 /**
- * THE GATE. What is wrong with a ledger for its window, which units it leaves
- * uncovered, and what of it stands: a refused entry covers nothing, and a unit
+ * THE GATE. What is wrong with a ledger for its window, which sentences it leaves
+ * uncovered, and what of it stands: a refused entry covers nothing, and a sentence
  * both cited and skipped counts as cited.
  */
 export function checkLedger(ledger: FactLedgerWire, scope: LedgerScope): LedgerCheck {
@@ -321,7 +321,7 @@ export function checkLedger(ledger: FactLedgerWire, scope: LedgerScope): LedgerC
       return
     }
     facts.push(fact)
-    for (const unit of fact.units) cited.add(unit)
+    for (const sentence of fact.sentences) cited.add(sentence)
   })
   const skippedAs = new Map<number, FactSkipReason>()
   ledger.skips.forEach((skip, i) => {
@@ -330,26 +330,26 @@ export function checkLedger(ledger: FactLedgerWire, scope: LedgerScope): LedgerC
       problems.push(...found.map((p) => `skips[${i}] ${p}`))
       return
     }
-    for (let unit = skip.from; unit <= skip.to; unit++) if (!skippedAs.has(unit)) skippedAs.set(unit, skip.why)
+    for (let sentence = skip.from; sentence <= skip.to; sentence++) if (!skippedAs.has(sentence)) skippedAs.set(sentence, skip.why)
   })
   const both = [...cited].filter((u) => skippedAs.has(u)).sort((a, b) => a - b)
   if (both.length > 0) {
-    problems.push(`unit ${unitRanges(both)} is both cited by a fact and skipped; a unit is one or the other`)
+    problems.push(`sentence ${sentenceRanges(both)} is both cited by a fact and skipped; a sentence is one or the other`)
   }
   const uncovered: number[] = []
   const skipped: Partial<Record<FactSkipReason, number>> = {}
-  for (let unit = scope.window.from; unit <= scope.window.to; unit++) {
-    const why = skippedAs.get(unit)
-    if (cited.has(unit)) continue
+  for (let sentence = scope.window.from; sentence <= scope.window.to; sentence++) {
+    const why = skippedAs.get(sentence)
+    if (cited.has(sentence)) continue
     if (why) skipped[why] = (skipped[why] ?? 0) + 1
-    else uncovered.push(unit)
+    else uncovered.push(sentence)
   }
   return { problems, uncovered, facts, skipped }
 }
 
 /** Most problems one refusal lists; the rest are counted. */
 const REFUSAL_PROBLEMS_MAX = 25
-/** Most unit ranges one refusal lists. */
+/** Most sentence ranges one refusal lists. */
 const REFUSAL_RANGES_MAX = 40
 
 /** The refusal for a ledger the gate does not pass, bounded, or `undefined` when it passes. */
@@ -358,7 +358,7 @@ export function ledgerRefusal(check: LedgerCheck): string | undefined {
   const parts: string[] = []
   if (check.uncovered.length > 0) {
     parts.push(
-      `${check.uncovered.length} unit(s) no fact cites and no skip covers: ${unitRanges(check.uncovered, REFUSAL_RANGES_MAX)}. Record the facts each states, or skip it with the reason that fits.`,
+      `${check.uncovered.length} sentence(s) no fact cites and no skip covers: ${sentenceRanges(check.uncovered, REFUSAL_RANGES_MAX)}. Record the facts each states, or skip it with the reason that fits.`,
     )
   }
   if (check.problems.length > 0) {
@@ -375,13 +375,13 @@ const skippedTotal = (skipped: Partial<Record<FactSkipReason, number>>): number 
 const CHECK_LEDGER = defineToolSpec({
   name: 'check_ledger',
   description:
-    'Check a draft ledger the way the run will: every unit of your window cited by a fact or inside a skip, each fact citing 1 to 3 units of the window and areas the document has, no unit both cited and skipped, a note on every "other" skip. Call it on your complete draft before you give the outcome.',
+    'Check a draft ledger the way the run will: every sentence of your window cited by a fact or inside a skip, each fact citing 1 to 3 sentences of the window and areas the document has, no sentence both cited and skipped, a note on every "other" skip. Call it on your complete draft before you give the outcome.',
   kind: 'check-fact-ledger',
   readOnly: true,
   destructive: false,
   display: {
-    one: 'I checked that every unit of the window is recorded or skipped',
-    many: 'I checked that every unit of the window is recorded or skipped, {n} passes',
+    one: 'I checked that every sentence of the window is recorded or skipped',
+    many: 'I checked that every sentence of the window is recorded or skipped, {n} passes',
   },
   inputSchema: FactLedgerWireSchema,
 })
@@ -393,7 +393,7 @@ function checkLedgerTool(scope: LedgerScope): SessionTool {
       const refusal = ledgerRefusal(check)
       if (refusal) return { content: refusal, isError: true }
       return {
-        content: `The ledger is complete: ${check.facts.length} fact(s), ${skippedTotal(check.skipped)} unit(s) skipped, every unit from ${scope.window.from} to ${scope.window.to} accounted for. Give it as the outcome.`,
+        content: `The ledger is complete: ${check.facts.length} fact(s), ${skippedTotal(check.skipped)} sentence(s) skipped, every sentence from ${scope.window.from} to ${scope.window.to} accounted for. Give it as the outcome.`,
       }
     },
   })
@@ -412,9 +412,9 @@ const RECORD_FACTS_SESSION = defineSessionKind({
 function presentLedger(ledger: FactLedger): KnownDisplayBlock[] {
   const skipped = ledger.skips.reduce((sum, s) => sum + Math.max(0, s.to - s.from + 1), 0)
   const lines = [
-    `I recorded ${ledger.facts.length} fact${ledger.facts.length === 1 ? '' : 's'} and skipped ${skipped} unit${skipped === 1 ? '' : 's'}`,
+    `I recorded ${ledger.facts.length} fact${ledger.facts.length === 1 ? '' : 's'} and skipped ${skipped} sentence${skipped === 1 ? '' : 's'}`,
   ]
-  if (ledger.unrecorded.length > 0) lines.push(`I left unit ${unitRanges(ledger.unrecorded, REFUSAL_RANGES_MAX)} unrecorded`)
+  if (ledger.unrecorded.length > 0) lines.push(`I left sentence ${sentenceRanges(ledger.unrecorded, REFUSAL_RANGES_MAX)} unrecorded`)
   return [{ kind: 'facts', lines }]
 }
 
@@ -427,7 +427,7 @@ export function recordFactsSessionDef(item: RecordFactsItem): SessionDef<FactLed
     budget: RECORD_FACTS_BUDGET,
     display: {
       title: 'Fact record',
-      intro: `I'm recording what units ${item.window.from} to ${item.window.to} of ${item.doc.path} state, one unit at a time.`,
+      intro: `I'm recording what sentences ${item.window.from} to ${item.window.to} of ${item.doc.path} state, one sentence at a time.`,
     },
     // The gaps are stamped by the engine over whatever the model wrote.
     resolveOutcome: (value) => {
@@ -446,7 +446,7 @@ export function recordFactsSessionDef(item: RecordFactsItem): SessionDef<FactLed
 }
 
 export function recordFactsBriefing(item: RecordFactsItem, instructions: readonly string[] = []): string {
-  const { doc, units, window } = item
+  const { doc, sentences, window } = item
   const lines = [
     ...instructionsBriefingBlock(instructions),
     `DOCUMENT: ${doc.path}  ·  ${docTitle(doc)}`,
@@ -457,25 +457,25 @@ export function recordFactsBriefing(item: RecordFactsItem, instructions: readonl
     headingOutline(docBody(doc)),
     '',
     item.windows > 1
-      ? `YOUR WINDOW: units ${window.from} to ${window.to} of ${units.length} (window ${window.index} of ${item.windows}; other sessions record the rest).`
-      : `YOUR WINDOW: all ${units.length} units of the document.`,
+      ? `YOUR WINDOW: sentences ${window.from} to ${window.to} of ${sentences.length} (window ${window.index} of ${item.windows}; other sessions record the rest).`
+      : `YOUR WINDOW: all ${sentences.length} sentences of the document.`,
   ]
   let heading: string | null | undefined
-  for (const unit of units.slice(window.from - 1, window.to)) {
-    if (unit.heading !== heading) {
-      heading = unit.heading
+  for (const sentence of sentences.slice(window.from - 1, window.to)) {
+    if (sentence.heading !== heading) {
+      heading = sentence.heading
       lines.push('', heading === null ? '(above the first heading)' : `## ${heading}`)
     }
-    lines.push(presentUnit(unit, units, window))
+    lines.push(presentSentence(sentence, sentences, window))
   }
   lines.push(
     '',
-    `Account for every unit from ${window.from} to ${window.to}: record the facts it states, or skip it with the reason that fits. Check the ledger with \`check_ledger\`, then give it as the outcome.`,
+    `Account for every sentence from ${window.from} to ${window.to}: record the facts it states, or skip it with the reason that fits. Check the ledger with \`check_ledger\`, then give it as the outcome.`,
   )
   return lines.join('\n')
 }
 
-export const RECORD_FACTS_SYSTEM_PROMPT = `You record the FACTS one documentation file states, unit by unit. The briefing gives you one WINDOW of one document: its units, numbered. A unit is one sentence of a paragraph or of a list item (an item's first sentence carries its marker, its later ones are indented under it), one table row, one code block or part of a long one, a frontmatter title or description, a run of the frontmatter's other lines, or the title a component gives its content. Your outcome is the window's LEDGER: the facts its units state, and the units you skip.
+export const RECORD_FACTS_SYSTEM_PROMPT = `You record the FACTS one documentation file states, sentence by sentence. The briefing gives you one WINDOW of one document: its sentences, numbered. A sentence here is a sentence of a paragraph or of a list item (an item's first sentence carries its marker, its later ones are indented under it), or one table row, one code block or part of a long one, a frontmatter title or description, a run of the frontmatter's other lines, or the title a component gives its content. Your outcome is the window's LEDGER: the facts its sentences state, and the sentences you skip.
 
 # What a fact is
 
@@ -495,23 +495,23 @@ A frontmatter description that says something about the product is a fact like a
 
 # What must be recorded
 
-Three kinds of unit look skippable and are not:
+Three kinds of sentence look skippable and are not:
   - A sentence that says a list or table is complete, or gives its count ("A complete list of the environment variables you can configure:", "There are six button variants") is a fact: record what it says is complete, or the count.
-  - A list or table that is the INVENTORY of one thing (all the tools, all the variables, all the views, all the providers) yields, beside the fact each of its rows or items states, ONE fact for the inventory as a whole, naming its members ("The MCP server provides these tools: list_resumes, get_resume, create_resume."). It cites the unit that introduces the list or table, or its first rows. That is how a member another document mentions and this one lacks can be seen.
+  - A list or table that is the INVENTORY of one thing (all the tools, all the variables, all the views, all the providers) yields, beside the fact each of its rows or items states, ONE fact for the inventory as a whole, naming its members ("The MCP server provides these tools: list_resumes, get_resume, create_resume."). It cites the sentence that introduces the list or table, or its first rows. That is how a member another document mentions and this one lacks can be seen.
   - What a document says it contains or lacks, when it names specific things ("examples for Nginx and Caddy", "contributions welcome for Traefik and Caddy"), is a fact, in its frontmatter description as anywhere else.
 
 # How to write one
 
   - \`statement\`: ONE declarative sentence that can be read alone. It names the product thing it is about, never "it", "this", "this page", "the above" or "the following". Keep the document's own names and values exactly, and keep its quantifiers and closure words: all, every, only, either, both, never, always, entirely, complete, exactly N. "A failure in either dependency returns HTTP 503" records "either", not "the database or storage fails"; a contradiction often turns on that one word.
   - \`subject\`: the product THING the fact is about, as the product names it and as specific as possible: a control, a setting, an endpoint, an environment variable, a feature: "ATS checker", "Export my data", "/api/health", "ENCRYPTION_SECRET", "Application Tracker views". Never the product as a whole, and never an aspect of a thing ("location", "limits", "behavior"): the fact's statement says which aspect. One to five words. Facts about the same thing carry the same subject, spelled the same way.
-  - \`units\`: the numbers of the units the fact is stated in: one, or up to three when it spans them (a list item and the sentence introducing the list).
+  - \`sentences\`: the numbers of the sentences the fact is stated in: one, or up to three when it spans them (a list item and the sentence introducing the list).
   - \`areas\`: the ones the fact belongs to among the document's area tags, exactly as the briefing lists them.
 
-A unit that states two facts yields two facts. Every clause that asserts something is a fact of its own: a second sentence, a recommendation ("prefer the named volume from the example Compose file"), a condition, a default, an exception. A fact that keeps one clause of a unit and drops the rest has lost what another document may contradict. A table row and a list item each need their own decision: a table of 40 rows is 40 units, and every row that states a fact yields one. A code block that names commands, variables, keys or endpoints states facts.
+A sentence that states two facts yields two facts. Every clause that asserts something is a fact of its own: a second sentence, a recommendation ("prefer the named volume from the example Compose file"), a condition, a default, an exception. A fact that keeps one clause of a sentence and drops the rest has lost what another document may contradict. A table row and a list item each need their own decision: a table of 40 rows is 40 sentences, and every row that states a fact yields one. A code block that names commands, variables, keys or endpoints states facts.
 
 # Skipping
 
-Skip only units that state no such fact. A skip is a range of consecutive units, \`from\` to \`to\`, with the reason that fits:
+Skip only sentences that state no such fact. A skip is a range of consecutive sentences, \`from\` to \`to\`, with the reason that fits:
   - "navigation": links onward, "see also", calls to action, a title that only names what follows;
   - "advice": tips and recommendations that say nothing about how the product behaves;
   - "rationale": why something is the way it is, history, motivation;
@@ -519,19 +519,19 @@ Skip only units that state no such fact. A skip is a range of consecutive units,
   - "competitor": what another product does;
   - "example": sample values or sample output that only illustrate;
   - "legal": licence and legal boilerplate;
-  - "other": anything else, with a \`note\` saying what the units are.
+  - "other": anything else, with a \`note\` saying what the sentences are.
 
 # The gate
 
-Every unit of the window must be cited by at least one fact or lie inside a skip, and no unit may be both. A fact cites units of this window only, and areas the document has. \`check_ledger\` runs exactly the check the run will: call it on your complete draft, fix what it lists, then give the outcome. Units outside your window are recorded by other sessions; read another section with \`read_section\` only when a unit cannot be understood without it.
+Every sentence of the window must be cited by at least one fact or lie inside a skip, and no sentence may be both. A fact cites sentences of this window only, and areas the document has. \`check_ledger\` runs exactly the check the run will: call it on your complete draft, fix what it lists, then give the outcome. Sentences outside your window are recorded by other sessions; read another section with \`read_section\` only when a sentence cannot be understood without it.
 
-Before you give the outcome, re-read each unit your facts cite and ask what else it says: a second sentence, a recommendation, a condition, a default, an exception or a closure word your facts leave out is a fact still to record.
+Before you give the outcome, re-read each sentence your facts cite and ask what else it says: a second sentence, a recommendation, a condition, a default, an exception or a closure word your facts leave out is a fact still to record.
 
 You have ${RECORD_FACTS_BUDGET.turns} turns, and one more grant of as many when they run out. Draft the whole ledger in your first turn or two.
 
 # The outcome
 
-One object: { "facts": [{ "units": [17], "subject": "Export my data", "statement": "Export my data is under Settings, Account.", "areas": ["core/exports"] }], "skips": [{ "from": 1, "to": 3, "why": "navigation" }] }`
+One object: { "facts": [{ "sentences": [17], "subject": "Export my data", "statement": "Export my data is under Settings, Account.", "areas": ["core/exports"] }], "skips": [{ "from": 1, "to": 3, "why": "navigation" }] }`
 
 // ---------------------------------------------------------------------------
 // The doc's ledger, folded
@@ -541,8 +541,8 @@ One object: { "facts": [{ "units": [17], "subject": "Export my data", "statement
 export interface RecordedFact {
   /** The doc it is recorded from, by ref. */
   doc: string
-  /** The units it cites, in doc order. */
-  units: DocUnit[]
+  /** The sentences it cites, in doc order. */
+  sentences: DocSentence[]
   subject: string
   statement: string
   /** Its areas, as canonical area ids. */
@@ -552,24 +552,24 @@ export interface RecordedFact {
 /** One doc's facts and skips across its windows, as the run folds them. */
 export interface DocFactLedger {
   doc: string
-  /** Every unit of the doc. */
-  units: readonly DocUnit[]
+  /** Every sentence of the doc. */
+  sentences: readonly DocSentence[]
   facts: RecordedFact[]
-  /** Units skipped, per reason. */
+  /** Sentences skipped, per reason. */
   skipped: Partial<Record<FactSkipReason, number>>
-  /** Units the recording left unaccounted for, ascending. */
+  /** Sentences the recording left unaccounted for, ascending. */
   unrecorded: number[]
-  /** Windows whose session failed: their units are in none of the lists. */
-  failed: UnitWindow[]
+  /** Windows whose session failed: their sentences are in none of the lists. */
+  failed: SentenceWindow[]
 }
 
 export interface DocLedgerInput {
   doc: string
-  units: readonly DocUnit[]
+  sentences: readonly DocSentence[]
   /** The doc's raw area tags. */
   areas: readonly string[]
   /** Each window's ledger, `null` for one whose session failed. */
-  windows: ReadonlyArray<{ window: UnitWindow; ledger: FactLedgerWire | null }>
+  windows: ReadonlyArray<{ window: SentenceWindow; ledger: FactLedgerWire | null }>
   /** The canonical area ids one raw tag of this doc lands in. */
   canonicalAreas: (raw: string) => readonly string[]
 }
@@ -582,7 +582,7 @@ export function docFactLedger(input: DocLedgerInput): DocFactLedger {
   const facts: RecordedFact[] = []
   const skipped: Partial<Record<FactSkipReason, number>> = {}
   const unrecorded: number[] = []
-  const failed: UnitWindow[] = []
+  const failed: SentenceWindow[] = []
   for (const { window, ledger } of [...input.windows].sort((a, b) => a.window.from - b.window.from)) {
     if (!ledger) {
       failed.push(window)
@@ -592,7 +592,7 @@ export function docFactLedger(input: DocLedgerInput): DocFactLedger {
     for (const fact of check.facts) {
       facts.push({
         doc: input.doc,
-        units: [...new Set(fact.units)].sort((a, b) => a - b).flatMap((n) => input.units[n - 1] ?? []),
+        sentences: [...new Set(fact.sentences)].sort((a, b) => a - b).flatMap((n) => input.sentences[n - 1] ?? []),
         subject: fact.subject.trim(),
         statement: fact.statement.trim(),
         areas: [...new Set(fact.areas.flatMap((raw) => input.canonicalAreas(raw)))].sort(),
@@ -604,23 +604,23 @@ export function docFactLedger(input: DocLedgerInput): DocFactLedger {
     }
     unrecorded.push(...check.uncovered)
   }
-  return { doc: input.doc, units: input.units, facts, skipped, unrecorded, failed }
+  return { doc: input.doc, sentences: input.sentences, facts, skipped, unrecorded, failed }
 }
 
 /** What a doc's ledger came to, counted, as the corpus records it. */
 export function docLedgerCounts(ledger: DocFactLedger): DocLedgerCounts {
   return {
-    units: ledger.units.length,
+    sentences: ledger.sentences.length,
     facts: ledger.facts.length,
     skipped: ledger.skipped,
     unrecorded: ledger.unrecorded.length,
   }
 }
 
-/** A doc's ledger in one line: `61 units, 34 facts, 27 skipped`, and what is missing. */
+/** A doc's ledger in one line: `61 sentences, 34 facts, 27 skipped`, and what is missing. */
 export function describeDocLedger(ledger: DocFactLedger, windows: number): string {
   const parts = [
-    `${ledger.units.length} unit${ledger.units.length === 1 ? '' : 's'}`,
+    `${ledger.sentences.length} sentence${ledger.sentences.length === 1 ? '' : 's'}`,
     `${ledger.facts.length} fact${ledger.facts.length === 1 ? '' : 's'}`,
     `${skippedTotal(ledger.skipped)} skipped`,
   ]

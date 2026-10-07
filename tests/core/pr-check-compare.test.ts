@@ -11,7 +11,8 @@ import {
   conflictsCreated,
   sectionsMoved,
 } from '../../packages/core/src/services/pr-check/compare';
-import { buildCorpusConflicts, passageKey } from '../../packages/shared/src/spec/overlap-resolution';
+import { buildCorpusConflicts, sentenceKey } from '../../packages/shared/src/spec/conflict-resolution';
+import { sentenceKey } from '../../packages/shared/src/spec/conflict-resolution.js';
 
 describe('compareFlows', () => {
   it.each([
@@ -59,57 +60,59 @@ describe('compareFlows', () => {
 });
 
 describe('conflictsCreated', () => {
-  const dispute = (a: string, b: string, headingA: string | null, headingB: string | null) => ({
+  /** A conflict between one sentence of each doc, named after the heading it sits under. */
+  const conflict = (a: string, b: string, headingA: string, headingB: string) => ({
     docs: [a, b] as [string, string],
     note: `${a} vs ${b}`,
     sections: [
-      { doc: a, heading: headingA, quote: 'x' },
-      { doc: b, heading: headingB, quote: 'y' },
+      { doc: a, heading: headingA, quote: `${headingA} says x`, sentence: sentenceKey(`${headingA} says x`) },
+      { doc: b, heading: headingB, quote: `${headingB} says y`, sentence: sentenceKey(`${headingB} says y`) },
     ],
   });
-  const corpus = (...overlaps: ReturnType<typeof dispute>[]) => ({ areas: [{ id: 'core/auth', overlaps }] });
+  const corpus = (...conflicts: ReturnType<typeof conflict>[]) => ({ areas: [{ id: 'core/auth', conflicts }] });
 
-  it('keeps only the head’s open conflicts the workspace does not already carry, by dispute identity', () => {
-    const shared = dispute('a.md', 'b.md', 'Login', 'Sessions');
-    const fresh = dispute('a.md', 'c.md', 'Login', 'Tokens');
+  it('keeps only the head’s open conflicts the workspace does not already carry, by conflict identity', () => {
+    const shared = conflict('a.md', 'b.md', 'Login', 'Sessions');
+    const fresh = conflict('a.md', 'c.md', 'Login', 'Tokens');
     const prConflicts = buildCorpusConflicts(corpus(shared, fresh), {}).filter((c) => !c.resolved);
-    // The workspace's copy of the shared dispute quotes it differently and
-    // lists the docs the other way round: same identity all the same.
+    // The workspace's copy of the shared conflict windows the quotes differently,
+    // files the sentences under other headings and lists the docs the other way
+    // round: same identity all the same.
     const workspace = corpus({
-      ...dispute('b.md', 'a.md', 'Sessions', 'Login'),
+      ...conflict('b.md', 'a.md', 'Sessions', 'Login'),
       sections: [
-        { doc: 'b.md', heading: 'Sessions', quote: 'other words' },
-        { doc: 'a.md', heading: 'Login', quote: 'more words' },
+        { doc: 'b.md', heading: 'Session cookies', quote: 'other words', sentence: sentenceKey('Sessions says y') },
+        { doc: 'a.md', heading: 'Signing in', quote: 'more words', sentence: sentenceKey('Login says x') },
       ],
     });
     expect(conflictsCreated(workspace, prConflicts, {}).map((c) => c.b)).toEqual(['c.md']);
   });
 
-  it('a dispute the workspace resolved is created anew when the head flags it under other anchors', () => {
+  it('a conflict the workspace resolved is created anew when the head states it in other sentences', () => {
     const decisions = {
       conflictResolutions: [
-        { docA: 'a.md', anchorA: 'Login', docB: 'b.md', anchorB: 'Sessions', verdict: 'a' as const },
+        { docA: 'a.md', anchorA: 'Login', sentenceA: sentenceKey('Login says x'), docB: 'b.md', anchorB: 'Sessions', sentenceB: sentenceKey('Sessions says y'), verdict: 'a' as const },
       ],
     };
-    const workspace = corpus(dispute('a.md', 'b.md', 'Login', 'Sessions'));
-    // The head moved the disagreement into another section: a new identity,
-    // which the old verdict does not cover.
-    const head = corpus(dispute('a.md', 'b.md', 'Login', 'Cookies'));
+    const workspace = corpus(conflict('a.md', 'b.md', 'Login', 'Sessions'));
+    // The head reworded one side of the disagreement: a new identity, which
+    // the old verdict does not cover.
+    const head = corpus(conflict('a.md', 'b.md', 'Login', 'Cookies'));
     const prConflicts = buildCorpusConflicts(head, decisions).filter((c) => !c.resolved);
     expect(prConflicts).toHaveLength(1);
     expect(conflictsCreated(workspace, prConflicts, decisions)).toHaveLength(1);
-    // The same anchors as the workspace's, resolved there: not open, not created.
+    // The same sentences as the workspace's, resolved there: not open, not created.
     const same = buildCorpusConflicts(workspace, decisions).filter((c) => !c.resolved);
     expect(conflictsCreated(workspace, same, decisions)).toEqual([]);
   });
 
-  it('a new disagreement between two sections the workspace already disputes on another point is created', () => {
+  it('a new disagreement between two sections the workspace already conflicts on another point is created', () => {
     const between = (quoteA: string, quoteB: string) => ({
       docs: ['a.md', 'b.md'] as [string, string],
       note: `${quoteA} vs ${quoteB}`,
       sections: [
-        { doc: 'a.md', heading: 'Login', quote: quoteA, passage: passageKey(quoteA) },
-        { doc: 'b.md', heading: 'Sessions', quote: quoteB, passage: passageKey(quoteB) },
+        { doc: 'a.md', heading: 'Login', quote: quoteA, sentence: sentenceKey(quoteA) },
+        { doc: 'b.md', heading: 'Sessions', quote: quoteB, sentence: sentenceKey(quoteB) },
       ],
     });
     const ttl = between('Tokens last an hour.', 'Tokens last a day.');
@@ -119,7 +122,7 @@ describe('conflictsCreated', () => {
   });
 
   it('treats no workspace corpus as carrying nothing', () => {
-    const prConflicts = buildCorpusConflicts(corpus(dispute('a.md', 'b.md', 'L', 'S')), {});
+    const prConflicts = buildCorpusConflicts(corpus(conflict('a.md', 'b.md', 'L', 'S')), {});
     expect(conflictsCreated(null, prConflicts, {})).toHaveLength(1);
   });
 });

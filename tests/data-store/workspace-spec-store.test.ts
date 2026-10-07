@@ -40,10 +40,10 @@ describe('PgSpecStore — workspace scope (pglite)', () => {
 
   it('round-trips the corpus and the decisions keyed by org', async () => {
     const ref: WorkspaceRef = { workspaceOrgId: ORG_A };
-    await store.saveWorkspaceSpec(ref, 'corpus', { version: 3, docs: [{ ref: 'd1' }] });
+    await store.saveWorkspaceSpec(ref, 'corpus', { version: 5, docs: [{ ref: 'd1' }] });
     await store.saveWorkspaceSpec(ref, 'decisions', { version: 1, decisions: [] });
 
-    expect(await store.loadWorkspaceSpec(ref, 'corpus')).toEqual({ version: 3, docs: [{ ref: 'd1' }] });
+    expect(await store.loadWorkspaceSpec(ref, 'corpus')).toEqual({ version: 5, docs: [{ ref: 'd1' }] });
     expect(await store.loadWorkspaceSpec(ref, 'decisions')).toEqual({ version: 1, decisions: [] });
   });
 

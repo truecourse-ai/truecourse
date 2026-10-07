@@ -26,7 +26,10 @@ import {
   DocVerdictSchema,
   curateDocSessionDef,
 } from '../../packages/core/src/services/spec-scan/curate-doc'
-import { OverlapOutcomeSchema, overlapSessionDef } from '../../packages/core/src/services/spec-scan/overlap'
+import { RECORD_FACTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/record-facts'
+import { SETTLE_SUBJECTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-subjects'
+import { COMPARE_FACTS_SESSION_KIND, presentConflict, type ReportedConflict } from '../../packages/core/src/services/spec-scan/compare-facts'
+import { compare, record as recordFacts, settle } from './spec-scan-facts-stub'
 import {
   AreaSettlementSchema,
   settleAreasSessionDef,
@@ -136,25 +139,14 @@ describe('spec-scan.orchestrate — presentOutcome', () => {
   })
 })
 
-describe('spec-scan.overlap — presentOutcome', () => {
-  const present = () => {
-    const def = overlapSessionDef({
-      item: { areaId: 'core/auth', concern: 'auth', cluster: 0, docs: [], pairs: [] },
-      universe: buildScanUniverse([]),
-    })
-    if (!def.presentOutcome) throw new Error('overlap declares no presentOutcome')
-    return def.presentOutcome
-  }
-
-  it('turns each overlap into a finding card carrying its dispute identity', () => {
-    const outcome = OverlapOutcomeSchema.parse({
-      overlaps: [
-        {
+describe('a conflict card', () => {
+  it('carries the note, the quotes, the recommendation and the conflict identity', () => {
+    const conflict: ReportedConflict = {
           docs: ['docs/api/users.md', 'docs/api/identity.md'],
           note: 'users.md uses auth0_id; identity.md uses auth0_sub',
           sections: [
-            { doc: 'docs/api/users.md', heading: 'User fields', quote: 'the `auth0_id` field holds the subject' },
-            { doc: 'docs/api/identity.md', heading: null, quote: 'we store `auth0_sub` on every account' },
+            { doc: 'docs/api/users.md', heading: 'User fields', quote: 'the `auth0_id` field holds the subject', sentence: 's-users' },
+            { doc: 'docs/api/identity.md', heading: null, quote: 'we store `auth0_sub` on every account', sentence: 's-identity' },
           ],
           review: {
             explanation: 'users.md says auth0_id, identity.md says auth0_sub — one field, two names.',
@@ -164,14 +156,11 @@ describe('spec-scan.overlap — presentOutcome', () => {
               confidence: 'high',
             },
           },
-        },
-      ],
-      notReached: [],
-    })
-    const blocks = present()(outcome)
+        }
+    const blocks = [presentConflict(conflict)]
     assertBlocks(blocks)
     expect(blocks[0]).toEqual({
-      kind: 'finding',
+      kind: 'conflict',
       claim: 'users.md uses auth0_id; identity.md uses auth0_sub',
       quotes: [
         { doc: 'docs/api/users.md', heading: 'User fields', quote: 'the `auth0_id` field holds the subject' },
@@ -183,66 +172,19 @@ describe('spec-scan.overlap — presentOutcome', () => {
         rationale: 'identity.md is the owner of the account schema',
         confidence: 'high',
       },
-      dispute: {
+      conflict: {
         docA: 'docs/api/users.md',
         anchorA: 'User fields',
         quoteA: 'the `auth0_id` field holds the subject',
+        sentenceA: 's-users',
         docB: 'docs/api/identity.md',
         anchorB: null,
         quoteB: 'we store `auth0_sub` on every account',
+        sentenceB: 's-identity',
       },
     })
   })
 
-  it('closes on what it found and skipped, never the coverage the run recomputes later', () => {
-    // sectionsOpened / uncheckedPairs are overwritten from the transcript
-    // after the outcome event is persisted, so the display must not carry
-    // the model's self-report of them.
-    const outcome = OverlapOutcomeSchema.parse({
-      overlaps: [],
-      notReached: ['docs/api/webhooks.md'],
-      sectionsOpened: 7,
-      uncheckedPairs: [
-        {
-          a: { doc: 'docs/api/webhooks.md', heading: 'Retries' },
-          b: { doc: 'docs/api/events.md', heading: 'Retries' },
-          keys: ['retries'],
-        },
-      ],
-    })
-    const blocks = present()(outcome)
-    assertBlocks(blocks)
-    expect(blocks).toEqual([
-      {
-        kind: 'facts',
-        lines: ['These docs agree — I found no disagreements', "I didn't get through docs/api/webhooks.md"],
-      },
-    ])
-  })
-
-  it('counts the disagreements it did record', () => {
-    const outcome = OverlapOutcomeSchema.parse({
-      overlaps: [
-        {
-          docs: ['docs/a.md', 'docs/b.md'],
-          note: 'a.md caps at 24h; b.md caps at 48h',
-          sections: [{ doc: 'docs/a.md', heading: null, quote: 'cancel up to 24h before' }],
-          review: {
-            explanation: 'a.md says 24h, b.md says 48h.',
-            recommendation: { action: 'fix-doc', rationale: 'the cutoff must be stated once' },
-          },
-        },
-      ],
-      notReached: [],
-    })
-    const blocks = present()(outcome)
-    expect(blocks[1]).toEqual({ kind: 'facts', lines: ['I found 1 disagreement'] })
-    expect(blocks[0]).toMatchObject({
-      kind: 'finding',
-      recommendation: { rationale: 'the cutoff must be stated once' },
-    })
-    expect((blocks[0] as { recommendation: { doc?: string } }).recommendation.doc).toBeUndefined()
-  })
 })
 
 describe('spec-scan.curate-doc — presentOutcome', () => {
@@ -379,10 +321,9 @@ describe('spec scan run record — the checklist block', () => {
         await call.emit(toolResult('check_settlement', 'valid'))
         return outcome({ concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] })
       }
-      if (call.kind === 'spec-scan.overlap') {
-        await call.emit(toolResult('check_findings', 'valid'))
-        return outcome({ overlaps: [], notReached: [] })
-      }
+      if (call.kind === RECORD_FACTS_SESSION_KIND) return recordFacts(call, () => null)
+      if (call.kind === SETTLE_SUBJECTS_SESSION_KIND) return settle(call)
+      if (call.kind === COMPARE_FACTS_SESSION_KIND) return compare(call)
       return outcome({
         keep: true,
         reason: 'spec',
@@ -428,86 +369,15 @@ describe('spec scan run record — the checklist block', () => {
     expect(block.items.map((item) => [item.key, item.sessionKinds])).toEqual([
       ['discover', ['spec-scan.orchestrate']],
       ['tag', ['spec-scan.curate-doc', 'spec-scan.settle-areas']],
-      ['overlap', ['spec-scan.overlap']],
+      ['record', ['spec-scan.record-facts']],
+      ['subjects', ['spec-scan.settle-subjects']],
+      ['compare', ['spec-scan.compare-facts']],
+      ['conflicts', []],
       ['verify', []],
     ])
   })
 })
 
-/**
- * The overlap step counts two different things under one word, so each line
- * says which it means: the CLUSTERS the review has to look at while it runs,
- * and the corpus's AREAS beside the clusters it reviewed once it settles.
- */
-describe('spec scan progress — the overlap step says what it counts', () => {
-  let repo: string
-  beforeEach(() => {
-    installMemoryKvCache()
-    installMemorySessionRuns()
-    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-scan-overlap-counts-'))
-    fs.mkdirSync(path.join(repo, 'docs'), { recursive: true })
-    // Two docs sharing rare identifiers: one collision cluster, one area.
-    fs.writeFileSync(path.join(repo, 'docs', 'alpha.md'), '# Alpha\n\nSet `sessionTtl` and `tokenScope` here.\n')
-    fs.writeFileSync(path.join(repo, 'docs', 'beta.md'), '# Beta\n\nSet `sessionTtl` and `tokenScope` there.\n')
-  })
-  afterEach(() => {
-    resetKvCacheStore()
-    resetSessionRuns()
-    fs.rmSync(repo, { recursive: true, force: true })
-  })
-
-  it('counts clusters while it runs, and names both counts when it settles', async () => {
-    const driver = stubDriver(async (call) => {
-      if (call.kind === 'spec-scan.settle-areas') {
-        await call.emit(toolResult('check_settlement', 'valid'))
-        return outcome({ concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] })
-      }
-      if (call.kind === 'spec-scan.overlap') {
-        await call.emit(toolResult('check_findings', 'valid'))
-        return outcome({ overlaps: [], notReached: [] })
-      }
-      return outcome({
-        keep: true,
-        reason: 'spec',
-        subject: 'this-product',
-        areas: [{ product: 'core', concern: 'sessions' }],
-        status: 'shipped',
-      })
-    }).driver
-
-    const details: string[] = []
-    const tracker = new StepTracker((payload) => {
-      const step = payload.steps?.find((s) => s.key === 'overlap')
-      if (step?.detail && details.at(-1) !== step.detail) details.push(step.detail)
-    }, [...CURATE_STEPS])
-
-    await curateInProcess(repo, {
-      skipGit: true,
-      skipCorpusWrite: true,
-      tracker,
-      driver,
-      transportMode: 'api',
-      decisions: {
-        version: 2,
-        manualIncludes: [],
-        manualExcludes: [],
-        manualAreas: [],
-        conflictResolutions: [],
-        instructions: [],
-        scopeVerdicts: ['.', 'docs'].map((p) => ({
-          path: p,
-          verdict: 'keep' as const,
-          reason: 'covered by the test',
-          decidedAt: '2026-01-01T00:00:00.000Z',
-          resolvedBy: 'user' as const,
-        })),
-      },
-    })
-
-    expect(details[0]).toBe('0/1 cluster to review')
-    expect(details.at(-1)).toBe('1 areas · 1 cluster reviewed · 0 overlaps')
-  })
-})
 
 describe('spec-scan defs — declared display', () => {
   const defs = () => [
@@ -521,10 +391,6 @@ describe('spec-scan defs — declared display', () => {
       vocab: { products: new Map(), concerns: new Map(), overThreshold: [] },
       universe: buildScanUniverse([]),
     }),
-    overlapSessionDef({
-      item: { areaId: 'core/auth', concern: 'auth', cluster: 0, docs: [], pairs: [] },
-      universe: buildScanUniverse([]),
-    }),
   ]
 
   it('names the kind of work it is, so a run can label the session', () => {
@@ -532,18 +398,14 @@ describe('spec-scan defs — declared display', () => {
       'Scan scope',
       'Document curation',
       'Area settling',
-      'Overlap review',
     ])
   })
 
   it('opens every session with a line of its own, naming its work item', () => {
     for (const def of defs()) expect(def.display?.intro, def.kind).toBeTruthy()
-    const [, curate, , overlap] = defs()
+    const [, curate] = defs()
     expect(curate.display?.intro).toBe(
       "I'm reading doc:docs/orders.md to decide whether it belongs in the corpus and which areas it covers.",
-    )
-    expect(overlap.display?.intro).toBe(
-      "I'm reviewing area:core/auth:0, reading its docs side by side to catch any claims that disagree.",
     )
   })
 

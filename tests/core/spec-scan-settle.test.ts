@@ -622,7 +622,7 @@ function runScan(driver: () => Promise<import('../../packages/agent-loop/src/ind
     decisions: COVERING,
     repoIdentity: IDENTITY,
     skipGit: true,
-    disableOverlapDetection: true,
+    disableConflictDetection: true,
     concurrency: 2,
   })
 }
@@ -644,7 +644,7 @@ describe('spec-scan.settle-areas — through the run', () => {
       decisions: COVERING,
       repoIdentity: IDENTITY,
       skipGit: true,
-      disableOverlapDetection: true,
+      disableConflictDetection: true,
       onSettle: (state) => states.push(state),
     })
 
@@ -765,10 +765,10 @@ describe('spec-scan.settle-areas — through the run', () => {
 
 describe('spec-scan.settle-areas — the prior corpus through the run', () => {
   const priorCorpus = (ids: string[], docs: Record<string, string[]>) => ({
-    version: 3 as const,
+    version: 5 as const,
     generatedAt: '2026-01-01T00:00:00.000Z',
     docs: Object.entries(docs).map(([ref, areaTags]) => ({ ref, kind: 'spec', lastTouched: '', areaTags })),
-    areas: ids.map((id) => ({ id, product: id.split('/')[0]!, concern: id.split('/')[1]!, docRefs: [], overlaps: [] })),
+    areas: ids.map((id) => ({ id, product: id.split('/')[0]!, concern: id.split('/')[1]!, docRefs: [], conflicts: [] })),
     skippedDocs: [],
   })
 
@@ -794,7 +794,7 @@ describe('spec-scan.settle-areas — the prior corpus through the run', () => {
       decisions: COVERING,
       repoIdentity: IDENTITY,
       skipGit: true,
-      disableOverlapDetection: true,
+      disableConflictDetection: true,
       previousCorpus: priorCorpus(['core/sessions'], { 'docs/login.md': ['core/sessions'], 'docs/logout.md': ['core/sessions'] }),
       onFact: (_step, line) => facts.push(line),
     })
@@ -817,7 +817,7 @@ describe('spec-scan.settle-areas — the prior corpus through the run', () => {
       decisions: COVERING,
       repoIdentity: IDENTITY,
       skipGit: true,
-      disableOverlapDetection: true,
+      disableConflictDetection: true,
       previousCorpus: priorCorpus(['core/bookings'], { 'docs/booking.md': ['core/bookings'] }),
       onFact: (_step, line) => facts.push(line),
     })
@@ -844,7 +844,7 @@ describe('spec-scan.settle-areas — the prior corpus through the run', () => {
       decisions: COVERING,
       repoIdentity: IDENTITY,
       skipGit: true,
-      disableOverlapDetection: true,
+      disableConflictDetection: true,
       previousCorpus: priorCorpus(['core/sessions', 'core/billing'], { 'docs/billing.md': ['core/billing'] }),
       onFact: (_step, line) => facts.push(line),
     })

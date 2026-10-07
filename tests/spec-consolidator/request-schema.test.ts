@@ -27,13 +27,6 @@ import {
   settleAreasSessionDef,
 } from '../../packages/core/src/services/spec-scan/settle-areas';
 import {
-  OVERLAP_SESSION_KIND,
-  OVERLAP_SESSION_PROMPT_FINGERPRINT,
-  OVERLAP_SESSION_SYSTEM_PROMPT,
-  OverlapOutcomeSchema,
-  overlapSessionDef,
-} from '../../packages/core/src/services/spec-scan/overlap';
-import {
   ORCHESTRATE_SYSTEM_PROMPT,
   SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
   ScanScopeOutcomeSchema,
@@ -126,35 +119,6 @@ describe('spec-scan.settle-areas', () => {
 
   it('fingerprints the cache on the prompt constant alone', () => {
     expect(SETTLE_AREAS_PROMPT_FINGERPRINT).toBe(fingerprint(SETTLE_AREAS_SYSTEM_PROMPT));
-  });
-});
-
-describe('spec-scan.overlap', () => {
-  const def = overlapSessionDef({
-    item: { areaId: 'core/orders', concern: 'orders', cluster: 0, docs: [DOC], pairs: [], overflow: [] },
-    universe: UNIVERSE,
-  });
-
-  it('declares the findings schema, the prompt constant and its validator tool', () => {
-    expect(def.kind).toBe(OVERLAP_SESSION_KIND);
-    expect(def.systemPrompt).toBe(OVERLAP_SESSION_SYSTEM_PROMPT);
-    // `sectionsOpened` and `uncheckedPairs` are on the schema only so the
-    // RUN's transcript-derived stamps can ride the cached value; they are
-    // never accepted from the session (the stamps overwrite a self-report)
-    // and they are OPTIONAL, so an entry cached before the fields existed
-    // still parses as a hit.
-    expect(props(OverlapOutcomeSchema)).toEqual(['notReached', 'overlaps', 'sectionsOpened', 'uncheckedPairs']);
-    expect(OverlapOutcomeSchema.safeParse({ overlaps: [], notReached: [] }).success).toBe(true);
-    expect(def.outcomeSchema).toBe(OverlapOutcomeSchema);
-    expect(def.tools.map((t) => t.name).sort()).toEqual([
-      'check_findings',
-      'read_doc_chunk',
-      'read_section',
-    ]);
-  });
-
-  it('fingerprints the cache on the prompt constant alone', () => {
-    expect(OVERLAP_SESSION_PROMPT_FINGERPRINT).toBe(fingerprint(OVERLAP_SESSION_SYSTEM_PROMPT));
   });
 });
 

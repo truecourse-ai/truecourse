@@ -69,7 +69,7 @@ let context: ContextStore;
 
 const corpus = (withConflict = false): CuratedCorpus =>
   ({
-    version: 3,
+    version: 5,
     generatedAt: '2026-01-01T00:00:00Z',
     docs: [
       { ref: REFUNDS, kind: 'prd', lastTouched: '', areaTags: ['acme/payments'], sourceId: SITE, sourceKind: 'site' },
@@ -82,7 +82,7 @@ const corpus = (withConflict = false): CuratedCorpus =>
             product: 'acme',
             concern: 'payments',
             docRefs: [REFUNDS, SHIPPING],
-            overlaps: [
+            conflicts: [
               { docs: [REFUNDS, SHIPPING], note: 'refund window disagrees', sections: [], areas: [] },
             ],
           },

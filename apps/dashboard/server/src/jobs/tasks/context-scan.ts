@@ -157,7 +157,7 @@ export function createContextScanTask(
             // On Claude Code a session can be handed a computer, so the scan
             // reviews its corpus over the docs on disk, and it finds conflicts
             // by comparing facts; in API mode it pairs.
-            ...(llm.mode === 'claude-code' ? { computer: true, conflictMethod: 'facts' as const } : {}),
+            ...(llm.mode === 'claude-code' ? { computer: true } : {}),
             onRunStarted: (info) => {
               runIds.set(ctx.jobId, info.runId);
               meter.setRunId(info.runId);

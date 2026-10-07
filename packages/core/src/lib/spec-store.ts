@@ -26,10 +26,10 @@ export type { WorkspaceRef } from './repo-ref.js';
 
 /**
  * A workspace's JSON artifacts. `corpus`/`decisions` are the curated spec
- * (areas + relations + overlaps, and the user's curation intent).
+ * (areas + conflicts, and the user's curation intent).
  */
 export type SpecArtifact =
-  // The curated doc corpus (areas + relations + overlaps).
+  // The curated doc corpus (areas + conflicts).
   | 'corpus'
   | 'decisions'
   // The DOCUMENT SNAPSHOT of a scan: `{ v, files: { <doc ref>: <content sha> } }`

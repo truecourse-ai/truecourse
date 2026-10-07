@@ -42,23 +42,23 @@ export const SessionDisplaySchema = z.object({
 export type SessionDisplay = z.infer<typeof SessionDisplaySchema>;
 
 /**
- * Two documents that disagree, named precisely enough for a reader to offer a
- * resolution. `anchorA`/`anchorB` are section anchors, `null` when the dispute
- * is whole-document, and `passageA`/`passageB` the passage keys when the
- * dispute names its passages. `docA` and `docB` are the same doc for a
- * contradiction inside it, its sides the first and second passage.
+ * A conflict's identity: two sentences that disagree, each a doc and a
+ * sentence key, named precisely enough for a reader to record a verdict.
+ * `anchorA`/`anchorB` are the headings the sentences sit under, `null` for a
+ * doc's preamble, carried for display. `docA` and `docB` are the same doc for
+ * a contradiction inside it, its sides the first and second sentence.
  */
-export const DisplayDisputeSchema = z.object({
+export const DisplayConflictSchema = z.object({
   docA: z.string(),
   anchorA: z.string().nullable(),
   quoteA: z.string().optional(),
-  passageA: z.string().optional(),
+  sentenceA: z.string(),
   docB: z.string(),
   anchorB: z.string().nullable(),
   quoteB: z.string().optional(),
-  passageB: z.string().optional(),
+  sentenceB: z.string(),
 });
-export type DisplayDispute = z.infer<typeof DisplayDisputeSchema>;
+export type DisplayConflict = z.infer<typeof DisplayConflictSchema>;
 
 /**
  * One line of a checklist block. `key` is the stable id its writer updates in
@@ -100,9 +100,9 @@ export const KnownDisplayBlockSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('text'), text: z.string() }),
   /** Short statements of what happened, one per line. */
   z.object({ kind: z.literal('facts'), lines: z.array(z.string()) }),
-  /** A result card: what disagrees, quoted, with an optional recommendation. */
+  /** A conflict card: what disagrees, quoted, with an optional recommendation. */
   z.object({
-    kind: z.literal('finding'),
+    kind: z.literal('conflict'),
     claim: z.string(),
     quotes: z.array(
       z.object({ doc: z.string(), heading: z.string().optional(), quote: z.string() }),
@@ -110,14 +110,15 @@ export const KnownDisplayBlockSchema = z.discriminatedUnion('kind', [
     recommendation: z
       .object({
         doc: z.string().optional(),
-        /** The dispute side the pick names: the only thing that tells two
-         *  passages of one doc apart, where `doc` names both. */
+        /** The conflict side the pick names: the only thing that tells two
+         *  sentences of one doc apart, where `doc` names both. */
         side: z.enum(['a', 'b']).optional(),
         rationale: z.string(),
         confidence: z.string().optional(),
       })
       .optional(),
-    dispute: DisplayDisputeSchema.optional(),
+    /** The conflict's identity, so a verdict recorded off the card matches the corpus conflict. */
+    conflict: DisplayConflictSchema.optional(),
   }),
   /** Steps of a piece of work, each carrying where it got to. */
   z.object({ kind: z.literal('checklist'), items: z.array(ChecklistItemSchema) }),

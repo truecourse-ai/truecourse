@@ -63,9 +63,6 @@ describe('spec scan progress', () => {
                 kind: 'outcome',
                 value: { concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] },
               };
-            case 'spec-scan.overlap':
-              input.onEvent({ type: 'tool-result', toolName: 'check_findings', content: 'ok', isError: false });
-              return { kind: 'outcome', value: { overlaps: [], notReached: [] } };
             default:
               throw new Error(`unscripted kind ${input.def.kind}`);
           }
@@ -74,7 +71,7 @@ describe('spec scan progress', () => {
       },
     };
 
-    await curateInProcess(repo, { tracker, driver, skipGit: true, skipCorpusWrite: true });
+    await curateInProcess(repo, { tracker, driver, skipGit: true, skipCorpusWrite: true, disableConflictDetection: true });
 
     expect(details.length).toBeGreaterThan(0);
     expect(details.some((d) => MODEL_TIER.test(d))).toBe(false);

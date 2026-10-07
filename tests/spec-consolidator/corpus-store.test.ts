@@ -38,7 +38,7 @@ const areas: Area[] = [
     product: 'core',
     concern: 'users-entity',
     docRefs: ['docs/0003-users.md'],
-    overlaps: [{ docs: ['docs/0003-users.md', 'docs/0008-users.md'], note: 'auth0_id vs auth0_sub', sections: [], areas: [] }],
+    conflicts: [{ docs: ['docs/0003-users.md', 'docs/0008-users.md'], note: 'auth0_id vs auth0_sub', sections: [], areas: [] }],
   },
 ];
 describe('corpus-store', () => {
@@ -49,7 +49,7 @@ describe('corpus-store', () => {
 
     const read = readCorpus(repo);
     expect(read).not.toBeNull();
-    expect(read!.version).toBe(3);
+    expect(read!.version).toBe(5);
     expect(read!.docs).toEqual(docs);
     expect(read!.areas).toEqual(areas);
     // A written corpus carries no relations field.
@@ -62,7 +62,7 @@ describe('corpus-store', () => {
     fs.writeFileSync(
       corpusFilePath(repo),
       JSON.stringify({
-        version: 3,
+        version: 5,
         generatedAt: '2026-01-01T00:00:00Z',
         docs,
         areas,

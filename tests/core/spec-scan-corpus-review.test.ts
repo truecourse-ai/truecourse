@@ -125,7 +125,7 @@ async function scan(review: CorpusReviewOutcome, computer = true) {
     if (kind === SETTLE_AREAS_SESSION_KIND) {
       return { kind: 'outcome', value: { concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] } }
     }
-    // Overlap detection is off: no hunt or cluster session runs.
+    // Conflict detection is off: no hunt or cluster session runs.
     throw new Error(`unscripted session kind: ${kind}`)
   })
   const result = await runSpecScanSessions({
@@ -133,7 +133,7 @@ async function scan(review: CorpusReviewOutcome, computer = true) {
     driver: async () => driver,
     persistence: memoryPersistence(),
     skipGit: true,
-    disableOverlapDetection: true,
+    disableConflictDetection: true,
     ...(computer ? { computer: true } : {}),
   })
   return { result, reviewed }

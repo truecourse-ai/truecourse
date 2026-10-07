@@ -14,6 +14,7 @@ import { curateInProcess } from '../../packages/core/src/commands/spec-in-proces
 import type { DecisionsFile } from '../../packages/spec-consolidator/src/index.js';
 import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
 import { outcome, stubDriver, toolResult } from './spec-scan-session-stub';
+import { compare, record, settle } from './spec-scan-facts-stub';
 
 /** Keep every doc in one area; no provider, no network. */
 const driver = () =>
@@ -22,10 +23,9 @@ const driver = () =>
       await call.emit(toolResult('check_settlement', 'valid'));
       return outcome({ concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] });
     }
-    if (call.kind === 'spec-scan.overlap') {
-      await call.emit(toolResult('check_findings', 'valid'));
-      return outcome({ overlaps: [], notReached: [] });
-    }
+    if (call.kind === 'spec-scan.record-facts') return record(call, () => null);
+    if (call.kind === 'spec-scan.settle-subjects') return settle(call);
+    if (call.kind === 'spec-scan.compare-facts') return compare(call);
     return outcome({
       keep: true,
       reason: 'spec',

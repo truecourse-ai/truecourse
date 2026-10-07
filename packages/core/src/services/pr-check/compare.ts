@@ -7,7 +7,7 @@
  */
 
 import {
-  disputeKey,
+  conflictKey,
   openConflicts,
   type CorpusConflict,
   type CorpusLike,
@@ -70,9 +70,8 @@ function deltaKind(
 
 /**
  * The open conflicts of the head's corpus that the workspace's corpus does not
- * carry, by dispute identity (the doc pair, each side's section anchor, and
- * each side's passage when the conflict names its passages), so a new
- * disagreement between two sections the workspace already disputes on another
+ * carry, by conflict identity (each side's doc and sentence), so a new
+ * disagreement between two sections the workspace already has a conflict on at another
  * point is a conflict created. The workspace corpus is its CURRENT one: a
  * corpus has no commit dimension.
  */
@@ -83,10 +82,10 @@ export function conflictsCreated<O extends CorpusConflict>(
 ): O[] {
   const known = new Set(
     (defaultCorpus ? openConflicts(defaultCorpus, decisions) : []).map((c) =>
-      disputeKey(c.a, c.b, c.sections),
+      conflictKey(c.a, c.b, c.sections),
     ),
   );
-  return prConflicts.filter((c) => !known.has(disputeKey(c.a, c.b, c.sections)));
+  return prConflicts.filter((c) => !known.has(conflictKey(c.a, c.b, c.sections)));
 }
 
 export interface SectionMoved {

@@ -15,7 +15,7 @@ import { saveWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 /**
  * The dashboard `guard generate` action hits the SAME open-conflict gate the
  * engine does, over the repository's SLICE of the workspace corpus folded with
- * the workspace's decisions. An open overlap → the POST returns the full
+ * the workspace's decisions. An open conflict → the POST returns the full
  * conflict report as an error and no job is started — a second POST is gated
  * again (422), never blocked as already-running (409).
  */
@@ -39,7 +39,7 @@ describe('guard generate route — open-conflict gate', () => {
 
     await setContextBindings(TEST_ORG, fixture.repoPath, [SOURCE]);
     await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', {
-      version: 3,
+      version: 5,
       generatedAt: '2026-01-01T00:00:00Z',
       docs: [
         { ref: V1, kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/users-entity'], sourceId: SOURCE },
@@ -51,7 +51,7 @@ describe('guard generate route — open-conflict gate', () => {
           product: 'booking',
           concern: 'users-entity',
           docRefs: [V1, V2],
-          overlaps: [{ docs: [V1, V2], note: NOTE, sections: [] }],
+          conflicts: [{ docs: [V1, V2], note: NOTE, sections: [] }],
         },
       ],
       relations: [],

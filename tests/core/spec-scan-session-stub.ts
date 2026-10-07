@@ -55,7 +55,7 @@ export const malformedFailure = (detail = 'the model never produced an outcome')
 
 /**
  * A tool-result event body, as a driver emits one after running a tool. The
- * fold's `sectionsOpened` counter and the shell's outcome precondition both
+ * fold's transcript counters and the shell's outcome precondition both
  * read these off the transcript.
  */
 export const toolResult = (toolName: string, content = 'ok', isError?: boolean): SessionEventBody => ({
