@@ -36,7 +36,7 @@ export const meta = () =>
   pageMeta({
     title: 'TrueCourse · Your AI CTO',
     description:
-      'An AI CTO for professionals who build their own apps with AI, for $99 a month. Get your evenings and weekends back while it keeps your app working.',
+      'An AI CTO for professionals who build their own apps with AI, for $49 a month for early adopters. Get your evenings and weekends back while it keeps your app working.',
     path: '/builders',
   });
 
@@ -135,9 +135,6 @@ export default function BuildersPage() {
           <Clouds className="hero-clouds" layout="narrow" />
           <div className="wrap bs-hero-inner">
             <div className="bs-hero-text">
-              <Reveal as="p" className="kicker" delay={20} rise>
-                For professionals who build their own apps with AI
-              </Reveal>
               <Reveal as="h1" className={cn(hero.long && 'long')} delay={60} rise>
                 {hero.title}
               </Reveal>
@@ -239,8 +236,9 @@ export default function BuildersPage() {
             <Reveal className="bs-plan">
               <div className="bs-plan-head">
                 <b>AI CTO</b>
+                <p className="bs-plan-early">Early adopter price</p>
                 <p className="bs-plan-price">
-                  $99<span>a month</span>
+                  <s>$99</s>$49<span>a month</span>
                 </p>
                 <p className="bs-muted">Less than one hour of a developer's time.</p>
               </div>

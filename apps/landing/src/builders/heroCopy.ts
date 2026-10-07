@@ -11,7 +11,7 @@ import { registerProperties } from '@/lib/posthog';
 export type HeroCopy = { variant: string; title: string; sub: string; long?: boolean };
 
 const FILTER_SUB =
-  'You built the app with Lovable, Replit or Claude Code. Your AI CTO tests it, watches it and fixes it.';
+  'Built your app with AI? Your AI CTO tests every change and fixes what breaks while you sleep.';
 
 const DEFAULT: HeroCopy = {
   variant: 'default',
@@ -28,7 +28,7 @@ const VARIANTS: Record<string, HeroCopy> = {
   },
   'part-time-cto': {
     variant: 'part-time-cto',
-    title: 'Why part time? Your AI CTO never clocks out.',
+    title: 'Why a part-time CTO? AI never clocks out.',
     sub: FILTER_SUB,
     long: true,
   },

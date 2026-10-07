@@ -1764,6 +1764,23 @@ section.band:has(.bs-ask) {
   letter-spacing: -0.03em;
   line-height: 1;
 }
+.bs-plan-price s {
+  margin-right: 12px;
+  font-size: 32px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.bs-plan-early {
+  display: block;
+  width: fit-content;
+  margin: 10px auto 0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
 .bs-plan-price span {
   margin-left: 8px;
   font-size: 17px;
