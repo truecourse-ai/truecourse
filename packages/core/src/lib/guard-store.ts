@@ -23,7 +23,7 @@ import type { LoadedScenarios } from '@truecourse/guard-runner';
 import type {
   GuardDecisions,
   GuardRunFlowSummary,
-  GuardRunSectionSummary,
+  GuardRunClaimSummary,
   GuardGenerateReport,
   GuardHistory,
   GuardHistoryEntry,
@@ -72,7 +72,7 @@ export interface SaveScenariosResult {
 }
 
 /**
- * ONE baseline run's coverage history: when it ran, and what every section and
+ * ONE baseline run's coverage history: when it ran, and what every claim and
  * every flow it covered was worth then. The trend on Home is these rows and
  * nothing else. A run without one is absent from history.
  */
@@ -80,7 +80,7 @@ export interface GuardRunCoverage {
   runId: string;
   ranAt: string;
   commit: string | null;
-  sections: GuardRunSectionSummary;
+  claims: GuardRunClaimSummary;
   /**
    * The run's flows, which is what Home's trend counts. Three states: a
    * summary, which the trend draws; an EMPTY summary, meaning the derivation

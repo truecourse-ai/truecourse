@@ -682,15 +682,10 @@ describe('write tools', () => {
   });
 
   it('undoes a claim dismissal', async () => {
-    const claim = { doc: DOC, anchor: 'tasks/creating-tasks', title: 'Creating a task prints its id' };
+    const claim = { claimId: `claim::${DOC}::creating-a-task` };
     await request(app).post(`/api/repos/${fixture.project.slug}/guard/dismiss`).send(claim).expect(200);
 
-    await ok(client, 'undismiss_claim', {
-      repo: fixture.project.slug,
-      doc: claim.doc,
-      section: claim.anchor,
-      title: claim.title,
-    });
+    await ok(client, 'undismiss_claim', { repo: fixture.project.slug, claimId: claim.claimId });
     const after = await request(app).get(`/api/repos/${fixture.project.slug}/guard/decisions`).expect(200);
     expect(after.body.dismissedClaims).toEqual([]);
   });

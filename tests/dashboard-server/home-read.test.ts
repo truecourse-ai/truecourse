@@ -25,7 +25,8 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { manifestPath, writeGuardLatest } from '@truecourse/guard-runner';
+import { guardFlowsPath, manifestPath, writeGuardClaims, writeGuardLatest } from '@truecourse/guard-runner';
+import { claimContentHash } from '@truecourse/shared';
 import type { HomeResponse } from '@truecourse/shared';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
 import { createTestApp, stubJobs, TEST_ORG } from '../helpers/test-app';
@@ -92,12 +93,54 @@ const corpus = (withConflict = false): CuratedCorpus =>
     skippedDocs: [],
   }) as unknown as CuratedCorpus;
 
+/** The claim refs the stored run's summaries are keyed by. */
+const REFUNDS_CLAIM = `claim::${REFUNDS}::refunds`;
+const SHIPPING_CLAIM = `claim::${SHIPPING}::shipping`;
+
 /**
- * A stored run in one repository: the Refunds section failed, the Shipping
- * section passed. The manifest binds each flow to its section.
+ * A stored run in one repository: the Refunds claim failed, the Shipping claim
+ * passed. The flow corpus names each claim; the manifest binds each flow.
  */
-function storedRun(repoPath: string): void {
+/** The claim corpus: one claim per document. Alone, nothing carries them, so each reads blocked. */
+function storedClaims(repoPath: string): void {
   fs.mkdirSync(path.dirname(manifestPath(repoPath)), { recursive: true });
+  const refunds = { doc: REFUNDS, anchor: 'refunds', title: 'a refund settles', claim: 'A refund settles within two business days.' };
+  const shipping = { doc: SHIPPING, anchor: 'shipping', title: 'a parcel ships', claim: 'A parcel ships the next day.' };
+  writeGuardClaims(repoPath, {
+    version: 1,
+    generatedAt: '2026-01-01T00:00:00.000Z',
+    claims: [
+      { id: REFUNDS_CLAIM, ...refunds, contentHash: claimContentHash(refunds) },
+      { id: SHIPPING_CLAIM, ...shipping, contentHash: claimContentHash(shipping) },
+    ],
+    untestable: [],
+  });
+}
+
+function storedRun(repoPath: string): void {
+  storedClaims(repoPath);
+  fs.writeFileSync(
+    guardFlowsPath(repoPath),
+    JSON.stringify({
+      version: 1,
+      generatedAt: '2026-01-01T00:00:00.000Z',
+      flows: [
+        {
+          id: 'f1', title: 'a refund settles', goal: 'settle a refund', fingerprint: 'sha256:f1',
+          milestones: [{ order: 1, doc: REFUNDS, anchor: 'refunds', claimTitle: 'a refund settles', sentences: ['refunds'] }],
+          bindings: [{ doc: REFUNDS, anchor: 'refunds', fingerprint: 'sha256:a', sentences: ['refunds'] }],
+          composedOf: [], synthesisInputsHash: 'sha256:i',
+        },
+        {
+          id: 'f2', title: 'a parcel ships', goal: 'ship a parcel', fingerprint: 'sha256:f2',
+          milestones: [{ order: 1, doc: SHIPPING, anchor: 'shipping', claimTitle: 'a parcel ships', sentences: ['shipping'] }],
+          bindings: [{ doc: SHIPPING, anchor: 'shipping', fingerprint: 'sha256:b', sentences: ['shipping'] }],
+          composedOf: [], synthesisInputsHash: 'sha256:i',
+        },
+      ],
+      noFlowClaims: [],
+    }),
+  );
   fs.writeFileSync(
     manifestPath(repoPath),
     JSON.stringify({
@@ -260,7 +303,7 @@ describe('GET /api/home', () => {
 
   it('counts a flow whether or not its repository reads a document', async () => {
     // The headline is the workspace's proving, so an unlinked repository's
-    // flows still count — unlike its sections, which are nobody's promise.
+    // flows still count — unlike its claims, which are nobody's promise.
     storedRun(repoA.repoPath);
 
     const page = await home();
@@ -269,21 +312,21 @@ describe('GET /api/home', () => {
     expect(page.areas).toEqual([]);
   });
 
-  it('composes the areas out of the sections of linked documents, folded across every repository that reads them', async () => {
+  it('composes the areas out of the claims of linked documents, folded across every repository that reads them', async () => {
     await setContextBindings(TEST_ORG, repoA.project.name, [SITE]);
     await setContextBindings(TEST_ORG, repoB.project.name, [SITE]);
     storedRun(repoA.repoPath);
 
     const page = await home();
 
-    // Two sections, two repositories. A failed one outranks the other
-    // repository's silence; a passed one does not, because the repository that
-    // ran nothing has nothing proven. The areas keep the Documents view's words.
+    // Two claims, two repositories. The repository that has no claims says
+    // nothing, so each claim wears the word the repository that ran it gave.
+    // The areas keep the Documents view's words.
     expect(
       Object.fromEntries(page.areas.map((area) => [area.area, area.byStatus])),
     ).toEqual({
       'acme/payments': { proved: 0, failed: 1, blocked: 0, 'not-testable': 0, 'not-run': 0 },
-      'acme/logistics': { proved: 0, failed: 0, blocked: 1, 'not-testable': 0, 'not-run': 0 },
+      'acme/logistics': { proved: 1, failed: 0, blocked: 0, 'not-testable': 0, 'not-run': 0 },
     });
   });
 
@@ -323,21 +366,21 @@ describe('GET /api/home', () => {
         runId: 'a-1',
         ranAt: daysAgo(40),
         commit: 'aaa',
-        sections: { [`${REFUNDS}#refunds`]: 'failed' },
+        claims: { [`${REFUNDS}#${REFUNDS_CLAIM}`]: 'failed' },
         flows: { f1: 'failed' },
       });
       await writeGuardRunCoverage(repoB.repoPath, {
         runId: 'b-1',
         ranAt: daysAgo(20),
         commit: 'bbb',
-        sections: { [`${REFUNDS}#refunds`]: 'succeeded' },
+        claims: { [`${REFUNDS}#${REFUNDS_CLAIM}`]: 'succeeded' },
         flows: { g1: 'succeeded' },
       });
       await writeGuardRunCoverage(repoA.repoPath, {
         runId: 'a-2',
         ranAt: daysAgo(2),
         commit: 'aab',
-        sections: { [`${REFUNDS}#refunds`]: 'succeeded' },
+        claims: { [`${REFUNDS}#${REFUNDS_CLAIM}`]: 'succeeded' },
         flows: { f1: 'succeeded' },
       });
     });
@@ -363,7 +406,7 @@ describe('GET /api/home', () => {
         runId: 'c-1',
         ranAt: daysAgo(50),
         commit: 'ccc',
-        sections: { [`${SHIPPING}#shipping`]: 'succeeded' },
+        claims: { [`${SHIPPING}#${SHIPPING_CLAIM}`]: 'succeeded' },
         flows: null,
       });
 
@@ -374,7 +417,7 @@ describe('GET /api/home', () => {
       // there would read as a workspace that had no flows, not one whose flows
       // were never written down.
       expect(page.trend).toHaveLength(3);
-      // Its sections still moved a document, which the changes widget reports.
+      // Its claims still moved a document, which the changes widget reports.
       expect(page.changed.some((row) => row.ref === SHIPPING)).toBe(true);
     });
 
@@ -438,11 +481,13 @@ describe('GET /api/home', () => {
     it('names every linked document nothing can prove, with its blocked count', async () => {
       withProvider();
       await setContextBindings(TEST_ORG, repoA.project.name, [SITE]);
+      // The repository read the documents' claims and generated nothing for them.
+      storedClaims(repoA.repoPath);
 
       const rows = (await home()).attention.filter((row) => row.kind === 'blocked-document');
 
       expect(rows.map((row) => row.title).sort()).toEqual(['Refunds', 'Shipping']);
-      expect(rows[0]).toMatchObject({ status: 'Blocked', fact: '1 section blocked' });
+      expect(rows[0]).toMatchObject({ status: 'Blocked', fact: '1 claim blocked' });
       expect(rows[0]!.href).toMatch(/^\/context\/doc\//);
     });
 

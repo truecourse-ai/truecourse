@@ -23,7 +23,6 @@ import {
   listContextBindings,
   listContextDocuments,
   listContextSources,
-  readContextDocByRef,
 } from '@truecourse/core/lib/context-store';
 import { composeContextDocumentRows, corpusDocSourceId } from '@truecourse/core/services/context';
 import {
@@ -35,10 +34,10 @@ import {
   type HomeSourceRow,
 } from '@truecourse/core/services/home';
 import {
-  docCoverageWords,
+  claimWordsByDoc,
   listGuardFlows,
   readGuardCoverageHistory,
-  readGuardCoverageSources,
+  readGuardClaims,
 } from '@truecourse/core/commands/guard-read';
 import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import { getWorkspaceDecisions } from '@truecourse/core/commands/spec-in-process';
@@ -129,30 +128,20 @@ export function createHomeRouter(deps: HomeRouterDeps = {}): Router {
         ]);
       }
 
-      // One body read per document somebody reads.
-      const bodies = new Map<string, string>();
-      for (const ref of new Set([...refsByRepo.values()].flat())) {
-        const body = await readContextDocByRef(org, ref);
-        if (body !== null) bodies.set(ref, body);
-      }
-
       // One guard-state read per repository, then every document it reads
-      // composed against it, the Documents view's reading kept per SECTION —
-      // plus the repository's FLOWS, which are what the headline counts.
+      // folded from the repository's claims — the Documents view's reading kept
+      // per CLAIM — plus the repository's FLOWS, which are what the headline counts.
       const repos: HomeRepoView[] = [];
       const coverage = new Map<string, Map<string, GuardCoveragePlainStatus>>();
       for (const [repoFullName, refs] of refsByRepo) {
-        const guard = await readGuardCoverageSources(visible.get(repoFullName)!.path, undefined, {
-          externals: false,
-        });
-        const sections = new Map<string, GuardCoveragePlainStatus>();
+        const byDoc = claimWordsByDoc(await readGuardClaims(visible.get(repoFullName)!.path));
+        const claims = new Map<string, GuardCoveragePlainStatus>();
         const blockedReasons = new Map<string, readonly string[]>();
         const docWords = new Map<string, GuardCoveragePlainStatus>();
         for (const ref of new Set(refs)) {
-          const body = bodies.get(ref);
-          if (body === undefined) continue;
-          const words = docCoverageWords(ref, body, guard);
-          for (const [sectionRef, word] of words.sections) sections.set(sectionRef, word);
+          const words = byDoc.get(ref);
+          if (!words) continue;
+          for (const [claimRef, word] of words.claims) claims.set(claimRef, word);
           if (words.blockedReasons.length > 0) blockedReasons.set(ref, words.blockedReasons);
           if (words.doc) docWords.set(ref, words.doc);
         }
@@ -160,7 +149,7 @@ export function createHomeRouter(deps: HomeRouterDeps = {}): Router {
         const flowRows = await readRepoFlows(visible.get(repoFullName)!);
         repos.push({
           repository: repoFullName,
-          sections,
+          claims,
           flows: flowRows.items.map((flow) => flow.status),
           flowRows,
           blockedReasons,
@@ -179,7 +168,7 @@ export function createHomeRouter(deps: HomeRouterDeps = {}): Router {
         if (flowRows.items.length === 0 && history.length === 0) continue;
         repos.push({
           repository: repoFullName,
-          sections: new Map(),
+          claims: new Map(),
           flows: flowRows.items.map((flow) => flow.status),
           flowRows,
           history,

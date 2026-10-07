@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import request from 'supertest';
+import { claimContentHash } from '@truecourse/shared';
 import { type Express } from 'express';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
@@ -45,9 +46,13 @@ const yaml = (id: string, section: string): string =>
     `    section: ${section}`,
     '    fingerprint: "sha256:x"',
     `    sentences: [${section}]`,
+    'flow:',
+    `  id: ${DOC}#${section}`,
+    '  fingerprint: "sha256:x"',
     'driver: cli',
     'steps:',
     '  - run: ["--help"]',
+    '    milestone: 1',
     '    expect:',
     '      exit: 0',
     '',
@@ -74,8 +79,18 @@ async function saveSet(commit: string, ids: Array<[string, string]>, scope?: str
     fs.writeFileSync(path.join(src, 'recipe.json'), JSON.stringify({ build: 'pnpm build', entry: ['node', 'dist/index.js'] }));
     fs.mkdirSync(path.join(src, 'core'), { recursive: true });
     const flows: unknown[] = [];
+    const claims: unknown[] = [];
+    const corpusFlows: unknown[] = [];
     for (const [id, section] of ids) {
       fs.writeFileSync(path.join(src, 'core', `${id}.yaml`), yaml(id, section));
+      const body = { doc: DOC, anchor: section, title: section, claim: `${section}.` };
+      claims.push({ id: `claim::${DOC}::${section}`, ...body, contentHash: claimContentHash(body) });
+      corpusFlows.push({
+        id: `${DOC}#${section}`, title: section, goal: section, fingerprint: 'sha256:x',
+        milestones: [{ order: 1, doc: DOC, anchor: section, claimTitle: section, sentences: [section] }],
+        bindings: [{ doc: DOC, anchor: section, fingerprint: 'sha256:x', sentences: [section] }],
+        composedOf: [], synthesisInputsHash: 'sha256:i',
+      });
       flows.push({
         flowId: `${DOC}#${section}`,
         flowFingerprint: 'sha256:x',
@@ -86,6 +101,8 @@ async function saveSet(commit: string, ids: Array<[string, string]>, scope?: str
       });
     }
     fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ flows }));
+    fs.writeFileSync(path.join(src, 'claims.json'), JSON.stringify({ version: 1, generatedAt: '2026-07-09T00:00:00.000Z', claims, untestable: [] }));
+    fs.writeFileSync(path.join(src, 'flows.json'), JSON.stringify({ version: 1, generatedAt: '2026-07-09T00:00:00.000Z', flows: corpusFlows, noFlowClaims: [] }));
     await guardStore.saveScenarios({ repoKey, commitSha: commit, ...(scope ? { scope } : {}) }, src);
   } finally {
     fs.rmSync(src, { recursive: true, force: true });
@@ -123,12 +140,11 @@ afterEach(async () => {
 });
 
 describe('Guard routes — hosted, commit-scoped', () => {
-  it('scenarios?ref= returns the PR head set with headings joined via the doc reader (no FS)', async () => {
+  it('scenarios?ref= returns the PR head set', async () => {
     await saveSet(HEAD, [['a1', 'alpha']]);
     await saveSet(OTHER, [['z9', 'beta']]);
     const res = await request(app).get(url(`scenarios?ref=${HEAD}`)).expect(200);
     expect(res.body.scenarios.map((s: { id: string }) => s.id)).toEqual(['a1']);
-    expect(res.body.scenarios[0].headingText).toBe('Alpha');
   });
 
   it('latest?ref= returns the run stored at that commit', async () => {
@@ -200,7 +216,7 @@ describe('Guard routes — hosted, commit-scoped', () => {
     expect(res.body.lastGenerate).toMatchObject({ generatedAt: '2026-07-01T00:00:00.000Z' });
   });
 
-  it('status counts the sections of every doc the guard stores name', async () => {
+  it('status counts the claims of the corpus the guard stores hold', async () => {
     // The baseline generate report anchors the repo view's commit, as the hosted job writes it.
     await guardStore.writeGuardResult(
       { repoKey, commitSha: 'baselinesha' },
@@ -222,19 +238,10 @@ describe('Guard routes — hosted, commit-scoped', () => {
     await saveSet('baselinesha', [['a1', 'alpha']]);
     setRepoDocReader(async (_repoKey, docPath) => (docPath === DOC ? DOC_CONTENT : null));
     const res = await request(app).get(url('status')).expect(200);
-    // Alpha (proven) + Beta, both sections of the doc the scenarios bind; the
-    // one without a scenario reads as blocked.
-    expect(res.body.sections).toMatchObject({ total: 2, byStatus: { succeeded: 1, blocked: 1 } });
+    // The one claim of the corpus, proven by the test the flow owns at its birth.
+    expect(res.body.claims).toMatchObject({ total: 1, byStatus: { succeeded: 1 } });
   });
 
-  it('coverage?ref= paints sections from the PR head run (not the baseline)', async () => {
-    await guardStore.writeGuardLatest(repoKey, runAt('baselinesha', 'a1', 'pass'));
-    await guardStore.writeGuardRun(repoKey, runAt(HEAD, 'a1', 'fail'));
-    const res = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}&ref=${HEAD}`)).expect(200);
-    const alpha = res.body.sections.find((s: { anchor: string }) => s.anchor === 'alpha');
-    expect(alpha.status).toBe('fail');
-    expect(res.body.runId).toBe(`run-${HEAD}`);
-  });
 });
 
 describe('Guard routes — versions of the scenario set', () => {
@@ -248,7 +255,7 @@ describe('Guard routes — versions of the scenario set', () => {
 
     const list = await request(app).get(url('versions')).expect(200);
     expect(list.body.versions.map((v: { commitSha: string }) => v.commitSha)).toEqual(['gen2', 'gen1']);
-    expect(list.body.versions[0]).toMatchObject({ artifact: 'scenarios', scope: 'default', fileCount: 4 });
+    expect(list.body.versions[0]).toMatchObject({ artifact: 'scenarios', scope: 'default', fileCount: 6 });
     const scoped = await request(app).get(url('versions?scope=pr%2F7')).expect(200);
     expect(scoped.body.versions.map((v: { commitSha: string }) => v.commitSha)).toEqual(['prhead']);
     await request(app).get(url('versions?artifact=nope')).expect(400);
@@ -271,7 +278,7 @@ describe('Guard routes — versions of the scenario set', () => {
 
     await new Promise((r) => setTimeout(r, 5));
     const restored = await request(app).post(url(`versions/${older.id}/restore`)).expect(200);
-    expect(restored.body.version).toMatchObject({ commitSha: 'gen1', fileCount: 3 });
+    expect(restored.body.version).toMatchObject({ commitSha: 'gen1', fileCount: 5 });
     expect(restored.body.version.id).not.toBe(older.id);
 
     const after = await request(app).get(url('versions')).expect(200);

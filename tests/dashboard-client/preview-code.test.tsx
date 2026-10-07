@@ -32,12 +32,12 @@ vi.mock('@/lib/socket', () => ({
 
 const repo = toDashboardRepo({ id: 'expense-tracker', name: 'expenses', path: '/expenses', provider: 'github', defaultBranch: 'main' });
 const corpus = { corpus: { version: 3, generatedAt: new Date().toISOString(), docs: [], areas: [] } };
-const empty: GuardStatusSummary = { sections: null, coverage: null, lastRun: null, lastGenerate: null };
+const empty: GuardStatusSummary = { claims: null, coverage: null, lastRun: null, lastGenerate: null };
 const counts = { failed: 1, blocked: 1, 'never-run': 1, 'partially-succeeded': 0, succeeded: 3, 'not-testable': 0 };
 function summary(): GuardStatusSummary {
   return {
     ...empty,
-    sections: { total: 6, byStatus: counts },
+    claims: { total: 6, byStatus: counts },
     coverage: {
       totalSections: 4, withScenarios: 4, byStatus: { ...counts, succeeded: 2, 'never-run': 0 },
       classification: { api: 2, web: 2, cli: 0, unclassified: 0, untestable: 0 },
@@ -78,7 +78,7 @@ describe('Code, the repositories and their stored summaries', () => {
     serve();
     renderCode();
     expect(await screen.findByText('50%')).toBeInTheDocument();
-    expect(screen.queryByText(/sections · /)).toBeNull();
+    expect(screen.queryByText(/claims · /)).toBeNull();
     expect(screen.queryByRole('img', { name: /^Flows:/ })).toBeNull();
     expect(row().getByText('Failing')).toBeInTheDocument();
     expect(row().getByText('main')).toBeInTheDocument();
@@ -94,7 +94,7 @@ describe('Code, the repositories and their stored summaries', () => {
     const calls = vi.mocked(fetch).mock.calls.length;
     complete('unrelated-repo');
     expect(vi.mocked(fetch).mock.calls.length).toBe(calls);
-    server.summary = { ...summary(), sections: { total: 6, byStatus: { ...counts, failed: 0, succeeded: 4 } }, lastRun: { ...summary().lastRun!, summary: { total: 2, pass: 2, fail: 0, error: 0, blocked: 0, stale: 0, orphaned: 0 } } };
+    server.summary = { ...summary(), claims: { total: 6, byStatus: { ...counts, failed: 0, succeeded: 4 } }, lastRun: { ...summary().lastRun!, summary: { total: 2, pass: 2, fail: 0, error: 0, blocked: 0, stale: 0, orphaned: 0 } } };
     complete();
     expect(await row().findByText('67%')).toBeInTheDocument();
     expect(row().getByText('Passing')).toBeInTheDocument();
@@ -148,7 +148,7 @@ describe('Code, the repositories and their stored summaries', () => {
   });
 
   it('retains coverage when the baseline read fails and uses manifest totals before whole-corpus totals exist', async () => {
-    const server = serve({ ...summary(), sections: null });
+    const server = serve({ ...summary(), claims: null });
     server.corpusCode = 500;
     renderCode();
     expect(await row().findByText('50%')).toBeInTheDocument();

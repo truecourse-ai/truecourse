@@ -214,7 +214,6 @@ import {
   runnableDriverIds,
   violatesSettleInvariant,
   type GuardSetupTaxonomyKey,
-  dismissedClaimKey,
   type GuardDriverId,
   type GuardFlow,
 } from '@truecourse/shared';
@@ -930,7 +929,7 @@ async function planGuardSessionStages(repoRoot: string, plan: GuardWorkPlan): Pr
   // of the universe — not only the ones with a changed section.
   const docs = collectWorkDocs(repoRoot, { ...plan, work: plan.sections });
   const dismissals = new Map(
-    readGuardDecisions(repoRoot).dismissedClaims.map((d) => [dismissedClaimKey(d.doc, d.anchor, d.title), d] as const),
+    readGuardDecisions(repoRoot).dismissedClaims.map((d) => [d.claimId, d] as const),
   );
   const docSet = new Set(docs.map((d) => d.doc));
   const treeOf = docTreesOf(repoRoot, docSet);

@@ -4,8 +4,8 @@ import { GuardVerificationSchema } from './verification.js'
  * `.truecourse/scenarios/claims.json` (committable, next to `flows.json`).
  *
  * A claim is ONE testable sentence a spec document states. Its identity is
- * `doc` + `anchor` + `title` (the same triple a dismissal matches on and a flow
- * milestone addresses), and it carries the verbatim claim sentence plus a
+ * `doc` + `anchor` + `title` (the triple a flow milestone addresses; a dismissal
+ * names the claim's id), and it carries the verbatim claim sentence plus a
  * CONTENT HASH over exactly that identity-and-sentence material — so a doc edit
  * that moves the claim's anchor or rewords its sentence rolls the hash, and an
  * edit anywhere else in the same section does not. That is what makes
@@ -144,9 +144,8 @@ function normalizeClaimText(text: string): string {
 const NUL = '\u0000'
 
 /**
- * The stable identity key of a claim: `doc` + `anchor` + `title`, NUL-joined.
- * `dismissedClaimKey` delegates to it, so a decision taken against a claim and the
- * claim itself can never key differently.
+ * The stable identity key of a claim: `doc` + `anchor` + `title`, NUL-joined —
+ * what a flow milestone resolves its claim through.
  */
 export function claimIdentityKey(doc: string, anchor: string, title: string): string {
   return `${doc}${NUL}${anchor}${NUL}${title}`

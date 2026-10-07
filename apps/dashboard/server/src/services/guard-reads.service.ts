@@ -19,8 +19,8 @@ import {
 import {
   guardFlowPlainStatus,
   guardResultRunId,
+  guardCoveragePlainStatus,
   isGuardFailure,
-  type GuardClaimCoverage,
   type GuardClaimsView,
   type GuardCoveragePlainStatus,
   type GuardFlowDetail,
@@ -104,19 +104,19 @@ export async function readRepoRunFailures(
 
 /**
  * The claims payload, narrowed: `withFlow` true keeps the claims a flow
- * carries, false the ones none does; `coverage` keeps the claims in one of
- * those states. The totals stay the whole repository's.
+ * carries, false the ones none does; `status` keeps the claims wearing one of
+ * those words. The totals stay the whole repository's.
  */
 export async function readRepoClaims(
   repoPath: string,
-  filter: { withFlow?: boolean; coverage?: readonly GuardClaimCoverage[]; ref?: string } = {},
+  filter: { withFlow?: boolean; status?: readonly GuardCoveragePlainStatus[]; ref?: string } = {},
 ): Promise<GuardClaimsView> {
   const view = await readGuardClaims(repoPath, filter.ref);
-  const coverage = filter.coverage ?? [];
+  const words = filter.status ?? [];
   return {
     ...view,
     claims: view.claims
       .filter((c) => filter.withFlow === undefined || c.flows.length > 0 === filter.withFlow)
-      .filter((c) => coverage.length === 0 || coverage.includes(c.coverage)),
+      .filter((c) => words.length === 0 || words.includes(guardCoveragePlainStatus(c.status))),
   };
 }

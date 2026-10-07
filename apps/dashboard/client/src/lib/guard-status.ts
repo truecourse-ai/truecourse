@@ -36,7 +36,7 @@
  */
 
 import { awaitingDriverIds } from '@truecourse/shared';
-import type { GuardAwaitingDriverId, GuardSectionCoverageStatus } from '@truecourse/shared';
+import type { GuardAwaitingDriverId, GuardCoverageStatus } from '@truecourse/shared';
 import {
   guardStatusHint,
   guardStatusLabel,
@@ -100,7 +100,7 @@ const AWAITING_DRIVER_COLOUR = Object.fromEntries(
   ]),
 ) as Record<GuardAwaitingDriverId, GuardStatusColour>;
 
-const GUARD_STATUS_COLOUR: Record<GuardSectionCoverageStatus, GuardStatusColour> = {
+const GUARD_STATUS_COLOUR: Record<GuardCoverageStatus, GuardStatusColour> = {
   pass: {
     band: 'border-emerald-500 bg-emerald-500/10',
     dot: 'bg-emerald-500',
@@ -173,16 +173,16 @@ const GUARD_STATUS_COLOUR: Record<GuardSectionCoverageStatus, GuardStatusColour>
 
 /** Paint + the vocabulary's words, per status. */
 export const GUARD_STATUS_META = Object.fromEntries(
-  (Object.keys(GUARD_STATUS_COLOUR) as GuardSectionCoverageStatus[]).map((status) => {
+  (Object.keys(GUARD_STATUS_COLOUR) as GuardCoverageStatus[]).map((status) => {
     const hint = guardStatusHint(status);
     return [
       status,
       { ...GUARD_STATUS_COLOUR[status], label: guardStatusLabel(status), ...(hint ? { hint } : {}) },
     ];
   }),
-) as Record<GuardSectionCoverageStatus, GuardStatusMeta>;
+) as Record<GuardCoverageStatus, GuardStatusMeta>;
 
-export function guardStatusMeta(status: GuardSectionCoverageStatus): GuardStatusMeta {
+export function guardStatusMeta(status: GuardCoverageStatus): GuardStatusMeta {
   return GUARD_STATUS_META[status];
 }
 
@@ -198,7 +198,7 @@ const PARTIAL_COLOUR: GuardStatusColour = {
 };
 
 /** The coverage status each plain status borrows its colour from. */
-const BADGE_SOURCE: Record<Exclude<GuardFlowPlainStatus, 'partially-succeeded'>, GuardSectionCoverageStatus> = {
+const BADGE_SOURCE: Record<Exclude<GuardFlowPlainStatus, 'partially-succeeded'>, GuardCoverageStatus> = {
   failed: 'fail',
   blocked: 'blocked-on',
   'not-testable': 'untestable',
@@ -220,6 +220,6 @@ export function guardFlowStatusDot(status: GuardFlowPlainStatus): string {
 }
 
 /** The `border-l-4 …` wrapper classes for a section's band. */
-export function guardBandClasses(status: GuardSectionCoverageStatus): string {
+export function guardBandClasses(status: GuardCoverageStatus): string {
   return `border-l-4 ${GUARD_STATUS_META[status].band}`;
 }

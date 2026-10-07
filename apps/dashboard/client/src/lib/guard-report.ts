@@ -17,7 +17,6 @@ import type {
   GuardGapDisplayKind,
   GuardGenerateError,
   GuardGenerateReport,
-  GuardNeedsSetup,
 } from '@truecourse/shared';
 
 /** Changed sections split the way the generate report counts them. */
@@ -85,11 +84,8 @@ export interface BlockedOnEntry {
 }
 
 /**
- * Tally capability nouns across many blocked-on sections, one increment per
- * (section, capability), descending by count then name. The single tally used by
- * both the Coverage totals strip (over the doc's blocked-on sections) and the
- * gaps-based {@link blockedOnTally} (over the generate report), so there is one
- * implementation, not two.
+ * Tally capability nouns across many blocked-on gaps, one increment per
+ * (gap, capability), descending by count then name.
  */
 export function tallyCapabilities(capabilityLists: Iterable<readonly string[]>): BlockedOnEntry[] {
   const tally: Record<string, number> = {};
@@ -108,46 +104,6 @@ export function tallyCapabilities(capabilityLists: Iterable<readonly string[]>):
 export function blockedOnTally(gaps: readonly GuardCoverageGap[]): BlockedOnEntry[] {
   return tallyCapabilities(
     gaps.filter((g) => g.kind === 'blocked-on').map((g) => parseBlockedOnCapabilities(g.reason)),
-  );
-}
-
-/** One providable service and the sections waiting on it. */
-export interface NeedsSetupEntry {
-  service: string;
-  count: number;
-  /** True when the account is ALREADY provided, the gap is stale, re-generate. */
-  provided: boolean;
-}
-
-/**
- * Tally the SERVICES behind a doc's `needs-setup` sections, one increment per
- * (section, service), still-to-provide first, then descending by count and name.
- * `provided` marks the "setup done" sub-state: nothing to fill in, the flows just
- * need the next `guard generate`. A service that appears in both readings counts
- * as still-to-provide (something is genuinely missing somewhere).
- */
-export function tallyNeedsSetup(
-  needsSetups: Iterable<GuardNeedsSetup | undefined>,
-): NeedsSetupEntry[] {
-  const tally = new Map<string, NeedsSetupEntry>();
-  const bump = (service: string, provided: boolean): void => {
-    const entry = tally.get(service);
-    if (!entry) tally.set(service, { service, count: 1, provided });
-    else {
-      entry.count += 1;
-      entry.provided = entry.provided && provided;
-    }
-  };
-  for (const needsSetup of needsSetups) {
-    if (!needsSetup) continue;
-    for (const service of needsSetup.services) bump(service, false);
-    for (const service of needsSetup.provided) bump(service, true);
-  }
-  return [...tally.values()].sort(
-    (a, b) =>
-      Number(a.provided) - Number(b.provided) ||
-      b.count - a.count ||
-      a.service.localeCompare(b.service),
   );
 }
 

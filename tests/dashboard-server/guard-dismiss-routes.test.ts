@@ -49,7 +49,7 @@ describe('Guard dismiss + finding-evidence routes', () => {
     resetGuardStore();
   });
 
-  const claim = { doc: DOC, anchor: 'version', title: 'the --version flag prints the semver' };
+  const claim = { claimId: `claim::${DOC}::version` };
 
   it('decisions is empty until something is dismissed', async () => {
     const res = await request(app).get(url('decisions')).expect(200);

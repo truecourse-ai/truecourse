@@ -11,6 +11,7 @@
 
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import fs from 'node:fs'
+import { specClaimsFilePath } from '@truecourse/shared/work-tree'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runnableDriverIds } from '@truecourse/shared'
@@ -132,6 +133,14 @@ async function generateAndWarm(r: string, extractor = extract, author = worker, 
 // ---------------------------------------------------------------------------
 // One model, so one price.
 // ---------------------------------------------------------------------------
+
+/** The id of the claim whose statement is `statement`, as `specs/claims.json` holds it. */
+function claimIdOf(repoRoot: string, statement: string): string {
+  const file = JSON.parse(fs.readFileSync(specClaimsFilePath(repoRoot), 'utf-8')) as { claims: { id: string; statement: string }[] }
+  const claim = file.claims.find((c) => c.statement === statement)
+  if (!claim) throw new Error(`no claim states "${statement}"`)
+  return claim.id
+}
 
 describe('estimateGuardTokens — every stage priced at the one model', () => {
   const savedModel = process.env.TRUECOURSE_MODEL
@@ -281,15 +290,14 @@ describe('estimateGuardTokens — cache awareness', () => {
     })
     expect((await stagesOf(r)).has(FLOWS_SESSION_KIND)).toBe(false)
 
-    // Dismiss the area's one claim: the run's area material changes, so its key
-    // changes, so the previously-cached area is a MISS again.
+    // Dismiss the area's one claim, by the id the scan gave it: the run's area
+    // material changes, so its key changes, so the previously-cached area is a
+    // MISS again.
     fs.writeFileSync(
       path.join(r, '.truecourse', 'scenarios', 'decisions.json'),
       JSON.stringify({
         version: 1,
-        dismissedClaims: [
-          { doc: DOC, anchor: 'version', title: 'version claim', dismissedAt: '2026-01-01T00:00:00Z' },
-        ],
+        dismissedClaims: [{ claimId: claimIdOf(r, 'version claim'), dismissedAt: '2026-01-01T00:00:00Z' }],
         dismissedFlows: [],
       }),
     )

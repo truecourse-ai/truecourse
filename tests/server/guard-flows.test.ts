@@ -12,7 +12,6 @@ import {
   GuardFlowsViewCoreSchema,
   GuardInterfacesViewSchema,
   GuardRunFlowSchema,
-  GuardSectionFlowSchema,
   GUARD_COVERAGE_STATUS_WORD,
   guardCoverageWord,
   type GuardCoveragePlainStatus,
@@ -439,138 +438,11 @@ describe('Guard flow read surfaces', () => {
 
     const latest = await request(app).get(url('latest')).expect(200);
     expect(() => z.array(GuardRunFlowSchema).parse(latest.body.runFlows)).not.toThrow();
-
-    const coverage = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
-    for (const section of coverage.body.sections) {
-      expect(() => z.array(GuardSectionFlowSchema).parse(section.flows)).not.toThrow();
-    }
-  });
-
-  // --- Coverage inversion: a section lists FLOWS ----------------------------
-
-  describe('coverage — a section carries its flows, never scenarios', () => {
-    it('lists the flows traversing each section with their milestone positions', async () => {
-      seed();
-      const res = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
-      const byAnchor = new Map<string, any>(res.body.sections.map((s: any) => [s.anchor, s]));
-
-      const creating = byAnchor.get('tasks/creating-tasks');
-      expect(creating.flows).toHaveLength(1);
-      expect(creating.flows[0]).toMatchObject({
-        flowId: FLOW_ID,
-        title: FLOWS_FILE.flows[0].title,
-        epic: false,
-        manual: false,
-        milestonesInSection: [1],
-        milestoneCount: 4,
-      });
-      // Both surfaces ride the flow: the cli scenario (painted by the run) and the
-      // tui gap that explains why there is no second scenario.
-      expect(creating.flows[0].surfaces).toEqual([
-        expect.objectContaining({ surface: 'cli', scenarioId: SCENARIO_ID, status: 'fail', outcome: 'fail', interfaceDrifted: true }),
-        expect.objectContaining({
-          surface: 'tui',
-          status: 'tui',
-          gap: { kind: 'awaiting-driver', driver: 'tui', reason: 'the board is terminal-only', label: 'awaiting tui driver' },
-        }),
-      ]);
-      expect(creating.scenarioIds).toEqual([SCENARIO_ID]);
-
-      // A milestone landing twice in one section reports both positions.
-      expect(byAnchor.get('tasks/completing-tasks').flows[0].milestonesInSection).toEqual([3, 4]);
-    });
-
-    it('rolls the section up to the WORST status over its flows (a run beats a gap)', async () => {
-      seed();
-      const res = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
-      const listing = res.body.sections.find((s: any) => s.anchor === 'tasks/listing-tasks');
-      // Two flows bind this section: the failing lifecycle and the unrealized
-      // export (a `no-interface` gap). The failure wins.
-      expect(listing.flows.map((f: any) => [f.flowId, f.status])).toEqual([
-        [FLOW_ID, 'fail'],
-        ['task-export', 'no-interface'],
-      ]);
-      expect(listing.status).toBe('fail');
-    });
-
-    it('groups a hand-written scenario under its Manual pseudo-flow', async () => {
-      seed();
-      const res = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
-      const overview = res.body.sections.find((s: any) => s.anchor === 'tasks');
-      expect(overview.flows).toEqual([
-        expect.objectContaining({
-          flowId: `manual:${MANUAL_ID}`,
-          title: '`tasks --help` prints usage',
-          manual: true,
-          status: 'pass',
-          milestoneCount: 0,
-        }),
-      ]);
-      // The section also carries a claim-level `no-claim` gap, but a run outcome
-      // outranks a generate-time verdict.
-      expect(overview.status).toBe('pass');
-    });
-
-    it('still paints a claim-level gap on a section no flow binds', async () => {
-      seed();
-      // Drop the manual scenario's run so the overview section has no flow at all.
-      writeJson('.truecourse/guard/LATEST.json', {
-        ...LATEST,
-        scenarios: LATEST.scenarios.filter((s) => s.id !== MANUAL_ID),
-      });
-      const res = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
-      const overview = res.body.sections.find((s: any) => s.anchor === 'tasks');
-      expect(overview.flows).toEqual([]);
-      // No flow, no run — the section's status comes from its gapped CLAIMS, and
-      // the reason that names one wins over the claim-less coverage gap.
-      expect(overview).toMatchObject({
-        status: 'untestable',
-        reason: 'implementation detail — nothing observable on any surface',
-      });
-      expect(guardCoverageWord(overview.status)).toBe('Not testable');
-      // Both records still show in the detail — the mix is never hidden.
-      expect(overview.claimGaps).toEqual([
-        expect.objectContaining({ title: 'Tasks are stored in a local file' }),
-        expect.objectContaining({ reason: 'the overview asserts nothing' }),
-      ]);
-    });
-
-    it('derives a Blocked section from its no-flow claims alone, never a mute bucket', async () => {
-      // The reference-store shape: a section whose every claim landed in
-      // `noFlowClaims`, with no coverage gap of its own and no flow binding it.
-      // Before claim-keyed derivation this read `unguarded` ("Not generated").
-      seed();
-      // `tasks` is the preamble section: no flow binds it, and with the manual
-      // scenario's run dropped it has no verdict either.
-      writeJson('.truecourse/scenarios/flows.json', {
-        ...FLOWS_FILE,
-        noFlowClaims: [
-          {
-            doc: DOC,
-            anchor: 'tasks',
-            claimTitle: 'Tasks are managed through the guard CLI',
-            reason: 'blocked-on layer 2: no `cli/guard` interface has been derived.',
-          },
-        ],
-      });
-      writeJson('.truecourse/guard/result.json', { ...RESULT, coverageGaps: [] });
-      writeJson('.truecourse/guard/LATEST.json', {
-        ...LATEST,
-        scenarios: LATEST.scenarios.filter((s) => s.id !== MANUAL_ID),
-      });
-
-      const res = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
-      const section = res.body.sections.find((s: any) => s.anchor === 'tasks');
-      expect(section.flows).toEqual([]);
-      expect(section.status).toBe('no-interface');
-      expect(guardCoverageWord(section.status)).toBe('Blocked');
-      expect(section.reason).toContain('no `cli/guard` interface');
-    });
   });
 
   // --- Flows tab: list + detail --------------------------------------------
 
-  it('rolls complete alternatives up identically in the list, detail and section coverage', async () => {
+  it('rolls complete alternatives up identically in the list and the detail', async () => {
     seed();
     const milestones = FLOWS_FILE.flows[0].milestones.map((m) => ({ ...m, proofDrivers: ['cli', 'api'] }));
     writeJson('.truecourse/scenarios/flows.json', {
@@ -593,14 +465,10 @@ describe('Guard flow read surfaces', () => {
     const detail = await request(app).get(url(`flows/${FLOW_ID}`)).expect(200);
     expect(GuardFlowDetailSchema.safeParse(detail.body).success).toBe(true);
     expect(detail.body).toMatchObject({ status: 'pass', bucket: 'guarded' });
-    const coverage = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
-    expect(coverage.body.sections.find((s: any) => s.anchor === 'tasks/creating-tasks').status).toBe('pass');
     // Local edits are read from the scenario, even if the manifest still describes the old full proof.
     write(SCENARIO_FILE, SCENARIO_YAML.replace('    milestone: 4', ''));
     const partialList = await request(app).get(url('flows')).expect(200);
     expect(partialList.body.flows.find((f: any) => f.flowId === FLOW_ID)).toMatchObject({ status: 'no-interface', bucket: 'partial' });
-    const partialCoverage = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
-    expect(partialCoverage.body.sections.find((s: any) => s.anchor === 'tasks/creating-tasks').status).toBe('no-interface');
   });
 
   describe('flows list', () => {
@@ -740,22 +608,15 @@ describe('Guard flow read surfaces', () => {
   });
 
   describe('flow detail', () => {
-    it('renders the milestone chain against the live sections, with drift', async () => {
+    it('renders the milestone chain as the corpus states it', async () => {
       seed();
       const res = await request(app).get(url(`flows/${FLOW_ID}`)).expect(200);
       expect(res.body).toMatchObject({ flowId: FLOW_ID, status: 'fail', bucket: 'partial', manual: false, epic: false });
       expect(res.body.milestones).toHaveLength(4);
-      expect(res.body.milestones[0]).toMatchObject({
-        order: 1,
-        anchor: 'tasks/creating-tasks',
-        headingText: 'Creating tasks',
-        live: true,
-        boundFingerprint: FP.creating,
-        currentFingerprint: FP.creating,
-        drifted: false,
-      });
-      // The flow bound "Completing tasks" before it was edited.
-      expect(res.body.milestones[2]).toMatchObject({ anchor: 'tasks/completing-tasks', headingText: 'Completing tasks', drifted: true });
+      expect(res.body.milestones[0]).toMatchObject({ order: 1, doc: DOC, anchor: 'tasks/creating-tasks' });
+      // No section is joined: a milestone is its claim and the document it is stated in.
+      expect(res.body.milestones[0].headingText).toBeUndefined();
+      expect(res.body.milestones[2]).toMatchObject({ anchor: 'tasks/completing-tasks' });
     });
 
     it('carries the per-surface scenario rows, gaps, interfaces and findings', async () => {
@@ -1445,22 +1306,6 @@ describe('Guard flow read surfaces', () => {
       // No LATEST.json: the test has never been through a `guard run`.
     }
 
-    it('gives the section a NON-EMPTY surface list painted from the birth status', async () => {
-      seedBornRed();
-      const res = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
-      const listing = res.body.sections.find((s: any) => s.anchor === 'tasks/listing-tasks');
-
-      expect(listing.flows).toHaveLength(1);
-      expect(listing.flows[0].surfaces).toEqual([
-        expect.objectContaining({ surface: 'cli', scenarioId: RED_SCENARIO, status: 'fail', stage: 'birth' }),
-      ]);
-      // No run has an outcome for it, so the row carries none — only the status.
-      expect(listing.flows[0].surfaces[0].outcome).toBeUndefined();
-      expect(listing.flows[0].status).toBe('fail');
-      expect(listing.status).toBe('fail');
-      expect(listing.scenarioIds).toEqual([RED_SCENARIO]);
-    });
-
     it('renders the flow detail row with the BIRTH failure and its evidence pointer', async () => {
       seedBornRed();
       const res = await request(app).get(url(`flows/${RED_FLOW}`)).expect(200);
@@ -1592,12 +1437,8 @@ describe('Guard flow read surfaces', () => {
         expect(res.body.status).toBe('never-run');
       });
 
-      it('rolls the section up as never-run, and the FIRST run overrides it', async () => {
+      it('the FIRST run overrides never-run on the flow detail', async () => {
         seedNeverRun();
-        const coverage = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
-        const listing = coverage.body.sections.find((s: any) => s.anchor === 'tasks/listing-tasks');
-        expect(listing.status).toBe('never-run');
-
         writeJson('.truecourse/guard/LATEST.json', {
           run: {
             runId: RUN_ID,

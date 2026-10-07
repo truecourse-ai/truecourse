@@ -130,7 +130,8 @@ import {
   autoResolutionKey,
   composeBlockedOnReason,
   bindRealizes,
-  dismissedClaimKey,
+  claimIdDoc,
+  claimIdentityKey,
   firstInvalidMatchPattern,
   guardDriver,
   guardScenarioDrivers,
@@ -1198,13 +1199,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const extractionFailures: GuardExtractionFailure[] = []
 
   // The user's curation (`scenarios/decisions.json`, stored per repository). A dismissed claim
-  // (identity = doc + anchor + the extracted claim's stable text) never becomes a
-  // milestone; a dismissed FLOW is dropped whole. Both settle as visible `dismissed`
-  // gaps rather than silently disappearing.
+  // (by its id) never becomes a milestone; a dismissed FLOW is dropped whole. Both
+  // settle as visible `dismissed` gaps rather than silently disappearing.
   const decisions = readGuardDecisions(repoRoot)
-  const dismissalByKey = new Map<string, GuardDismissedClaim>(
-    decisions.dismissedClaims.map((d) => [dismissedClaimKey(d.doc, d.anchor, d.title), d]),
-  )
+  const dismissalByKey = new Map<string, GuardDismissedClaim>(decisions.dismissedClaims.map((d) => [d.claimId, d]))
   const flowDismissalById = new Map(decisions.dismissedFlows.map((d) => [d.flowId, d]))
 
   // The durable auto-resolve ledger — escalation counts + the flow-taint
@@ -1316,14 +1314,19 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   coverageGaps.push(...inventory.gaps)
   for (const line of inventory.lines) fact('extract', line)
   const areaInputs = inventory.inputs
-  const liveClaimKeys = inventory.claimKeys
+  const liveClaimIds = inventory.claimIds
+  // A flow milestone names its claim by identity; the dismissal ledger by id.
+  const claimIdByIdentity = new Map(placement.placed.map((p) => [claimIdentityKey(p.claim.doc, p.anchor, p.claim.statement), p.claim.id]))
   options.onClaims?.(placement.placed.length, docs.length)
 
   // Orphan honesty: a dismissal naming a claim the scan no longer reads from
   // its document is stale — surfaced so it is never silently honored.
   const orphanedDismissals: GuardOrphanedDismissal[] = decisions.dismissedClaims
-    .filter((d) => docSet.has(d.doc) && !liveClaimKeys.has(dismissedClaimKey(d.doc, d.anchor, d.title)))
-    .map((d) => ({ doc: d.doc, anchor: d.anchor, title: d.title }))
+    .filter((d) => {
+      const doc = claimIdDoc(d.claimId)
+      return doc !== null && docSet.has(doc) && !liveClaimIds.has(d.claimId)
+    })
+    .map((d) => ({ claimId: d.claimId }))
 
   // The claim corpus every claim reference resolves against at load time
   // (`scenarios/claims.json`), written whole from the scan's claims BEFORE
@@ -4209,7 +4212,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     retiredFlows
       .filter((f) =>
         f.milestones.length > 0 &&
-        f.milestones.every((m) => dismissalByKey.has(dismissedClaimKey(m.doc, m.anchor, m.claimTitle))),
+        f.milestones.every((m) => dismissalByKey.has(claimIdByIdentity.get(claimIdentityKey(m.doc, m.anchor, m.claimTitle)) ?? '')),
       )
       .map((f) => f.id),
   )

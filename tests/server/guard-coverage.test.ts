@@ -1,292 +1,260 @@
 import { describe, it, expect } from 'vitest';
-import { composeDocCoverage } from '../../packages/core/src/commands/guard-read';
+import { claimWordsByDoc, composeClaimCoverage } from '../../packages/core/src/commands/guard-read';
+import { claimContentHash } from '../../packages/shared/src/guard/claims';
 import { composeBlockedOnReason } from '../../packages/shared/src/guard/report';
 import type {
-  GuardManifest,
-  GuardLatest,
+  GuardClaimsFile,
+  GuardCoverageStatus,
+  GuardFlowsFile,
   GuardGenerateReport,
-  GuardScenarioResult,
+  GuardLatest,
+  GuardManifest,
 } from '../../packages/shared/src/index';
+
+/**
+ * The claim-keyed coverage join: every claim of the corpus wears the worst word
+ * over the flows that carry it, a claim no flow carries wears what the corpus's
+ * no-flow record says about it, and a dismissed claim wears the ruling.
+ */
 
 const DOC = 'docs/spec.md';
 
-// A doc whose H1 siblings slugify to single-segment anchors (s-pass, s-fail, …),
-// one per coverage status the join can produce on a LIVE section.
-const CONTENT = [
-  '# S Pass', 'a',
-  '# S Fail', 'b',
-  '# S Error', 'c',
-  '# S Stale', 'd',
-  '# S Guarded', 'e',
-  '# S Api', 'f',
-  '# S Web', 'g',
-  '# S Tui', 'h',
-  '# S Untestable', 'i',
-  '# S No Claim', 'j',
-  '# S Blocked', 'k',
-  '# S Unguarded', 'l',
-  '# S Moved', 'm',
-  '# S Author Error', 'n',
-].join('\n');
+const claimOf = (title: string) => {
+  const body = { doc: DOC, anchor: 'spec', title, claim: `${title}.` };
+  return { id: `claim::${DOC}::${title.replace(/\W+/g, '-').toLowerCase()}`, ...body, contentHash: claimContentHash(body) };
+};
 
-const fp = 'sha256:seed';
-const binds = (section: string) => ({ doc: DOC, section, fingerprint: fp });
+/** One flow per claim, each with the given manifest scenario status and run outcome. */
+const CASES = [
+  { title: 'passes', scenario: 'passing', outcome: 'pass' },
+  { title: 'fails', scenario: 'passing', outcome: 'fail' },
+  { title: 'errors', scenario: 'passing', outcome: 'error' },
+  { title: 'went stale', scenario: 'passing', outcome: 'stale' },
+  { title: 'was guarded earlier', scenario: 'passing', outcome: null },
+  { title: 'never ran', scenario: 'never-run', outcome: null },
+] as const;
 
-function scenario(over: Partial<GuardScenarioResult> & { id: string; section: string; outcome: GuardScenarioResult['outcome'] }): GuardScenarioResult {
-  const { section, ...rest } = over;
-  return { title: `t ${over.id}`, durationMs: 1, binds: binds(section), ...rest } as GuardScenarioResult;
-}
+const claims: GuardClaimsFile = {
+  version: 1,
+  generatedAt: '2026-08-07T00:00:00.000Z',
+  claims: [
+    ...CASES.map((c) => claimOf(c.title)),
+    claimOf('is blocked on an interface'),
+    claimOf('is not observable'),
+    claimOf('nothing accounts for'),
+    claimOf('was dismissed'),
+    claimOf('awaits authoring'),
+  ],
+  untestable: [{ doc: DOC, anchor: 'spec', text: 'Specs are the heart of the product.', reason: 'states no behaviour' }],
+};
+const byTitle = (title: string) => claims.claims.find((c) => c.title === title)!;
 
-const latest: GuardLatest = {
+const flowOf = (title: string) => ({
+  id: `flow-${byTitle(title).id}`,
+  title: `A user ${title}`,
+  goal: title,
+  fingerprint: `sha256:${title}`,
+  milestones: [{ order: 1, doc: DOC, anchor: 'spec', claimTitle: title, sentences: ['s'] }],
+  bindings: [{ doc: DOC, anchor: 'spec', fingerprint: 'sha256:s', sentences: ['s'] }],
+  composedOf: [],
+  synthesisInputsHash: 'sha256:i',
+});
+
+const flows: GuardFlowsFile = {
+  version: 1,
+  generatedAt: '2026-08-07T00:00:00.000Z',
+  flows: [...CASES.map((c) => flowOf(c.title)), flowOf('awaits authoring')],
+  noFlowClaims: [
+    { doc: DOC, anchor: 'spec', claimTitle: 'is blocked on an interface', reason: 'no `cli/spec` interface has been derived.' },
+    { doc: DOC, anchor: 'spec', claimTitle: 'is not observable', reason: 'unobservable via CLI — nothing prints it.' },
+  ],
+};
+
+const manifest = {
+  version: 1,
+  flows: CASES.map((c) => ({
+    flowId: flowOf(c.title).id,
+    flowFingerprint: flowOf(c.title).fingerprint,
+    bindings: flowOf(c.title).bindings,
+    scenarios: [{ id: `${flowOf(c.title).id}.cli.1`, drivers: ['cli'], status: c.scenario }],
+    interfaces: [],
+    generationInputsHash: null,
+    gaps: [],
+  })),
+} as unknown as GuardManifest;
+
+const latest = {
   run: { runId: 'r1', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:r' },
-  summary: { total: 6, pass: 2, fail: 1, stale: 1, orphaned: 1, error: 1 },
-  scenarios: [
-    scenario({ id: 'sp', section: 's-pass', outcome: 'pass' }),
-    scenario({ id: 'sf', section: 's-fail', outcome: 'fail', failure: { step: 1, expected: 'x', actual: 'y' }, evidencePath: '.truecourse/guard/evidence/r1/sf' }),
-    scenario({ id: 'se', section: 's-error', outcome: 'error', failure: { step: 2, expected: 'p', actual: 'q' } }),
-    scenario({ id: 'ss', section: 's-stale', outcome: 'stale', currentFingerprint: 'sha256:new' }),
-    scenario({ id: 'sm', section: 's-old', outcome: 'pass', remappedTo: 's-moved' }),
-    scenario({ id: 'so', section: 's-removed', outcome: 'orphaned' }),
-  ],
-  // The join reads `scenarios`, not the rollups (remap-correct), so leave empty.
+  summary: { total: 4, pass: 1, fail: 1, stale: 1, orphaned: 0, error: 1 },
+  scenarios: CASES.filter((c) => c.outcome).map((c) => ({
+    id: `${flowOf(c.title).id}.cli.1`,
+    title: c.title,
+    binds: { doc: DOC, section: 'spec', fingerprint: 'sha256:s', sentences: ['s'] },
+    outcome: c.outcome,
+    durationMs: 1,
+    ...(c.outcome === 'fail' ? { failure: { step: 1, expected: 'x', actual: 'y' }, evidencePath: '.truecourse/guard/evidence/r1/f' } : {}),
+    ...(c.outcome === 'stale' ? { currentFingerprint: 'sha256:new' } : {}),
+  })),
   sections: [],
-};
+} as unknown as GuardLatest;
 
-const manifest: GuardManifest = {
-  flows: [
-    {
-      flowId: `${DOC}#s-guarded`,
-      flowFingerprint: fp,
-      bindings: [{ doc: DOC, anchor: 's-guarded', fingerprint: fp, sentences: ['s-guarded'] }],
-      scenarios: [{ id: 'sg1', drivers: ['cli'] }],
-      generationInputsHash: null,
-      gaps: [],
-    },
-  ],
-};
-
-const result: GuardGenerateReport = {
+const result = {
   generatedAt: '2026-07-06T00:00:00.000Z',
   status: 'ok',
-  sectionsTotal: 14,
+  sectionsTotal: 1,
   sectionsChanged: 0,
-  skippedUnchanged: 14,
+  skippedUnchanged: 1,
   noChanges: false,
   written: [],
-  coverageGaps: [
-    { doc: DOC, anchor: 's-api', kind: 'awaiting-driver', driver: 'library', reason: 'import-only surface' },
-    { doc: DOC, anchor: 's-tui', kind: 'awaiting-driver', driver: 'tui', reason: 'terminal UI only' },
-    { doc: DOC, anchor: 's-no-claim', kind: 'no-claim', reason: 'no assertable claim' },
-    { doc: DOC, anchor: 's-blocked', kind: 'blocked-on', reason: composeBlockedOnReason(['git', 'db'], 'needs a git repo and a database') },
-    { doc: DOC, anchor: 's-web', kind: 'awaiting-driver', driver: 'desktop', reason: 'desktop-only' },
-    { doc: DOC, anchor: 's-untestable', kind: 'untestable', reason: 'no CLI surface' },
-  ],
+  coverageGaps: [],
   birthFindings: [],
-  // The flow bound to `s-author-error` could not be authored: no scenario, no gap.
+  // The flow carrying "awaits authoring" could not be authored: no scenario, no gap.
   errors: [
-    {
-      doc: DOC,
-      anchor: 's-author-error',
-      kind: 'authoring',
-      flowId: 'author-error-flow',
-      surface: 'cli',
-      message: 'authoring (cli) call failed: claude timed out after 600000ms',
-    },
-    {
-      doc: DOC,
-      anchor: 's-author-error',
-      kind: 'authoring',
-      flowId: 'author-error-flow',
-      surface: 'cli',
-      message: 'authoring (cli) call failed: claude timed out after 600000ms',
-    },
+    { doc: DOC, anchor: 'spec', kind: 'authoring', flowId: flowOf('awaits authoring').id, surface: 'cli', message: 'authoring (cli) call failed' },
   ],
   extractionFailures: [],
   orphaned: [],
+} as unknown as GuardGenerateReport;
+
+const decisions = {
+  version: 1 as const,
+  dismissedClaims: [{ claimId: byTitle('was dismissed').id, dismissedAt: '2026-08-07T00:00:00.000Z', note: 'repo hygiene, not product' }],
+  dismissedFlows: [],
 };
 
-describe('composeDocCoverage — per-section join (all statuses)', () => {
-  const cov = composeDocCoverage(DOC, CONTENT, { manifest, latest, result });
-  const byAnchor = new Map(cov.sections.map((s) => [s.anchor, s]));
-  const status = (a: string) => byAnchor.get(a)?.status;
+describe('composeClaimCoverage — every status, keyed by the claim', () => {
+  const view = composeClaimCoverage({ manifest, latest, result, flows, claims, decisions });
+  const status = (title: string): GuardCoverageStatus | undefined => view.claims.find((c) => c.id === byTitle(title).id)?.status;
+  const row = (title: string) => view.claims.find((c) => c.id === byTitle(title).id)!;
 
-  it('maps run outcomes from the last run onto live sections', () => {
-    expect(status('s-pass')).toBe('pass');
-    expect(status('s-fail')).toBe('fail');
-    expect(status('s-error')).toBe('error');
-    expect(status('s-stale')).toBe('stale');
+  it('wears the run outcome of the flow that carries it', () => {
+    expect(status('passes')).toBe('pass');
+    expect(status('fails')).toBe('fail');
+    expect(status('errors')).toBe('error');
+    expect(status('went stale')).toBe('stale');
   });
 
-  it('carries failure detail + evidence pointer for a failed section', () => {
-    const sf = byAnchor.get('s-fail')!;
-    expect(sf.scenarios[0].failure).toEqual({ step: 1, expected: 'x', actual: 'y' });
-    expect(sf.scenarios[0].evidencePath).toBe('.truecourse/guard/evidence/r1/sf');
-    expect(sf.scenarioIds).toEqual(['sf']);
+  it('wears the birth status when no run covers the flow', () => {
+    expect(status('was guarded earlier')).toBe('guarded');
+    expect(status('never ran')).toBe('never-run');
   });
 
-  it('surfaces the edited fingerprint on a stale section', () => {
-    expect(byAnchor.get('s-stale')!.scenarios[0].currentFingerprint).toBe('sha256:new');
+  it('wears the kind the no-flow record states, with its reason', () => {
+    expect(row('is blocked on an interface')).toMatchObject({ status: 'no-interface', flows: [] });
+    expect(row('is blocked on an interface').reason).toContain('cli/spec');
+    expect(row('is not observable')).toMatchObject({ status: 'untestable', flows: [] });
   });
 
-  it('marks a section with scenarios but no run outcome as guarded', () => {
-    const sg = byAnchor.get('s-guarded')!;
-    expect(sg.status).toBe('guarded');
-    expect(sg.scenarioIds).toEqual(['sg1']);
+  it('is unguarded when nothing accounts for it', () => {
+    expect(row('nothing accounts for')).toMatchObject({ status: 'unguarded', flows: [] });
+    expect(row('nothing accounts for').reason).toBeUndefined();
   });
 
-  it('maps coverage gaps (library / tui / no-claim) with their reasons', () => {
-    expect(status('s-api')).toBe('library');
-    expect(byAnchor.get('s-api')!.reason).toBe('import-only surface');
-    expect(status('s-tui')).toBe('tui');
-    expect(status('s-no-claim')).toBe('no-claim');
+  it('wears the ruling when dismissed, whatever else says', () => {
+    expect(row('was dismissed')).toMatchObject({ status: 'dismissed', dismissed: true, reason: 'repo hygiene, not product' });
   });
 
-  it('parses blocked-on capabilities from the gap reason', () => {
-    const sb = byAnchor.get('s-blocked')!;
-    expect(sb.status).toBe('blocked-on');
-    expect(sb.blockedOnCapabilities).toEqual(['git', 'db']);
+  // "Generate tried and could not" is NOT "nothing was ever tried".
+  it('paints a claim whose flow only errored at authoring as authoring-error', () => {
+    const r = row('awaits authoring');
+    expect(r.status).toBe('authoring-error');
+    expect(r.flows.map((f) => f.flowId)).toEqual([flowOf('awaits authoring').id]);
+    expect(r.flows[0].surfaces).toEqual([{ surface: 'cli', status: 'authoring-error' }]);
   });
 
-  it('reads the awaiting-driver / untestable gaps (desktop driver, untestable)', () => {
-    expect(status('s-web')).toBe('desktop');
-    expect(byAnchor.get('s-web')!.reason).toBe('desktop-only');
-    expect(status('s-untestable')).toBe('untestable');
-    expect(byAnchor.get('s-untestable')!.reason).toBe('no CLI surface');
-  });
-
-  it('marks a section with nothing bound as unguarded', () => {
-    expect(status('s-unguarded')).toBe('unguarded');
-  });
-
-  // "Generate tried and could not" is NOT "nothing was ever tried" — before this
-  // the two painted identically and the failure disappeared from every total.
-  it('paints a section whose flow only errored at authoring as authoring-error', () => {
-    const sa = byAnchor.get('s-author-error')!;
-    expect(sa.status).toBe('authoring-error');
-    expect(sa.flows.map((f) => f.flowId)).toEqual(['author-error-flow']);
-    expect(sa.flows[0].surfaces).toEqual([{ surface: 'cli', status: 'authoring-error' }]);
-    expect(sa.scenarioIds).toEqual([]);
-  });
-
-  it('re-anchors a moved section via remappedTo', () => {
-    const sm = byAnchor.get('s-moved')!;
-    expect(sm.status).toBe('pass');
-    expect(sm.scenarios[0].remappedTo).toBe('s-moved');
-    // The old anchor is not a live section.
-    expect(byAnchor.has('s-old')).toBe(false);
-  });
-
-  it('collects guards for removed sections into orphanedSections', () => {
-    expect(cov.orphanedSections).toEqual([
-      { anchor: 's-removed', scenarioIds: ['so'], scenarios: [expect.objectContaining({ id: 'so', outcome: 'orphaned' })] },
-    ]);
-    // An orphaned scenario never lands on a live section.
-    expect(cov.sections.some((s) => s.status === 'orphaned')).toBe(false);
-  });
-
-  it('tallies totals across the live sections and stamps provenance', () => {
-    expect(cov.doc).toBe(DOC);
-    expect(cov.markdown).toBe(true);
-    expect(cov.sections).toHaveLength(14);
-    expect(cov.runId).toBe('r1');
-    expect(cov.ranAt).toBe('2026-07-07T00:00:00.000Z');
-    expect(cov.generatedAt).toBe('2026-07-06T00:00:00.000Z');
-    expect(cov.totals).toMatchObject({
-      pass: 2, fail: 1, error: 1, stale: 1, guarded: 1,
-      library: 1, desktop: 1, tui: 1, untestable: 1, 'no-claim': 1, 'blocked-on': 1,
-      unguarded: 1, orphaned: 0, 'authoring-error': 1,
+  it('lists each carrying flow as the Flows page words it, with the milestones proving the claim', () => {
+    const r = row('fails');
+    expect(r.flows).toHaveLength(1);
+    expect(r.flows[0]).toMatchObject({
+      flowId: flowOf('fails').id,
+      title: 'A user fails',
+      status: 'fail',
+      epic: false,
+      manual: false,
+      milestoneOrders: [1],
+      milestoneCount: 1,
     });
   });
 
-  it('reports unguarded for a doc with no store data', () => {
-    const empty = composeDocCoverage(DOC, '# Solo\nbody', { manifest: null, latest: null, result: null });
-    expect(empty.sections).toEqual([
-      expect.objectContaining({ anchor: 'solo', status: 'unguarded', scenarioIds: [], scenarios: [] }),
-    ]);
-    expect(empty.runId).toBeNull();
-    expect(empty.generatedAt).toBeNull();
+  it('tallies the five words over every claim, dismissed ones under Not testable', () => {
+    expect(view.totals).toEqual({
+      claims: 11,
+      byStatus: { failed: 2, blocked: 4, 'never-run': 1, 'partially-succeeded': 0, succeeded: 2, 'not-testable': 2 },
+      dismissed: 1,
+      untestable: 1,
+    });
+    expect(view.untestable).toEqual([{ doc: DOC, text: 'Specs are the heart of the product.', reason: 'states no behaviour' }]);
+  });
+
+  it('folds the claims per document: the document wears its worst word', () => {
+    const words = claimWordsByDoc(view);
+    expect([...words.keys()]).toEqual([DOC]);
+    expect(words.get(DOC)!.doc).toBe('failed');
+    expect(words.get(DOC)!.claims.size).toBe(11);
+    expect(words.get(DOC)!.blockedReasons).toEqual(expect.arrayContaining([expect.stringContaining('cli/spec')]));
+  });
+
+  it('is the empty view without a claim corpus', () => {
+    const empty = composeClaimCoverage({ manifest: null, latest: null, result: null });
+    expect(empty.extracted).toBe(false);
+    expect(empty.claims).toEqual([]);
+    expect(empty.totals.claims).toBe(0);
   });
 });
 
 // ---------------------------------------------------------------------------
-// The needs-setup promotion, entirely inside the read model.
+// The needs-setup promotion, entirely inside the read model: a flow blocked on
+// a providable service lifts its claim to `needs-setup`.
 // ---------------------------------------------------------------------------
 
-describe('composeDocCoverage — needs-setup', () => {
-  const EXTERNAL_DOC = 'docs/api.md';
-  const EXTERNAL_CONTENT = ['# Forecast', 'a', '# Payments', 'b', '# Vague', 'c'].join('\n');
-  const externalResult: GuardGenerateReport = {
-    ...result,
-    coverageGaps: [
-      {
-        doc: EXTERNAL_DOC,
-        anchor: 'forecast',
-        kind: 'blocked-on',
-        reason: composeBlockedOnReason(['open-meteo'], 'the forecast comes from upstream'),
-      },
-      {
-        doc: EXTERNAL_DOC,
-        anchor: 'payments',
-        kind: 'blocked-on',
-        reason: composeBlockedOnReason(['stripe'], 'charges go to the payment provider'),
-      },
-      {
-        doc: EXTERNAL_DOC,
-        anchor: 'vague',
-        kind: 'blocked-on',
-        reason: composeBlockedOnReason(['external-service'], 'it calls something out there'),
-      },
-    ],
-  };
+describe('composeClaimCoverage — needs-setup', () => {
+  const blockedManifest = {
+    version: 1,
+    flows: ['passes', 'fails', 'errors'].map((title) => ({
+      flowId: flowOf(title).id,
+      flowFingerprint: flowOf(title).fingerprint,
+      bindings: flowOf(title).bindings,
+      scenarios: [],
+      interfaces: [],
+      generationInputsHash: null,
+      gaps: [
+        {
+          surface: 'cli',
+          kind: 'blocked-on',
+          reason: composeBlockedOnReason(
+            [title === 'passes' ? 'open-meteo' : title === 'fails' ? 'stripe' : 'external-service'],
+            'it calls something out there',
+          ),
+        },
+      ],
+    })),
+  } as unknown as GuardManifest;
   const compose = (externals: Record<string, 'provided' | 'incomplete' | 'unprovided'> | null) =>
-    composeDocCoverage(EXTERNAL_DOC, EXTERNAL_CONTENT, {
-      manifest: null,
-      latest: null,
-      result: externalResult,
-      externals,
-    });
+    composeClaimCoverage({ manifest: blockedManifest, latest: null, result: null, flows, claims, externals });
 
   const joined = compose({ 'open-meteo': 'unprovided', stripe: 'provided' });
-  const bySection = new Map(joined.sections.map((s) => [s.anchor, s]));
+  const row = (title: string) => joined.claims.find((c) => c.id === byTitle(title).id)!;
 
   it('promotes a gap naming a KNOWN, unprovided service — and says which', () => {
-    const section = bySection.get('forecast')!;
-    expect(section.status).toBe('needs-setup');
-    expect(section.needsSetup).toEqual({ services: ['open-meteo'], provided: [] });
+    expect(row('passes').status).toBe('needs-setup');
+    expect(row('passes').needsSetup).toEqual({ services: ['open-meteo'], provided: [] });
   });
 
   it('a PROVIDED service is the re-generate sub-state, not a to-do', () => {
-    const section = bySection.get('payments')!;
-    expect(section.status).toBe('needs-setup');
-    expect(section.needsSetup).toEqual({ services: [], provided: ['stripe'] });
+    expect(row('fails').status).toBe('needs-setup');
+    expect(row('fails').needsSetup).toEqual({ services: [], provided: ['stripe'] });
   });
 
-  it('a GENERIC noun stays plain blocked-on, capability chips and all', () => {
-    const section = bySection.get('vague')!;
-    expect(section.status).toBe('blocked-on');
-    expect(section.needsSetup).toBeUndefined();
-    expect(section.blockedOnCapabilities).toEqual(['external-service']);
+  it('a GENERIC noun stays plain blocked-on', () => {
+    expect(row('errors').status).toBe('blocked-on');
+    expect(row('errors').needsSetup).toBeUndefined();
   });
 
-  it('without externals data EVERY section stays plain blocked-on', () => {
+  it('without externals data EVERY claim stays plain blocked-on', () => {
     for (const externals of [null, {}]) {
       const plain = compose(externals);
-      expect(plain.sections.map((s) => s.status)).toEqual([
-        'blocked-on',
-        'blocked-on',
-        'blocked-on',
-      ]);
-      expect(plain.sections.every((s) => s.needsSetup === undefined)).toBe(true);
+      const statuses = ['passes', 'fails', 'errors'].map((t) => plain.claims.find((c) => c.id === byTitle(t).id)!.status);
+      expect(statuses).toEqual(['blocked-on', 'blocked-on', 'blocked-on']);
     }
-  });
-
-  it('changes NOTHING that is persisted — the gap kind and the totals buckets', () => {
-    // The stored gap is untouched: this is a read-model promotion.
-    expect(externalResult.coverageGaps.every((g) => g.kind === 'blocked-on')).toBe(true);
-    expect(joined.totals['needs-setup']).toBe(2);
-    expect(joined.totals['blocked-on']).toBe(1);
-    // Every bucket still exists (the derived status did not knock one out).
-    expect(joined.totals.pass).toBe(0);
-    expect(joined.totals.unguarded).toBe(0);
   });
 });

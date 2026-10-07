@@ -313,7 +313,7 @@ export function createRepoGuardRunTask(
           }
           // Its flows are derived from the head's tree; its sections are nobody's trend.
           const headFlows = readGuardRunFlowSummaryFromTree(tree.dir, latest) ?? {};
-          await persistGuardRun(ref, tree.dir, latest, { provenance, coverage: { sections: {}, flows: headFlows } });
+          await persistGuardRun(ref, tree.dir, latest, { provenance, coverage: { claims: {}, flows: headFlows } });
           const check = await deps.pullRequests.pulls.getCheck(pr.checkId);
           outcomes.set(
             ctx.jobId,

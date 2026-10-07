@@ -23,12 +23,15 @@
 import {
   DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER,
   autoResolutionKey,
+  claimIdentityKey,
+  claimsByIdentity,
   type GuardAdjudication,
   type GuardScenarioAdjudication,
 } from '@truecourse/shared';
 import {
   dismissGuardClaim,
   readGuardAutoResolutions,
+  readGuardClaimsCorpus,
   withScenarioAdjudication,
   writeGuardAutoResolutions,
 } from '@truecourse/guard-runner';
@@ -77,7 +80,7 @@ export interface AdjudicationRouting {
    *  belongs to no flow (nothing to taint). */
   tainted?: { key: string; count: number; escalated: boolean };
   /** The claim auto-dismissal, when the auto tier fired. */
-  autoDismissed?: { doc: string; anchor: string; title: string };
+  autoDismissed?: { claimId: string };
 }
 
 export interface PersistAdjudicationResult {
@@ -148,19 +151,24 @@ export async function persistAdjudication(opts: {
     routing.tainted = { key, count, escalated };
 
     // The auto tier: a HIGH-confidence scenario-layer defect whose failing
-    // milestone resolves a claim identity dismisses that claim (idempotent by
-    // identity), the mechanism as the recorded reason. Held back once the
-    // escalation threshold is crossed — past it, nothing auto-resolves again.
+    // milestone resolves to a claim of the corpus dismisses that claim
+    // (idempotent by id), the mechanism as the recorded reason. Held back once
+    // the escalation threshold is crossed — past it, nothing auto-resolves again.
     if (verdict.confidence === 'high' && verdict.fix?.layer === 'scenario' && !escalated) {
-      const claim = claimIdentity(item);
+      const identity = claimIdentity(item);
+      const claim = identity
+        ? claimsByIdentity(readGuardClaimsCorpus(repoRoot)?.claims ?? []).get(
+            claimIdentityKey(identity.doc, identity.anchor, identity.title),
+          )
+        : undefined;
       if (claim) {
         dismissGuardClaim(repoRoot, {
-          ...claim,
+          claimId: claim.id,
           dismissedAt: now(),
           auto: true,
           reason: verdict.mechanism,
         });
-        routing.autoDismissed = claim;
+        routing.autoDismissed = { claimId: claim.id };
       }
     }
   }
@@ -168,10 +176,11 @@ export async function persistAdjudication(opts: {
 }
 
 /**
- * The claim a scenario-layer authoring defect is ABOUT — the dismissal
- * identity (doc + anchor + claim title). The committed diagnosis carries it
- * outright; failing that, the failing milestone of the flow names it. `null`
- * when neither does — a dismissal without an identity would key on nothing.
+ * The claim a scenario-layer authoring defect is ABOUT, as the flow names it
+ * (doc + anchor + claim title, the identity the corpus resolves to a claim id).
+ * The committed diagnosis carries it outright; failing that, the failing
+ * milestone of the flow names it. `null` when neither does — a dismissal
+ * without an identity would key on nothing.
  * This is the structural reading of the plan's "mechanism names a claim-level
  * mistake": only a failure that RESOLVES to a claim can dismiss one.
  */

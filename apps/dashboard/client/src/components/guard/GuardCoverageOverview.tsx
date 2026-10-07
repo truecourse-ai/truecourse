@@ -5,7 +5,7 @@
  * whole corpus stand" at a glance, and stops.
  *
  * THE FORM IS A COMPOSITION BAR, not a wall of numbers: each store rolls up as
- * one part-to-whole strip (sections, claims, flows, tests), segments in the
+ * one part-to-whole strip (claims, flows, tests), segments in the
  * guard status vocabulary, worst first, with a legend naming every bucket and
  * its count. The legend is load-bearing, not decoration, two of the tiers
  * share a hue family (deliberately, everywhere in guard), and the grey tier is
@@ -19,7 +19,7 @@
  * wears, so one state cannot change colour with the surface a reader is on.
  *
  * Every number is a straight read of a store the page already trusts:
- * `specs/corpus.json` (documents), `guard/status` (sections, flows, tests,
+ * `specs/corpus.json` (documents), `guard/status` (claims, flows, tests,
  * surfaces, freshness), the claims view's own totals (the coverage ledger).
  * Numbers that need a generate render only once one exists, a fresh repo shows
  * the document line and one honest "nothing generated yet" sentence, never a
@@ -47,6 +47,7 @@ const LABEL = 'text-[10px] font-medium uppercase tracking-wider text-muted-foreg
 // Last-known summaries per repo+ref, so a remount never blanks the bars.
 const statusCache = new Map<string, GuardStatusSummary>();
 const flowsCache = new Map<string, GuardFlowsView>();
+const claimsCache = new Map<string, GuardClaimsView>();
 
 /** One bucket of a composition bar: its word, its count, its fill class. */
 export interface Segment {
@@ -134,15 +135,12 @@ export function CompositionBar({
 export function GuardCoverageOverview({
   repoId,
   docsCount,
-  claims,
   staleness,
   reloadKey = 0,
 }: {
   repoId: string;
   /** The curated corpus's kept-doc count. */
   docsCount: number;
-  /** The claims view the page already holds; null while loading / before extract. */
-  claims: GuardClaimsView | null;
   staleness: GuardStaleness;
   /** Bumped on a generate/run completion → refetch the summary. */
   reloadKey?: number;
@@ -156,6 +154,7 @@ export function GuardCoverageOverview({
   const [flowsView, setFlowsView] = useState<GuardFlowsView | null>(
     () => flowsCache.get(cacheKey) ?? null,
   );
+  const [claims, setClaims] = useState<GuardClaimsView | null>(() => claimsCache.get(cacheKey) ?? null);
   const [loaded, setLoaded] = useState(() => statusCache.has(cacheKey));
   useEffect(() => {
     let cancelled = false;
@@ -173,6 +172,13 @@ export function GuardCoverageOverview({
         setLoaded(true);
       });
     api
+      .getGuardClaims(repoId)
+      .then((v) => {
+        claimsCache.set(cacheKey, v);
+        if (!cancelled) setClaims(v);
+      })
+      .catch(() => !cancelled && setClaims(null));
+    api
       .getGuardFlows(repoId)
       .then((v) => {
         flowsCache.set(cacheKey, v);
@@ -185,27 +191,17 @@ export function GuardCoverageOverview({
   }, [repoId, reloadKey, cacheKey]);
 
   const coverage = status?.coverage ?? null;
-  const sections = status?.sections ?? null;
+  const claimTotals = status?.claims ?? null;
   const lastGenerate = status?.lastGenerate ?? null;
   const lastRun = status?.lastRun ?? null;
-  const claimTotals = claims?.extracted ? claims.totals : null;
-
-  // The statement ledger, worst-first: red leads, the ruled-out grey tail closes.
-  const claimSegments: Segment[] = claimTotals
+  // What the claims view itself counts beside the five words: the dismissed
+  // claims (counted under Not testable) and the statements the scan refused.
+  const claimNotes = claims?.extracted
     ? [
-        { word: 'Failing', count: claimTotals.failing ?? 0, fill: 'bg-red-500' },
-        { word: 'Unplanned', count: claimTotals.unplanned, fill: 'bg-red-400' },
-        { word: 'Gapped', count: claimTotals.gapped, fill: 'bg-sky-400' },
-        { word: 'Planned', count: claimTotals.planned, fill: 'bg-sky-600' },
-        { word: 'Proven', count: claimTotals.proven, fill: 'bg-emerald-500' },
-        { word: 'Dismissed', count: claimTotals.dismissed, fill: 'bg-slate-300' },
-        { word: 'Untestable', count: claimTotals.untestable, fill: 'bg-slate-400' },
-      ]
-    : [];
-  const claimNotes =
-    claimTotals && claimTotals.orphanedAnchors > 0
-      ? `${claimTotals.orphanedAnchors} claim anchor${claimTotals.orphanedAnchors === 1 ? '' : 's'} no longer resolve in the live docs`
-      : '';
+        claims.totals.dismissed > 0 ? `${claims.totals.dismissed} dismissed` : '',
+        claims.totals.untestable > 0 ? `${claims.totals.untestable} statement${claims.totals.untestable === 1 ? '' : 's'} the scan judged untestable` : '',
+      ].filter(Boolean).join(' · ')
+    : '';
 
   // The tests' CURRENT state: the last run's outcomes when one exists (the
   // stored-at statuses go stale the moment a run records real verdicts);
@@ -249,7 +245,7 @@ export function GuardCoverageOverview({
           <h2 className="text-sm font-semibold text-foreground">Coverage overview</h2>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
             {docsCount} document{docsCount === 1 ? '' : 's'}
-            {sections ? ` · ${sections.total} section${sections.total === 1 ? '' : 's'}` : ''}
+            {claimTotals ? ` · ${claimTotals.total} claim${claimTotals.total === 1 ? '' : 's'}` : ''}
             {coverage ? ` · ${coverage.withScenarios} with tests` : ''}
             {''}
           </p>
@@ -259,13 +255,8 @@ export function GuardCoverageOverview({
           <>
             {/* The flow-bound summary stands in on servers without the tally. */}
             <CompositionBar
-              label="Sections"
-              segments={fiveWordSegments(sections?.byStatus ?? coverage.byStatus)}
-            />
-            {/* Carries dismissed + untestable too, so it sums to every statement. */}
-            <CompositionBar
-              label="Statements"
-              segments={claimSegments}
+              label="Claims"
+              segments={fiveWordSegments(claimTotals?.byStatus ?? coverage.byStatus)}
               {...(claimNotes ? { note: claimNotes } : {})}
             />
             <CompositionBar label="Flows" segments={fiveWordSegments(coverage.flows.byStatus)} />

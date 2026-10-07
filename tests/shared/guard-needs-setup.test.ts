@@ -3,7 +3,7 @@ import {
   GUARD_COVERAGE_STATUS_PRECEDENCE,
   guardCoverageWord,
   GuardNeedsSetupSchema,
-  GuardSectionCoverageStatusSchema,
+  GuardCoverageStatusSchema,
   composeBlockedOnReason,
   deriveNeedsSetup,
   needsSetupIsDone,
@@ -85,7 +85,7 @@ describe('needs-setup RANKING — the gap tier, most actionable first', () => {
 
   it('is a ranked coverage status (the exhaustiveness backstop compiles)', () => {
     expect(rank('needs-setup')).toBeGreaterThanOrEqual(0)
-    expect(GuardSectionCoverageStatusSchema.safeParse('needs-setup').success).toBe(true)
+    expect(GuardCoverageStatusSchema.safeParse('needs-setup').success).toBe(true)
   })
 
   it('outranks every other gap — it is the one a user can clear today', () => {

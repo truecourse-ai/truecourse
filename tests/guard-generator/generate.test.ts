@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import fs from 'node:fs'
+import { specClaimsFilePath } from '@truecourse/shared/work-tree'
 import path from 'node:path'
 import yaml from 'js-yaml'
 import {
@@ -1030,6 +1031,14 @@ describe('generateGuards — failure output excerpts', () => {
 // birth-retry round: the worker revises in-loop, on the tool result the case
 // above pins, so there is no second-round cache key.
 
+/** The id of the claim whose statement is `statement`, as `specs/claims.json` holds it. */
+function claimIdOf(repoRoot: string, statement: string): string {
+  const file = JSON.parse(fs.readFileSync(specClaimsFilePath(repoRoot), 'utf-8')) as { claims: { id: string; statement: string }[] }
+  const claim = file.claims.find((c) => c.statement === statement)
+  if (!claim) throw new Error(`no claim states "${statement}"`)
+  return claim.id
+}
+
 describe('generateGuards — dismissals (decisions.json)', () => {
   // Two cli claims in ONE section, composed into one flow: dismissing one changes
   // the flow's composition, which is the whole point of the milestone identity.
@@ -1070,7 +1079,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
     expect(first.written).toHaveLength(1)
     const before = readManifest(r)!.flows[0]
 
-    dismissGuardClaim(r, { doc: DOC, anchor: 'version', title: 'CLAIM_BAD', dismissedAt: '2026-07-08T00:00:00.000Z' })
+    dismissGuardClaim(r, { claimId: claimIdOf(r, 'CLAIM_BAD'), dismissedAt: '2026-07-08T00:00:00.000Z' })
 
     const second = await runOnce()
     const dismissedGap = second.coverageGaps.find((g) => g.kind === 'dismissed')!
@@ -1100,13 +1109,8 @@ describe('generateGuards — dismissals (decisions.json)', () => {
     const file = path.join(r, first.written[0].file)
     expect(fs.existsSync(file)).toBe(true)
 
-    // "This claim is noise" — the dismissal keys on the extracted claim, unchanged.
-    dismissGuardClaim(r, {
-      doc: DOC,
-      anchor: 'version',
-      title: 'version claim',
-      dismissedAt: '2026-07-26T00:00:00.000Z',
-    })
+    // "This claim is noise" — the dismissal names the claim by the id the scan gave it.
+    dismissGuardClaim(r, { claimId: claimIdOf(r, 'version claim'), dismissedAt: '2026-07-26T00:00:00.000Z' })
 
     const second = await run()
     // The claim is gone, so the flow it was the whole of is gone — and its test goes
@@ -1119,10 +1123,10 @@ describe('generateGuards — dismissals (decisions.json)', () => {
     expect(second.coverageGaps.find((g) => g.kind === 'dismissed')?.reason).toContain('version claim')
   }, 90_000)
 
-  it('a dismissal whose claim text no longer matches any live claim surfaces as orphaned', async () => {
+  it('a dismissal naming a claim the scan no longer reads surfaces as orphaned', async () => {
     const r = seed()
 
-    dismissGuardClaim(r, { doc: DOC, anchor: 'version', title: 'STALE CLAIM TEXT', dismissedAt: '2026-07-08T00:00:00.000Z' })
+    dismissGuardClaim(r, { claimId: `claim::${DOC}::stale`, dismissedAt: '2026-07-08T00:00:00.000Z' })
 
     const res = await runGenerate({
       repoRoot: r,
@@ -1130,7 +1134,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
       flowWorkerSession: authorsEvery(),
     })
 
-    expect(res.orphanedDismissals).toEqual([{ doc: DOC, anchor: 'version', title: 'STALE CLAIM TEXT' }])
+    expect(res.orphanedDismissals).toEqual([{ claimId: `claim::${DOC}::stale` }])
     // The live claim is unaffected — it authors + commits normally.
     expect(res.written.map((w) => w.flowId)).toEqual(['version'])
   }, 60_000)

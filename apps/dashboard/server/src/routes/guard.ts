@@ -1,5 +1,5 @@
 /**
- * Guard routes — the dashboard read surface for spec-section scenario coverage.
+ * Guard routes — the dashboard read surface for claim coverage.
  * Read-only (no generate/run triggering here) and diff-free by design: guard shows
  * current state only. Thin adapters over the `@truecourse/core` guard drivers.
  *
@@ -9,7 +9,6 @@
  *   GET /:id/guard/history       the baseline run trend (?all=1: every stored run, not just the trend)
  *   GET /:id/guard/runs/:runId   one past run snapshot (+ runFlows); ?outcome= narrows the tests
  *   GET /:id/guard/report        the last `guard generate` report
- *   GET /:id/guard/coverage      per-section coverage join for ?doc=<path> (over the live doc)
  *   GET /:id/guard/flows         the flow inventory + recipe card (the Flows tab); ?status= narrows
  *   GET /:id/guard/flows/:flowId one flow: milestones, per-surface scenarios, gaps, findings
  *   GET /:id/guard/interfaces    the code-derived interface catalog + its reverse index
@@ -33,17 +32,13 @@
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import path from 'node:path';
 import { resolveProjectForRequest } from '@truecourse/core/config/current-project';
 import { orgOf } from '../services/workspace-llm.service.js';
-import { readRepoDoc } from '@truecourse/core/lib/repo-doc-reader';
 import {
   composeGuardStatus,
   GUARD_COVERAGE_PLAIN_ORDER,
   GUARD_VISUAL_CONTENT_TYPE,
-  GuardClaimCoverageSchema,
   GuardOutcomeSchema,
-  type GuardClaimCoverage,
   type GuardOutcome,
   type GuardCoveragePlainStatus,
 } from '@truecourse/shared';
@@ -56,7 +51,7 @@ import {
 import {
   readManifestForView,
   readGuardRunForView,
-  readGuardSectionTotals,
+  readGuardClaimTotals,
   readGuardHistory,
   readGuardResultForView,
   readGuardReport,
@@ -72,14 +67,9 @@ import {
   readGuardEvidenceVisual,
   readGuardDecisions,
   computeGuardStaleness,
-  composeDocCoverage,
   listGuardScenarios,
-  readGuardFlowsForView,
-  readGuardScenariosForView,
   readGuardInterfaces,
-  readGuardClaimsForView,
   readGuardRunFlows,
-  guardExternalSetupIndexForView,
   type GuardEvidenceLocator,
 } from '@truecourse/core/commands/guard-read';
 import { readRepoDependencies } from '../services/guard-dependencies.service.js';
@@ -142,7 +132,7 @@ router.get('/:id/guard/status', async (req: Request, res: Response, next: NextFu
         await readManifestForView(repo.path, ref),
         await readGuardRunForView(repo.path, ref),
         await readGuardResultForView(repo.path, ref),
-        await readGuardSectionTotals(repo.path, ref),
+        await readGuardClaimTotals(repo.path, ref),
       ),
     );
   } catch (e) {
@@ -212,53 +202,6 @@ router.get('/:id/guard/report', async (req: Request, res: Response, next: NextFu
       return;
     }
     res.json(report);
-  } catch (e) {
-    next(e);
-  }
-});
-
-// The per-section coverage join over a live spec doc. `?doc=` is repo-relative;
-// `?ref=` is accepted for the guard-side join; the document body is the
-// workspace's current one (the doc reader takes no revision).
-router.get('/:id/guard/coverage', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
-    const doc = String(req.query.doc ?? '');
-    if (!doc) {
-      res.status(400).json({ error: 'Missing ?doc=<doc path>.' });
-      return;
-    }
-    // Confine to the repo tree — no traversal (mirrors the Spec doc read).
-    if (path.isAbsolute(doc) || doc.split(/[\\/]/).includes('..')) {
-      res.status(400).json({ error: 'doc escapes the repository.' });
-      return;
-    }
-    const commit = refOf(req);
-    const content = await readRepoDoc(repo.path, doc, commit ? { commit } : undefined);
-    if (content == null) {
-      res.status(404).json({ error: `Doc not found: ${doc}` });
-      return;
-    }
-    // With a pinned commit: the run is the one stored at that commit, never the
-    // baseline; the join falls back to the baseline set.
-    res.json(
-      composeDocCoverage(doc, content, {
-        scenarios: await readGuardScenariosForView(repo.path, commit),
-        manifest: await readManifestForView(repo.path, commit),
-        latest: await readGuardRunForView(repo.path, commit),
-        result: await readGuardReport(repo.path, commit),
-        // The flow corpus gives each section's flows their title and milestone
-        // positions; absent, they degrade to manifest-derived rows.
-        flows: await readGuardFlowsForView(repo.path, commit),
-        // Resolves each gapped claim to its store id, so a gap row in the section
-        // detail can link to the claim it is about.
-        claims: await readGuardClaimsForView(repo.path, commit),
-        // Which third parties the user could PROVIDE right now — the join
-        // that promotes a providable `blocked-on` section to `needs-setup`,
-        // read from the stored overlay.
-        externals: await guardExternalSetupIndexForView(repo.path, refOf(req)),
-      }),
-    );
   } catch (e) {
     next(e);
   }
@@ -354,10 +297,10 @@ router.get(
   rawArtifactRoute((repoPath, _id, ref) => readGuardRecipeRaw(repoPath, ref), 'recipe', true),
 );
 
-// The claims payload — the extracted claim corpus with the trace from claim to
-// the flows that carry it and the scenario steps that prove it. Always 200: no
-// claims store yet reads as `extracted: false` with empty lists, which is the
-// client's own empty state.
+// The claims payload — every claim with its status and the trace from claim to
+// the flows that carry it and the scenario steps that prove it; ?status= narrows
+// to the five words. Always 200: no claim corpus yet reads as `extracted: false`
+// with empty lists, which is the client's own empty state.
 router.get('/:id/guard/claims', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
@@ -366,8 +309,8 @@ router.get('/:id/guard/claims', async (req: Request, res: Response, next: NextFu
         ...(req.query.withFlow === 'true' || req.query.withFlow === 'false'
           ? { withFlow: req.query.withFlow === 'true' }
           : {}),
-        coverage: queryList(req.query.coverage).filter((c): c is GuardClaimCoverage =>
-          (GuardClaimCoverageSchema.options as readonly string[]).includes(c),
+        status: queryList(req.query.status).filter((c): c is GuardCoveragePlainStatus =>
+          (GUARD_COVERAGE_PLAIN_ORDER as readonly string[]).includes(c),
         ),
         ...refFilter(req),
       }),

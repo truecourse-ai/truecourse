@@ -55,10 +55,7 @@ import type { CuratedCorpus } from '@truecourse/spec-consolidator';
 import { buildDocSectionIndex } from '@truecourse/guard-runner';
 import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import { getWorkspaceDecisions } from '@truecourse/core/commands/spec-in-process';
-import {
-  docCoveragePlainStatus,
-  readGuardCoverageSources,
-} from '@truecourse/core/commands/guard-read';
+import { claimWordsByDoc, readGuardClaims } from '@truecourse/core/commands/guard-read';
 import { requireWorkspaceDescription } from '@truecourse/core/lib/workspace-profile-store';
 import {
   CONTEXT_SOURCE_KINDS,
@@ -582,26 +579,15 @@ export async function listWorkspaceDocuments(
     refsByRepo.set(binding.repoFullName, [...(refsByRepo.get(binding.repoFullName) ?? []), ...refs]);
   }
 
-  // One body read per document, for the documents somebody reads.
-  const bodies = new Map<string, string>();
-  for (const ref of new Set([...refsByRepo.values()].flat())) {
-    const body = await readContextDocByRef(org, ref);
-    if (body !== null) bodies.set(ref, body);
-  }
-
-  // One guard-state read per repository, then every document it reads
-  // composed against it. The externals index is deliberately not read: it
-  // never changes which of the five words a section wears.
+  // One claims read per repository, then every document it reads folded from
+  // the repository's claims. The externals index is deliberately not read: it
+  // never changes which of the five words a claim wears.
   const coverage = new Map<string, Map<string, GuardCoveragePlainStatus>>();
   for (const [repoFullName, refs] of refsByRepo) {
-    const guard = await readGuardCoverageSources(visible.get(repoFullName)!.path, undefined, {
-      externals: false,
-    });
+    const byDoc = claimWordsByDoc(await readGuardClaims(visible.get(repoFullName)!.path));
     const words = new Map<string, GuardCoveragePlainStatus>();
     for (const ref of new Set(refs)) {
-      const body = bodies.get(ref);
-      if (body === undefined) continue;
-      const word = docCoveragePlainStatus(ref, body, guard);
+      const word = byDoc.get(ref)?.doc;
       if (word) words.set(ref, word);
     }
     coverage.set(repoFullName, words);

@@ -37,7 +37,7 @@ export function GuardDriftDetail({
   runFlow?: GuardRunFlow | null;
   /** The mapped catalog, when the view has one; null = unmapped. */
   interfaces?: GuardInterfaceRow[] | null;
-  onOpenSpec: (doc: string, section: string) => void;
+  onOpenSpec: (doc: string) => void;
   /** Jump to the test's own home, its flow. Omitted in read-only embeds. */
   onOpenFlow?: (flowId: string) => void;
 }) {
@@ -58,11 +58,7 @@ export function GuardDriftDetail({
     ...(scenario.blockedPrecondition ? { blockedPrecondition: true } : {}),
     ...(runFlow?.goal ? { goal: runFlow.goal } : {}),
     ...(runFlow ? { flow: { id: runFlow.flowId, title: runFlow.title } } : {}),
-    binds: {
-      doc: scenario.binds.doc,
-      section: scenario.binds.section,
-      fingerprint: scenario.binds.fingerprint,
-    },
+    binds: { doc: scenario.binds.doc },
     interfacePath: [],
     // Any executed outcome that captured a transcript renders it, passes
     // included. A non-executed stale/orphaned, or an older pass without one, has
@@ -99,19 +95,9 @@ export function GuardDriftDetail({
       }
       notes={
         <>
-          {scenario.remappedTo && (
-            <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
-              Section re-anchored to <code className="text-foreground">{scenario.remappedTo}</code>
-            </p>
-          )}
-          {scenario.currentFingerprint && (
-            <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
-              Section text changed since generation (stale binding).
-            </p>
-          )}
           {scenario.outcome === 'stale' && !scenario.failure && (
             <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
-              The bound section was edited since this test was written, regenerate to re-anchor it.
+              A sentence this test was written against changed since, regenerate to re-anchor it.
             </p>
           )}
           {scenario.outcome === 'orphaned' && !scenario.failure && (

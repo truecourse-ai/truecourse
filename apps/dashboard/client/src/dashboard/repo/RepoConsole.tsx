@@ -3,9 +3,10 @@
  *
  * There is no section switcher: the left menu here is not a switcher between
  * products, it is the tabs of the one thing this repository has: Runs first
- * (what this repository's tests did, and when) and Pipeline
- * beside it (the three pieces of work the repository runs, each with its last
- * outcome and a way to run it again), then the setup group, Context (which
+ * (what this repository's tests did, and when), Claims (what the documents it
+ * reads promise, and how each promise stands) and Pipeline beside them (the
+ * three pieces of work the repository runs, each with its last outcome and a
+ * way to run it again), then the setup group, Context (which
  * workspace sources this repository reads), Interfaces, Dependencies and the
  * repository's Settings. Every tab reads the server: the runs it stored, the
  * interface catalog derived from its tree, the dependency catalog its setup
@@ -33,6 +34,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader, ProviderIcon, SideMenu } from '@/dashboard/ui/bits';
 import { StatusWord, CONCLUSION_TONE } from '@/dashboard/ui/status-word';
 import { useDashboardState } from '@/dashboard/shell/dashboard-state';
+import { ClaimsTab } from './ClaimsTab';
 import { ContextTab } from './ContextTab';
 import { DependenciesTab } from './DependenciesTab';
 import { DependencyPage } from './DependencyPage';
@@ -45,6 +47,7 @@ import { SettingsTab } from './SettingsTab';
 
 const TABS = [
   { id: 'runs', label: 'Runs', group: 'work' },
+  { id: 'claims', label: 'Claims', group: 'work' },
   { id: 'pipeline', label: 'Pipeline', group: 'work' },
   { id: 'context', label: 'Context', group: 'setup' },
   { id: 'interfaces', label: 'Interfaces', group: 'setup' },
@@ -145,6 +148,11 @@ export default function RepoConsole() {
             // The three pieces of work this repository runs, each with what it
             // last did and a way to run it again.
             <PipelineTab repo={repo} />
+          ) : active === 'claims' ? (
+            // Every claim the documents this repository reads make, with how it
+            // stands, over '/api/repos/<id>/guard/claims'; one claim as a side
+            // pane, addressed by `?claim=`.
+            <ClaimsTab repo={repo} />
           ) : active === 'settings' ? (
             <SettingsTab repo={repo} />
           ) : active === 'context' ? (

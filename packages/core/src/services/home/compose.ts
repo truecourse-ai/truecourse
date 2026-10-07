@@ -3,15 +3,15 @@
  *
  * TWO UNITS, each in its own words. The headline and the trend count FLOWS,
  * because a flow is what the engine proves and what can be proved on its own;
- * sections are folded worst-first, so one blocked scenario erases every proof
- * beside it and a section tally can only ever read zero on a workspace with
- * real gaps. The Areas widget and Recently changed stay on SECTIONS and
+ * claims are folded worst-first, so one blocked flow erases every proof
+ * beside it and a claim tally can only ever read zero on a workspace with
+ * real gaps. The Areas widget and Recently changed stay on CLAIMS and
  * DOCUMENTS, which is what an area and a document are made of.
  *
  * Three rules run through it:
  *
  *   - A flow wears the ENGINE's words ({@link guardFlowPlainStatus}'s), so
- *     Home's number is the Flows page's number. A section wears the Documents
+ *     Home's number is the Flows page's number. A claim wears the Documents
  *     view's ({@link CONTEXT_DOCUMENT_STATUS_OF_COVERAGE}, {@link
  *     worstContextStatus}), so an area reads the way its documents do.
  *   - Everything here is PURE: the caller does the store reads (once per
@@ -27,13 +27,13 @@ import {
   HOME_FLOW_STATUS_ORDER,
   HOME_STATUS_ORDER,
   HOME_STATUS_WORD,
-  guardSectionRefDoc,
+  guardClaimRefDoc,
   runKindWord,
   type ContextDocumentRow,
   type ContextDocumentStatus,
   type GuardCoveragePlainStatus,
   type GuardRunFlowSummary,
-  type GuardRunSectionSummary,
+  type GuardRunClaimSummary,
   type HomeAreaRow,
   type HomeAttentionRow,
   type HomeChangeRow,
@@ -53,7 +53,7 @@ import { worstContextStatus } from '../context/documents.js';
 export interface HomeHistoryRun {
   runId: string;
   ranAt: string;
-  sections: GuardRunSectionSummary;
+  claims: GuardRunClaimSummary;
   /**
    * Every flow of the repository as the word it wore then. Absent on a run
    * stored before flows were recorded, which is simply not a point of the flow
@@ -66,8 +66,8 @@ export interface HomeHistoryRun {
 export interface HomeRepoView {
   /** `owner/repo`. */
   repository: string;
-  /** Every section this repository reads, as the word it wears today. */
-  sections: ReadonlyMap<string, GuardCoveragePlainStatus>;
+  /** Every claim of the documents this repository reads, as the word it wears today. */
+  claims: ReadonlyMap<string, GuardCoveragePlainStatus>;
   /**
    * This repository's flows today, as the words they wear on the Flows page.
    * Statuses only: Home counts them and names none.
@@ -79,7 +79,7 @@ export interface HomeRepoView {
    * folded from. Absent on a view that only counts.
    */
   flowRows?: { repoId: string; items: readonly HomeFlowRow[] };
-  /** Per document, the reasons its blocked sections give, in document order. */
+  /** Per document, the reasons its blocked claims give, in corpus order. */
   blockedReasons?: ReadonlyMap<string, readonly string[]>;
   /** The repository's baseline runs that carry a summary, oldest first. */
   history: readonly HomeHistoryRun[];
@@ -154,7 +154,7 @@ function zero(): Record<HomeStatus, number> {
   return Object.fromEntries(HOME_STATUS_ORDER.map((s) => [s, 0])) as Record<HomeStatus, number>;
 }
 
-/** A tally over section statuses, in the Documents view's five words. */
+/** A tally over claim statuses, in the Documents view's five words. */
 function tally(statuses: Iterable<HomeStatus>): HomeTally {
   const byStatus = zero();
   let total = 0;
@@ -188,41 +188,41 @@ function flowTally(statuses: Iterable<HomeFlowStatus>): HomeFlowTally {
 }
 
 /**
- * One status per section, folded WORST FIRST across everything that says
+ * One status per claim, folded WORST FIRST across everything that says
  * something about it, the Documents view's fold applied a level down. The
  * sources are a repository's coverage today, or a repository's latest run at a
  * moment of the trend; they read the same way.
  */
-function foldSections(
-  sources: Iterable<ReadonlyMap<string, GuardCoveragePlainStatus> | GuardRunSectionSummary>,
-  keep: (sectionRef: string) => boolean = () => true,
+function foldClaims(
+  sources: Iterable<ReadonlyMap<string, GuardCoveragePlainStatus> | GuardRunClaimSummary>,
+  keep: (claimRef: string) => boolean = () => true,
 ): Map<string, HomeStatus> {
   const said = new Map<string, ContextDocumentStatus[]>();
   for (const source of sources) {
     const entries =
-      source instanceof Map ? source.entries() : Object.entries(source as GuardRunSectionSummary);
-    for (const [sectionRef, word] of entries) {
-      if (!keep(sectionRef)) continue;
+      source instanceof Map ? source.entries() : Object.entries(source as GuardRunClaimSummary);
+    for (const [claimRef, word] of entries) {
+      if (!keep(claimRef)) continue;
       const status = CONTEXT_DOCUMENT_STATUS_OF_COVERAGE[word as GuardCoveragePlainStatus];
       if (!status) continue;
-      said.set(sectionRef, [...(said.get(sectionRef) ?? []), status]);
+      said.set(claimRef, [...(said.get(claimRef) ?? []), status]);
     }
   }
   const folded = new Map<string, HomeStatus>();
-  for (const [sectionRef, statuses] of said) {
+  for (const [claimRef, statuses] of said) {
     const worst = worstContextStatus(statuses);
-    // Not linked is the one word a section can never wear: a section is only
-    // counted because a repository that reads it said something about it.
-    if (worst && worst !== 'not-linked') folded.set(sectionRef, worst);
+    // Not linked is the one word a claim can never wear: a claim is only
+    // counted because a repository that reads its document said something about it.
+    if (worst && worst !== 'not-linked') folded.set(claimRef, worst);
   }
   return folded;
 }
 
-/** The worst of a document's sections, which is the status the document wears. */
-function foldDocuments(sections: ReadonlyMap<string, HomeStatus>): Map<string, HomeStatus> {
+/** The worst of a document's claims, which is the status the document wears. */
+function foldDocuments(claims: ReadonlyMap<string, HomeStatus>): Map<string, HomeStatus> {
   const byDoc = new Map<string, ContextDocumentStatus[]>();
-  for (const [sectionRef, status] of sections) {
-    const doc = guardSectionRefDoc(sectionRef);
+  for (const [claimRef, status] of claims) {
+    const doc = guardClaimRefDoc(claimRef);
     byDoc.set(doc, [...(byDoc.get(doc) ?? []), status]);
   }
   const folded = new Map<string, HomeStatus>();
@@ -245,29 +245,29 @@ function fileNameOf(ref: string): string {
 }
 
 /**
- * Today: the workspace's FLOWS as the headline, and the areas its SECTIONS fall
+ * Today: the workspace's FLOWS as the headline, and the areas its CLAIMS fall
  * in. Only the documents at least one repository reads are counted into an
- * area: an unlinked document is nobody's promise. The sections come back too,
+ * area: an unlinked document is nobody's promise. The claims come back too,
  * because the attention rows are made of them.
  */
 export function composeHomeToday(input: Pick<HomeInput, 'documents' | 'repos'>): {
   today: HomeFlowTally;
   areas: HomeAreaRow[];
-  sections: Map<string, HomeStatus>;
+  claims: Map<string, HomeStatus>;
 } {
   const linked = new Set(
     input.documents.filter((doc) => doc.repositories.length > 0).map((doc) => doc.ref),
   );
   const areaOf = new Map(input.documents.map((doc) => [doc.ref, doc.area]));
 
-  const sections = foldSections(
-    input.repos.map((repo) => repo.sections),
-    (sectionRef) => linked.has(guardSectionRefDoc(sectionRef)),
+  const claims = foldClaims(
+    input.repos.map((repo) => repo.claims),
+    (claimRef) => linked.has(guardClaimRefDoc(claimRef)),
   );
 
   const byArea = new Map<string, HomeStatus[]>();
-  for (const [sectionRef, status] of sections) {
-    const area = areaOf.get(guardSectionRefDoc(sectionRef)) ?? '';
+  for (const [claimRef, status] of claims) {
+    const area = areaOf.get(guardClaimRefDoc(claimRef)) ?? '';
     byArea.set(area, [...(byArea.get(area) ?? []), status]);
   }
 
@@ -287,7 +287,7 @@ export function composeHomeToday(input: Pick<HomeInput, 'documents' | 'repos'>):
   return {
     today: flowTally(input.repos.flatMap((repo) => [...repo.flows])),
     areas,
-    sections,
+    claims,
   };
 }
 
@@ -324,14 +324,14 @@ export function composeHomeTrend(
 
   const trend: HomeTrendPoint[] = [];
   const changed: HomeChangeRow[] = [];
-  const currentSections = new Map<string, GuardRunSectionSummary>();
+  const currentClaims = new Map<string, GuardRunClaimSummary>();
   const currentFlows = new Map<string, GuardRunFlowSummary>();
   let previousDocs = new Map<string, HomeStatus>();
 
   for (const moment of moments) {
-    currentSections.set(moment.repository, moment.run.sections);
+    currentClaims.set(moment.repository, moment.run.claims);
     if (moment.run.flows) currentFlows.set(moment.repository, moment.run.flows);
-    const sections = foldSections(currentSections.values());
+    const claims = foldClaims(currentClaims.values());
     const inPeriod = start === null || Date.parse(moment.run.ranAt) >= start;
     if (inPeriod && currentFlows.size > 0) {
       const flows = [...currentFlows.values()].flatMap(
@@ -340,7 +340,7 @@ export function composeHomeTrend(
       trend.push({ at: moment.run.ranAt, byStatus: flowTally(flows).byStatus });
     }
 
-    const docs = foldDocuments(sections);
+    const docs = foldDocuments(claims);
     for (const [ref, status] of docs) {
       const before = previousDocs.get(ref);
       if (before === status) continue;
@@ -372,7 +372,7 @@ export function composeHomeAttention(
     HomeInput,
     'documents' | 'repos' | 'runs' | 'conflicts' | 'sources' | 'providerConfigured'
   >,
-  sections: ReadonlyMap<string, HomeStatus>,
+  claims: ReadonlyMap<string, HomeStatus>,
 ): HomeAttentionRow[] {
   const rows: HomeAttentionRow[] = [];
 
@@ -408,12 +408,12 @@ export function composeHomeAttention(
     });
   }
 
-  // A document nothing can prove: how many of its sections are blocked, and the
+  // A document nothing can prove: how many of its claims are blocked, and the
   // first reason any repository gave for one of them.
   const blockedByDoc = new Map<string, number>();
-  for (const [sectionRef, status] of sections) {
+  for (const [claimRef, status] of claims) {
     if (status !== 'blocked') continue;
-    const doc = guardSectionRefDoc(sectionRef);
+    const doc = guardClaimRefDoc(claimRef);
     blockedByDoc.set(doc, (blockedByDoc.get(doc) ?? 0) + 1);
   }
   for (const doc of input.documents) {
@@ -422,7 +422,7 @@ export function composeHomeAttention(
     const reason = input.repos
       .map((repo) => repo.blockedReasons?.get(doc.ref)?.[0])
       .find((text): text is string => Boolean(text));
-    const blocked = `${count} section${count === 1 ? '' : 's'} blocked`;
+    const blocked = `${count} claim${count === 1 ? '' : 's'} blocked`;
     rows.push({
       id: `document:${doc.ref}`,
       kind: 'blocked-document',
@@ -517,14 +517,14 @@ export function composeHomeFlowFacts(
 }
 
 export function composeHome(input: HomeInput): HomeResponse {
-  const { today, areas, sections } = composeHomeToday(input);
+  const { today, areas, claims } = composeHomeToday(input);
   const { trend, changed } = composeHomeTrend(input);
   return {
     period: input.period,
     today,
     trend,
     areas,
-    attention: composeHomeAttention(input, sections),
+    attention: composeHomeAttention(input, claims),
     changed,
     ...composeHomeFlowFacts(input),
   };
