@@ -210,7 +210,6 @@ describe('a real guard setup, folded', () => {
     const outcome = eventsOf(RECIPE).at(-1) as Extract<SessionEvent, { type: 'outcome' }>;
     expect(line.value).toBe(JSON.stringify(outcome.value, null, 2));
     expect(line.value).toContain('"install": "corepack pnpm install --frozen-lockfile"');
-    expect(line.conflicts).toEqual([]);
   });
 
   it('gives an event that is only fields a data line of exactly those fields', () => {
@@ -411,7 +410,7 @@ describe('the shapes one run cannot show', () => {
     ]);
   });
 
-  it('renders only the conflict blocks of an outcome, never a summary of the value', () => {
+  it('carries an outcome as its value alone, nothing from its display blocks', () => {
     seq = 0;
     const events = journal({
       sessionId: 'ses-a',
@@ -436,7 +435,7 @@ describe('the shapes one run cannot show', () => {
       events,
     ).steps[0].sessions[0].lines[1] as Extract<ConversationLine, { kind: 'outcome' }>;
     expect(line.value).toBe('{\n  "uncheckedPairs": 2\n}');
-    expect(line.conflicts.map((f) => f.claim)).toEqual(['The refund window disagrees']);
+    expect(line).not.toHaveProperty('conflicts');
   });
 
   it('says what is happening right now only when the stream says it', () => {

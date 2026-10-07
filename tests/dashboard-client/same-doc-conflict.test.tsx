@@ -8,11 +8,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
 import { buildCorpusConflicts, sentenceKey } from '@truecourse/shared';
 import { SpecConflictDetail } from '@/components/spec/SpecConflictDetail';
 import { SpecSourceProvider, type SpecSource } from '@/components/spec/spec-source';
-import { ConflictCard, ConflictResolveProvider } from '@/components/sessions/conversation-pieces';
 import type { SpecCorpusResponse } from '@/lib/api';
 
 const DOC = 'context/site-x/design.md';
@@ -75,38 +73,6 @@ describe('the conflict pane, for a conflict inside one doc', () => {
     expect(post).toHaveBeenCalledWith(
       expect.objectContaining({ docA: DOC, anchorA: 'Buttons', docB: DOC, anchorB: 'Motion', verdict: 'a' }),
     );
-  });
-});
-
-describe('the conflict card, for a conflict inside one doc', () => {
-  it('offers each sentence by name and marks the one recommended', async () => {
-    const realFetch = window.fetch;
-    window.fetch = vi.fn(async () =>
-      new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } }),
-    ) as unknown as typeof window.fetch;
-    try {
-      render(
-        <MemoryRouter>
-          <ConflictResolveProvider repoId="web" active>
-            <ConflictCard
-              card={{
-                claim: conflict.note,
-                quotes: [PRESS, SCALE],
-                recommendation: { doc: DOC, side: 'b', rationale: 'Motion is newer.' },
-                conflict: { docA: DOC, anchorA: 'Buttons', quoteA: PRESS.quote, sentenceA: PRESS.sentence, docB: DOC, anchorB: 'Motion', quoteB: SCALE.quote, sentenceB: SCALE.sentence },
-              }}
-            />
-          </ConflictResolveProvider>
-        </MemoryRouter>,
-      );
-      const second = await screen.findByRole('button', { name: /Follow design\.md · Motion/ });
-      const first = screen.getByRole('button', { name: /Follow design\.md · Buttons/ });
-      expect(second.querySelector('svg')).not.toBeNull();
-      expect(first.querySelector('svg')).toBeNull();
-      await waitFor(() => expect(screen.getByText('A press scales the button to 0.97.')).toBeInTheDocument());
-    } finally {
-      window.fetch = realFetch;
-    }
   });
 });
 
