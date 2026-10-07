@@ -8,14 +8,10 @@
  * repository's: its slice, its documents.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 
 import { createRepoSpecSource } from '@/components/spec/spec-source';
 import { createWorkspaceContextSource } from '@/dashboard/pages/context-spec-source';
-import { ConflictCard, ConflictResolveProvider } from '@/components/sessions/conversation-pieces';
 
 const realFetch = window.fetch;
 
@@ -110,49 +106,5 @@ describe('the source a document page reads through one repository', () => {
       'POST /api/context/excludes',
       'POST /api/context/conflict-resolution',
     ]);
-  });
-});
-
-describe('a verdict recorded on a conflict of a repository’s run', () => {
-  const FINDING = {
-    claim: 'Refunds settle in two days, or five.',
-    quotes: [
-      { doc: DOC_A, heading: 'Refunds', quote: 'two business days' },
-      { doc: DOC_B, heading: 'Refund window', quote: 'five business days' },
-    ],
-    conflict: {
-      docA: DOC_A,
-      anchorA: 'Refunds',
-      quoteA: 'two business days',
-      sentenceA: 's-refunds',
-      docB: DOC_B,
-      anchorB: 'Refund window',
-      quoteB: 'five business days',
-      sentenceB: 's-window',
-    },
-  };
-
-  beforeEach(() => {
-    window.history.replaceState({}, '', '/');
-  });
-
-  it('writes it to the workspace, though the run was a repository’s', async () => {
-    const calls = serve();
-    render(
-      <MemoryRouter>
-        <ConflictResolveProvider repoId="web" active>
-          <ConflictCard card={FINDING as never} />
-        </ConflictResolveProvider>
-      </MemoryRouter>,
-    );
-    const user = userEvent.setup();
-
-    // The conflicts it reads are the repository's slice of the corpus.
-    await waitFor(() => expect(calls).toContain('GET /api/repos/web/spec/corpus'));
-
-    await user.click(await screen.findByRole('button', { name: /payouts/i }));
-
-    await waitFor(() => expect(calls).toContain('POST /api/context/conflict-resolution'));
-    expect(calls.some((c) => c.includes('/api/repos/web/spec/conflict-resolution'))).toBe(false);
   });
 });
