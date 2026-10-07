@@ -38,6 +38,7 @@ import {
   RECORD_STAGE_VERSION,
   RECORD_WINDOW_SENTENCES,
   checkLedger,
+  claimsFromLedgers,
   describeDocLedger,
   docFactLedger,
   ledgerRefusal,
@@ -55,7 +56,7 @@ import { SETTLE_SUBJECTS_SESSION_KIND } from '../../packages/core/src/services/s
 import { COMPARE_FACTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/compare-facts'
 import { instructionsFingerprint, scanCacheKey, docLifecycleFingerprint } from '../../packages/core/src/services/spec-scan/tools'
 import { writeDecisions, type DecisionsFile, type DocCandidate } from '../../packages/spec-consolidator/src/index.js'
-import { SENTENCE_SPLITTER_VERSION, splitDocSentences } from '@truecourse/shared'
+import { SENTENCE_SPLITTER_VERSION, claimId, sentenceKey, splitDocSentences } from '@truecourse/shared'
 import type {
   DriverResult,
   SessionDriver,
@@ -76,6 +77,8 @@ const fact = (sentences: number[], areas: string[] = ['core/exports']): FactLedg
   subject: 'Export my data',
   statement: 'Export my data is under Settings, Account.',
   areas,
+  testable: true,
+  reason: null,
 })
 
 /** A ledger that accounts for every sentence of SCOPE: 3-5 cited, 6-8 skipped. */
@@ -89,6 +92,21 @@ describe('the record gate', () => {
     const check = checkLedger(COMPLETE, SCOPE)
     expect(check).toEqual({ problems: [], uncovered: [], facts: COMPLETE.facts, skipped: { navigation: 3 } })
     expect(ledgerRefusal(check)).toBeUndefined()
+  })
+
+  it('wants a reason on a fact that is not testable, and none on one that is', () => {
+    const check = checkLedger(
+      {
+        facts: [{ ...fact([3]), testable: false, reason: null }, { ...fact([4]), testable: true, reason: 'hedge' }, { ...fact([5]), testable: false, reason: 'hedge' }],
+        skips: [{ from: 6, to: 8, why: 'navigation' }],
+      },
+      SCOPE,
+    )
+    expect(check.problems).toEqual([
+      'facts[0] is not testable and gives no reason',
+      'facts[1] is testable and gives a reason it is not; the reason is null for a testable fact',
+    ])
+    expect(check.facts).toEqual([{ ...fact([5]), testable: false, reason: 'hedge' }])
   })
 
   it('refuses uncovered sentences, naming them as ranges', () => {
@@ -332,11 +350,57 @@ describe('record windows and the doc ledger', () => {
         subject: 'Export my data',
         statement: 'Export my data is under Settings, Account.',
         areas: ['core/exports'],
+        testable: true,
       },
     ])
     expect(ledger.unrecorded).toEqual([2])
     expect(ledger.failed).toEqual([{ index: 2, from: 3, to: 4 }])
     expect(describeDocLedger(ledger, 2)).toBe('4 sentences, 1 fact, 0 skipped, 1 unrecorded, 1 of 2 windows not recorded, the session failed')
+  })
+
+  it('turns the ledgers into claims named by their sentence keys, each carrying its testability', () => {
+    const sentences = splitDocSentences(EXPORT_MD)
+    const ledger = docFactLedger({
+      doc: 'docs/export.md',
+      sentences,
+      areas: ['core/exports'],
+      windows: [
+        {
+          window: { index: 1, from: 1, to: 4 },
+          ledger: {
+            facts: [fact([1, 2]), { ...fact([3]), testable: false, reason: 'advice' }],
+            skips: [{ from: 4, to: 4, why: 'navigation' }],
+          },
+        },
+      ],
+      canonicalAreas: (raw) => [raw],
+    })
+    const claims = claimsFromLedgers([ledger], '2026-10-07T00:00:00.000Z')
+    const keys = sentences.map((s) => sentenceKey(s.text, s.repeat))
+    expect(claims).toEqual({
+      version: 1,
+      generatedAt: '2026-10-07T00:00:00.000Z',
+      claims: [
+        {
+          id: claimId('docs/export.md', [keys[0]!, keys[1]!]),
+          doc: 'docs/export.md',
+          sentences: [keys[0], keys[1]],
+          subject: 'Export my data',
+          statement: 'Export my data is under Settings, Account.',
+          areas: ['core/exports'],
+          testable: true,
+        },
+        {
+          id: claimId('docs/export.md', [keys[2]!]),
+          doc: 'docs/export.md',
+          sentences: [keys[2]],
+          subject: 'Export my data',
+          statement: 'Export my data is under Settings, Account.',
+          areas: ['core/exports'],
+          testable: { reason: 'advice' },
+        },
+      ],
+    })
   })
 })
 
@@ -393,7 +457,7 @@ async function honestRecord(input: SessionRunInput): Promise<DriverResult> {
   const { sentences, areas } = windowOf(input)
   const [first, ...rest] = sentences
   const ledger: FactLedgerWire = {
-    facts: rest.map((n) => ({ sentences: [n], subject: `sentence ${n}`, statement: `Sentence ${n} states a fact.`, areas: [areas[0]!] })),
+    facts: rest.map((n) => ({ sentences: [n], subject: `sentence ${n}`, statement: `Sentence ${n} states a fact.`, areas: [areas[0]!], testable: true, reason: null })),
     skips: first === undefined ? [] : [{ from: first, to: first, why: 'navigation' }],
   }
   await callTool(input, 'check_ledger', ledger)

@@ -652,8 +652,9 @@ export async function syncWorkspaceCorpusInProcess(options: {
       // every sync and its verdicts die with the tree.
       disableScopeOrchestration: true,
     });
-    // Persist the curated corpus under workspace scope (the dashboard reads it).
+    // Persist the curated corpus and its claims under workspace scope (the dashboard reads them).
     await saveWorkspaceSpec(ref, 'corpus', curateResult.corpus);
+    await saveWorkspaceSpec(ref, 'claims', curateResult.claims);
     return { areaCount: curateResult.stats.areaCount };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });

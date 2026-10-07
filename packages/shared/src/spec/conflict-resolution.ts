@@ -42,8 +42,9 @@ export function normalizeQuote(text: string): string {
 
 /** FNV-1a 32-bit as hex — short, dependency-free, identical in node and the
  *  browser. NOT cryptographic: it only has to separate the sentences of one
- *  document, and the conflicts that share one area + doc pair. */
-const shortHash = (s: string): string => {
+ *  document, the claims read from one, and the conflicts that share one
+ *  area + doc pair. */
+export const shortHash = (s: string): string => {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
     h ^= s.charCodeAt(i);

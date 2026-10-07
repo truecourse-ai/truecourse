@@ -26,11 +26,14 @@ export type { WorkspaceRef } from './repo-ref.js';
 
 /**
  * A workspace's JSON artifacts. `corpus`/`decisions` are the curated spec
- * (areas + conflicts, and the user's curation intent).
+ * (areas + conflicts, and the user's curation intent); `claims` is every claim
+ * the scan read from the corpus's documents.
  */
 export type SpecArtifact =
   // The curated doc corpus (areas + conflicts).
   | 'corpus'
+  // Every claim read from the kept documents, a series like the corpus.
+  | 'claims'
   | 'decisions'
   // The DOCUMENT SNAPSHOT of a scan: `{ v, files: { <doc ref>: <content sha> } }`
   // over the kept documents' bodies, so a document can still be read exactly as
@@ -51,9 +54,9 @@ export interface WorkspaceSpecAt {
 /** Where a workspace's curated specs are kept. */
 export interface SpecStore {
   /**
-   * Persist one spec JSON artifact under WORKSPACE scope. The corpus and the
-   * docs snapshot become a new version of the ref's series; the decisions
-   * replace the workspace's one ledger.
+   * Persist one spec JSON artifact under WORKSPACE scope. The corpus, the
+   * claims and the docs snapshot become a new version of the ref's series; the
+   * decisions replace the workspace's one ledger.
    */
   saveWorkspaceSpec(
     ref: WorkspaceRef,
