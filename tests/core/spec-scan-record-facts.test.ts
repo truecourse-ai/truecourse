@@ -54,13 +54,8 @@ import { SETTLE_AREAS_SESSION_KIND } from '../../packages/core/src/services/spec
 import { SETTLE_SUBJECTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-subjects'
 import { COMPARE_FACTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/compare-facts'
 import { instructionsFingerprint, scanCacheKey, docLifecycleFingerprint } from '../../packages/core/src/services/spec-scan/tools'
-import {
-  SENTENCE_SPLITTER_VERSION,
-  splitDocSentences,
-  writeDecisions,
-  type DecisionsFile,
-  type DocCandidate,
-} from '../../packages/spec-consolidator/src/index.js'
+import { writeDecisions, type DecisionsFile, type DocCandidate } from '../../packages/spec-consolidator/src/index.js'
+import { SENTENCE_SPLITTER_VERSION, splitDocSentences } from '@truecourse/shared'
 import type {
   DriverResult,
   SessionDriver,

@@ -66,7 +66,9 @@
  * element like `<p>`); an inline tag (`<a>`, `<strong>`) stays in its sentence.
  */
 
-import { normalizeQuote, parseHeadings } from '@truecourse/shared';
+import { normalizeQuote } from '../spec/conflict-resolution.js';
+import { parseHeadings } from './headings.js';
+import type { DocWindow } from './windows.js';
 
 /** Bumped by hand whenever a change here moves a sentence's number, text or repeat. */
 export const SENTENCE_SPLITTER_VERSION = 3;
@@ -886,63 +888,6 @@ export function splitDocSentences(body: string): DocSentence[] {
 }
 
 // ---------------------------------------------------------------------------
-// Windows
-// ---------------------------------------------------------------------------
-
-/** Consecutive sentences of one doc, `from` to `to` inclusive: the work of one session. */
-export interface SentenceWindow {
-  /** 1-based, in doc order. */
-  index: number;
-  from: number;
-  to: number;
-}
-
-export interface SentenceWindowBounds {
-  maxSentences: number;
-  /** The bound on the summed text length of a window's sentences. */
-  maxChars: number;
-}
-
-/**
- * Pack a doc's sentences into windows: whole sections (the consecutive sentences under
- * one heading) in doc order, as many as fit both bounds. A section over either
- * bound is cut at sentence boundaries, and its last piece may share a window with
- * the sections after it; a single sentence over the character bound is a window
- * alone. Deterministic: the same sentences always give the same windows.
- */
-export function planSentenceWindows(sentences: readonly DocSentence[], bounds: SentenceWindowBounds): SentenceWindow[] {
-  const sections: DocSentence[][] = [];
-  for (const sentence of sentences) {
-    const last = sections[sections.length - 1];
-    if (last && last[0]!.heading === sentence.heading) last.push(sentence);
-    else sections.push([sentence]);
-  }
-  const fits = (count: number, chars: number): boolean => count <= bounds.maxSentences && chars <= bounds.maxChars;
-  const windows: SentenceWindow[] = [];
-  let open: { from: number; to: number; count: number; chars: number } | null = null;
-  for (const section of sections) {
-    const chars = section.reduce((sum, u) => sum + u.text.length, 0);
-    if (open && !fits(open.count + section.length, open.chars + chars)) {
-      windows.push({ index: windows.length + 1, from: open.from, to: open.to });
-      open = null;
-    }
-    for (const sentence of section) {
-      if (open && !fits(open.count + 1, open.chars + sentence.text.length)) {
-        windows.push({ index: windows.length + 1, from: open.from, to: open.to });
-        open = null;
-      }
-      if (open) {
-        open.to = sentence.n;
-        open.count += 1;
-        open.chars += sentence.text.length;
-      } else open = { from: sentence.n, to: sentence.n, count: 1, chars: sentence.text.length };
-    }
-  }
-  if (open) windows.push({ index: windows.length + 1, from: open.from, to: open.to });
-  return windows;
-}
-
-// ---------------------------------------------------------------------------
 // Presentation
 // ---------------------------------------------------------------------------
 
@@ -968,7 +913,7 @@ function dedent(text: string): string {
  * sentence carries its marker; a later one is indented under it. `sentences` is
  * the doc's whole list.
  */
-export function presentSentence(sentence: DocSentence, sentences: readonly DocSentence[], window: SentenceWindow): string {
+export function presentSentence(sentence: DocSentence, sentences: readonly DocSentence[], window: Pick<DocWindow, 'from' | 'to'>): string {
   const label = `[${sentence.n}]`;
   const indented = (text: string): string =>
     dedent(text)

@@ -95,7 +95,6 @@ import {
   readCorpusDecisions,
   readRepoIdentityInput,
   resolveRepoIdentity,
-  verifyConflictSides,
   writeCorpus,
   writeDecisions,
   type Area,
@@ -1303,28 +1302,6 @@ export async function runSpecScanSessions(
     for (const ref of refs) set.add(ref)
     notReachedByArea.set(areaId, set)
   }
-  const bodyOf = (ref: string): string | undefined => {
-    const d = universe.byPath.get(ref)
-    return d ? docBody(d) : undefined
-  }
-  /** Re-anchor a conflict's sides against the docs, recording each move. */
-  const verifiedSections = (
-    a: string,
-    b: string,
-    flagged: Pick<Parameters<typeof verifyConflictSides>[0], 'note' | 'sections'>,
-  ) => {
-    const sections = flagged.sections.filter((s) => s.doc === a || s.doc === b)
-    const verified = verifyConflictSides({ docs: [a, b], note: flagged.note, sections, bodyOf })
-    verified.forEach((ptr, i) => {
-      const claimed = sections[i]
-      if (claimed && claimed.heading !== ptr.heading) {
-        fact('verify', `${ptr.doc}: pointer re-anchored from ${claimed.heading ?? 'the lead'} to ${ptr.heading ?? 'the lead'}`)
-      }
-    })
-    return verified
-  }
-
-
   // How a fact's raw tag lands in the corpus's areas: the path the doc's own
   // tags took, one tag at a time. A doc a decision pins files every fact under
   // the pinned areas, as the pin replaces the doc's own tags.
@@ -1430,7 +1407,7 @@ export async function runSpecScanSessions(
       conflict: {
         docs: [a, b],
         note: flagged.note,
-        sections: verifiedSections(a, b, flagged),
+        sections: flagged.sections.filter((s) => s.doc === a || s.doc === b),
         areas: spannedAreas(a, b, area),
         review: flagged.review,
       },

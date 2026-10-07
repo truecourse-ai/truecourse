@@ -9,11 +9,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import type { GuardDocCoverage as GuardDocCoverageData, GuardSectionCoverage, GuardSectionCoverageStatus } from '@truecourse/shared';
+import { parseDocTree } from '@truecourse/shared';
 import { GuardDocCoverage } from '@/components/guard/GuardDocCoverage';
 
 function sec(headingText: string, level: number, status: GuardSectionCoverageStatus): GuardSectionCoverage {
   return {
-    anchor: headingText.toLowerCase().replace(/\s+/g, '-'),
+    anchor: parseDocTree('docs/SPEC.md', MD).sections.find((s) => s.headingText === headingText)!.anchor,
     headingText,
     level,
     fingerprint: 'sha256:x',
@@ -88,13 +89,13 @@ describe('GuardDocCoverage — in-document link navigation', () => {
     // dispatchEvent returns false when the default (new-tab nav) was prevented.
     const notPrevented = fireEvent.click(link);
     expect(notPrevented).toBe(false);
-    expect(onSelectSection).toHaveBeenCalledWith('introduction');
+    expect(onSelectSection).toHaveBeenCalledWith(SECTIONS[1].anchor);
   });
 
   it('resolves a pre-heading anchor link to the section it precedes', () => {
     const { onSelectSection } = renderCoverage();
     fireEvent.click(screen.getByRole('link', { name: 'deep' }));
-    expect(onSelectSection).toHaveBeenCalledWith('deep-section');
+    expect(onSelectSection).toHaveBeenCalledWith(SECTIONS[2].anchor);
   });
 
   it('leaves external links to open a new tab (not intercepted)', () => {
@@ -121,21 +122,21 @@ describe('GuardDocCoverage — filter blur vs hide', () => {
   it('blur mode dims non-matching sections but keeps them in the DOM', () => {
     const { container } = renderCoverage({ activeFilter: 'failed', filterMode: 'blur' });
     // Introduction (fail) matches; Overview (pass) is dimmed, still present.
-    expect(anchorEl(container, 'overview')?.className).toContain('opacity-40');
-    expect(anchorEl(container, 'introduction')?.className).not.toContain('opacity-40');
+    expect(anchorEl(container, SECTIONS[0].anchor)?.className).toContain('opacity-40');
+    expect(anchorEl(container, SECTIONS[1].anchor)?.className).not.toContain('opacity-40');
     expect(screen.getByRole('heading', { name: 'Overview' })).toBeInTheDocument();
   });
 
   it('hide mode removes non-matching sections from the DOM', () => {
     const { container } = renderCoverage({ activeFilter: 'failed', filterMode: 'hide' });
-    expect(anchorEl(container, 'introduction')).not.toBeNull();
+    expect(anchorEl(container, SECTIONS[1].anchor)).not.toBeNull();
     expect(screen.queryByRole('heading', { name: 'Overview' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Deep Section' })).not.toBeInTheDocument();
   });
 
   it('keeps the selected section visible in hide mode even when it does not match the filter', () => {
     // Overview is `pass`, filter is `fail`, but it is the selection → stays shown.
-    renderCoverage({ activeFilter: 'failed', filterMode: 'hide', selectedAnchor: 'overview' });
+    renderCoverage({ activeFilter: 'failed', filterMode: 'hide', selectedAnchor: SECTIONS[0].anchor });
     expect(screen.getByRole('heading', { name: 'Overview' })).toBeInTheDocument();
   });
 });

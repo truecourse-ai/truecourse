@@ -65,13 +65,8 @@ import {
   type FactComparisonWire,
 } from '../../packages/core/src/services/spec-scan/compare-facts'
 import { instructionsFingerprint } from '../../packages/core/src/services/spec-scan/tools'
-import {
-  splitDocSentences,
-  verifyConflictSides,
-  writeDecisions,
-  type DecisionsFile,
-  type DocCandidate,
-} from '../../packages/spec-consolidator/src/index.js'
+import { writeDecisions, type DecisionsFile, type DocCandidate } from '../../packages/spec-consolidator/src/index.js'
+import { splitDocSentences } from '@truecourse/shared'
 import { docPathOf, malformedFailure, memoryPersistence, outcome, stubDriver, type StubCall } from './spec-scan-session-stub'
 import { compare, compareBriefing, record, settle, useTool, type BriefedFact, type SentenceFact } from './spec-scan-facts-stub'
 
@@ -517,17 +512,6 @@ describe('conflicts on the same two sentences', () => {
     // A member with no grade leaves the fold with none, so nothing applies it unsupervised.
     expect(foldSameSentences([conflict('a', 'dismiss', 'high'), conflict('b', 'dismiss', undefined)]).review.recommendation).not.toHaveProperty('confidence')
   })
-
-  it('carries the sentence through a pointer the verifier re-anchors', () => {
-    const body = '# API\n\n## Paging\n\nNothing here.\n\n## Expense list\n\nExpenses are listed 20 per page, newest first.\n'
-    const [moved] = verifyConflictSides({
-      docs: ['docs/api.md', 'docs/app.md'],
-      note: 'page size',
-      sections: [{ ...api, heading: 'Paging' }],
-      bodyOf: () => body,
-    })
-    expect(moved).toEqual(api)
-  })
 })
 
 // ---------------------------------------------------------------------------
@@ -727,10 +711,9 @@ describe('a scan that compares facts, from docs to corpus', () => {
         sentence: sentenceKey('Export my data is under Settings, Danger Zone.'),
       },
     ])
-    // Verbatim by construction, so the verifier anchors each pointer where it already is.
+    // Verbatim by construction: every quote is a slice of its doc.
     const bodies: Record<string, string> = { 'docs/export.md': EXPORT_MD, 'docs/privacy.md': PRIVACY_MD }
     for (const section of conflict.sections) expect(bodies[section.doc]).toContain(section.quote)
-    expect(verifyConflictSides({ docs: conflict.docs, note: conflict.note, sections: conflict.sections, bodyOf: (ref) => bodies[ref] })).toEqual(conflict.sections)
     expect(conflict.review?.recommendation.action).toBe('fix-doc')
     expect(result.stats.conflictCount).toBe(1)
 

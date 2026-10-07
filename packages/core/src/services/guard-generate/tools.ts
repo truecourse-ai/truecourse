@@ -13,15 +13,16 @@
 
 import { z } from 'zod'
 import { defineToolSpec, type SessionTool } from '@truecourse/agent-loop'
-import { planDocChunks } from '@truecourse/shared'
+import { parseDocTree, planWindows, windowText } from '@truecourse/shared'
 import { isOpenApiDoc } from '@truecourse/shared/openapi'
 import type { GuardDoc, SectionInput } from '@truecourse/guard-generator'
 
 /**
- * One chunk of a doc a tool (or the briefing) shows per call — the same size
- * the scan sessions chunk with, so "chunk 2" means one thing everywhere.
+ * The character budget of one window of a doc a tool (or the briefing) shows
+ * per call — the same size the scan sessions page with, so "window 2" means
+ * one thing everywhere.
  */
-export const GUARD_DOC_CHUNK_CHARS = 16_000
+export const GUARD_DOC_WINDOW_CHARS = 16_000
 
 /** The run's doc universe as the tools see it: every planned doc, by ref. */
 export interface GuardDocUniverse {
@@ -70,34 +71,33 @@ function noSectionError(doc: GuardDoc, heading: string): { content: string; isEr
 }
 
 /**
- * The doc's paging plan. Markdown pages through the shared heading-aware
- * chunker; an OpenAPI doc is not markdown (the chunker would return ONE
- * potentially huge slice), so it pages per OPERATION SECTION instead —
- * mirroring the one-shot extract's `planViews` split, with the full outline
- * still the snapping set.
+ * The doc's paging plan: the shared doc tree's windows. An OpenAPI doc has no
+ * sentences to window (its sections ARE its operations), so it pages per
+ * OPERATION SECTION instead, with the full outline still the snapping set.
  */
-function docPages(doc: GuardDoc): { text: string }[] {
+function docPages(doc: GuardDoc): string[] {
   if (isOpenApiDoc(doc.doc, doc.content) && doc.sections.length > 1) {
-    return doc.sections.map((s) => ({ text: s.fullText }))
+    return doc.sections.map((s) => s.fullText)
   }
-  return planDocChunks(doc.doc, doc.content, GUARD_DOC_CHUNK_CHARS).map((c) => ({ text: c.text }))
+  const tree = parseDocTree(doc.doc, doc.content)
+  return planWindows(tree, { maxChars: GUARD_DOC_WINDOW_CHARS }).map((w) => windowText(tree, w))
 }
 
-/** Render one chunk (page) of a doc, with an honest chunk header. */
-export function renderDocChunk(doc: GuardDoc, chunk: number): { content: string; isError?: boolean } {
+/** Render one window (page) of a doc, with an honest window header. */
+export function renderDocWindow(doc: GuardDoc, window: number): { content: string; isError?: boolean } {
   const pages = docPages(doc)
-  if (chunk > pages.length) {
+  if (window > pages.length) {
     return {
-      content: `\`${doc.doc}\` has ${pages.length} chunk(s) — chunk ${chunk} is past the end.`,
+      content: `\`${doc.doc}\` has ${pages.length} window(s) — window ${window} is past the end.`,
       isError: true,
     }
   }
-  const head = pages.length > 1 ? `--- ${doc.doc} (chunk ${chunk}/${pages.length}) ---` : `--- ${doc.doc} ---`
-  return { content: [head, pages[chunk - 1].text, '--- end ---'].join('\n') }
+  const head = pages.length > 1 ? `--- ${doc.doc} (window ${window}/${pages.length}) ---` : `--- ${doc.doc} ---`
+  return { content: [head, pages[window - 1], '--- end ---'].join('\n') }
 }
 
-/** How many chunks (pages) a doc's briefing pages through. */
-export function docChunkCount(doc: GuardDoc): number {
+/** How many windows (pages) a doc's briefing pages through. */
+export function docWindowCount(doc: GuardDoc): number {
   return docPages(doc).length
 }
 
@@ -115,7 +115,7 @@ const READ_OWN_SECTION = defineToolSpec({
 
 /**
  * `read_section` — one section of THE doc a session owns, by anchor or heading
- * (the extract session's main read beyond its briefed first chunk; OpenAPI docs
+ * (the extract session's main read beyond its briefed first window; OpenAPI docs
  * resolve per operation, since their sections ARE the operations).
  */
 export function readOwnSectionTool(doc: GuardDoc): SessionTool {
@@ -128,22 +128,22 @@ export function readOwnSectionTool(doc: GuardDoc): SessionTool {
   })
 }
 
-const READ_OWN_CHUNK = defineToolSpec({
-  name: 'read_chunk',
-  description: 'Read another chunk of THE doc you are extracting (the briefing carried chunk 1).',
-  kind: 'read-own-doc-chunk',
+const READ_OWN_WINDOW = defineToolSpec({
+  name: 'read_window',
+  description: 'Read another window of THE doc you are extracting (the briefing carried window 1).',
+  kind: 'read-own-doc-window',
   readOnly: true,
   destructive: false,
   inputSchema: z
-    .object({ chunk: z.number().int().positive().describe('Chunk number (2 and up — 1 is in the briefing).') })
+    .object({ window: z.number().int().positive().describe('Window number (2 and up — 1 is in the briefing).') })
     .strict(),
 })
 
-/** `read_chunk` — the session's OWN doc, paged (the briefing carried chunk 1). */
-export function readOwnChunkTool(doc: GuardDoc): SessionTool {
-  return READ_OWN_CHUNK.bind({
+/** `read_window` — the session's OWN doc, paged (the briefing carried window 1). */
+export function readOwnWindowTool(doc: GuardDoc): SessionTool {
+  return READ_OWN_WINDOW.bind({
     async execute(args) {
-      return renderDocChunk(doc, args.chunk)
+      return renderDocWindow(doc, args.window)
     },
   })
 }
@@ -151,7 +151,7 @@ export function readOwnChunkTool(doc: GuardDoc): SessionTool {
 const READ_REFERENCED_DOC = defineToolSpec({
   name: 'read_referenced_doc',
   description:
-    'Read ANOTHER spec doc of this run, by its repo-relative ref — only to resolve an explicit reference your doc makes, never to browse. Pass `heading` for one section, omit it for the opening chunk.',
+    'Read ANOTHER spec doc of this run, by its repo-relative ref — only to resolve an explicit reference your doc makes, never to browse. Pass `heading` for one section, omit it for the opening window.',
   kind: 'read-referenced-doc',
   readOnly: true,
   destructive: false,
@@ -166,7 +166,7 @@ const READ_REFERENCED_DOC = defineToolSpec({
 /**
  * `read_referenced_doc` — ANOTHER doc of the run's universe, opened only to
  * resolve an explicit reference the own doc makes ("see docs/auth.md"). One
- * section when `heading` is given, chunk 1 otherwise.
+ * section when `heading` is given, window 1 otherwise.
  */
 export function readReferencedDocTool(universe: GuardDocUniverse): SessionTool {
   return READ_REFERENCED_DOC.bind({
@@ -179,7 +179,7 @@ export function readReferencedDocTool(universe: GuardDocUniverse): SessionTool {
           isError: true,
         }
       }
-      if (args.heading === undefined) return renderDocChunk(doc, 1)
+      if (args.heading === undefined) return renderDocWindow(doc, 1)
       const section = resolveSection(doc, args.heading)
       if (!section) return noSectionError(doc, args.heading)
       return { content: renderSection(doc, section) }

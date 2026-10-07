@@ -152,10 +152,12 @@ describe('DocMarkdown — YAML frontmatter', () => {
     expect(screen.getByText('Order creation must be idempotent.')).toBeTruthy();
   });
 
-  it('hides it on the highlighted path too, where the doc is split by section', () => {
-    render(<DocMarkdown source={FM} highlight={['KAN-2: Idempotent order creation']} />);
+  it('hides it when a sentence is marked too', () => {
+    const sentence = 'Order creation must be idempotent.';
+    const start = FM.indexOf(sentence);
+    render(<DocMarkdown source={FM} marks={[{ key: 'k', start, end: start + sentence.length }]} />);
     expect(screen.queryByText(/created:/)).toBeNull();
-    expect(screen.getByText('Order creation must be idempotent.')).toBeTruthy();
+    expect(screen.getByText(sentence, { selector: 'mark' })).toBeTruthy();
   });
 
   it('takes a block whose body would break a naive fence match', () => {

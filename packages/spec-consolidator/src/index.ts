@@ -94,20 +94,6 @@ export type { GroupResult } from './area-grouper.js';
 
 export { VOCAB_NORMALIZER_SYSTEM_PROMPT } from './vocab-normalizer.js';
 
-export { verifyConflictSides, splitDocSections, locateQuote } from './pointer-verifier.js';
-export type { VerifyPointersInput, DocSection } from './pointer-verifier.js';
-
-export {
-  splitDocSentences,
-  planSentenceWindows,
-  presentSentence,
-  SENTENCE_SPLITTER_VERSION,
-  CODE_LINES_PER_SENTENCE,
-} from './doc-sentences.js';
-export type { DocSentence, DocSentenceKind, SentenceWindow, SentenceWindowBounds } from './doc-sentences.js';
-
-export { headingOutline, leadText, sectionText } from './doc-sections.js';
-
 export {
   readCorpusDecisions,
   pruneOrphanedConflictResolutions,

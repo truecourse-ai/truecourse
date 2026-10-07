@@ -29,7 +29,23 @@
  * the cut pairs say how much a split separated.
  */
 
-import { STOPWORDS } from './pointer-verifier.js';
+/**
+ * Generic English function words + a few markdown-noise words, dropped before
+ * scoring so only content-bearing tokens are compared. Not tuned to any repo:
+ * these carry no topical signal in any document.
+ */
+export const STOPWORDS: ReadonlySet<string> = new Set<string>([
+  'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'else', 'of', 'to', 'in',
+  'on', 'at', 'by', 'for', 'with', 'as', 'is', 'are', 'was', 'were', 'be', 'been',
+  'being', 'it', 'its', 'this', 'that', 'these', 'those', 'they', 'them', 'their',
+  'there', 'here', 'no', 'not', 'yes', 'so', 'than', 'too', 'very', 'can', 'could',
+  'will', 'would', 'shall', 'should', 'may', 'might', 'must', 'do', 'does', 'did',
+  'done', 'has', 'have', 'had', 'from', 'up', 'out', 'down', 'over', 'under', 'again',
+  'we', 'you', 'your', 'our', 'us', 'i', 'he', 'she', 'his', 'her', 'each', 'any',
+  'all', 'both', 'some', 'such', 'only', 'own', 'same', 'more', 'most', 'other',
+  'into', 'about', 'when', 'where', 'which', 'who', 'whom', 'what', 'how', 'why',
+  'per', 'via', 'also',
+]);
 
 /**
  * A token in more items than this links nothing: it is corpus vocabulary

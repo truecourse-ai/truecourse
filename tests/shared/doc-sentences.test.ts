@@ -8,20 +8,13 @@
  * - an edit renumbers only the sentences at and after it;
  * - each sentence kind, and what is not a sentence, on those docs;
  * - the edge rules the module states, one small doc each;
- * - window planning and the presentation a briefing shows.
+ * - the presentation a briefing shows.
  */
 
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { parseHeadings } from '@truecourse/shared'
-import {
-  CODE_LINES_PER_SENTENCE,
-  planSentenceWindows,
-  presentSentence,
-  splitDocSentences,
-  type DocSentence,
-} from '../../packages/spec-consolidator/src/index.js'
+import { CODE_LINES_PER_SENTENCE, parseHeadings, presentSentence, splitDocSentences, type DocSentence } from '@truecourse/shared'
 
 const FIXTURES = path.resolve(__dirname, '../fixtures/doc-sentences')
 const fixture = (name: string): string => fs.readFileSync(path.join(FIXTURES, name), 'utf-8')
@@ -368,45 +361,6 @@ describe('splitDocSentences edge rules', () => {
       expect(body.slice(sentence.start, sentence.end)).toBe(sentence.text)
       expect(sentence.text.endsWith('\r')).toBe(false)
     }
-  })
-})
-
-describe('planSentenceWindows', () => {
-  const doc = (sections: number[]): DocSentence[] =>
-    splitDocSentences(sections.map((n, s) => `## S${s}\n\n${Array.from({ length: n }, (_, i) => `Sentence ${i} of ${s}.`).join(' ')}`).join('\n\n'))
-
-  it('packs whole sections in order, and covers every sentence once', () => {
-    const sentences = doc([3, 4, 3, 5])
-    const windows = planSentenceWindows(sentences, { maxSentences: 7, maxChars: 10_000 })
-    expect(windows).toEqual([
-      { index: 1, from: 1, to: 7 },
-      { index: 2, from: 8, to: 10 },
-      { index: 3, from: 11, to: 15 },
-    ])
-    expect(planSentenceWindows(sentences, { maxSentences: 7, maxChars: 10_000 })).toEqual(windows)
-  })
-
-  it('cuts a section over the bound at sentence boundaries, its last piece sharing a window', () => {
-    const sentences = doc([2, 9, 1])
-    expect(planSentenceWindows(sentences, { maxSentences: 4, maxChars: 10_000 })).toEqual([
-      { index: 1, from: 1, to: 2 },
-      { index: 2, from: 3, to: 6 },
-      { index: 3, from: 7, to: 10 },
-      { index: 4, from: 11, to: 12 },
-    ])
-  })
-
-  it('bounds the characters too; a sentence over the bound is a window alone', () => {
-    const sentences = splitDocSentences(`Short one. ${'X'.repeat(60)}. Short two. Short three.`)
-    expect(planSentenceWindows(sentences, { maxSentences: 100, maxChars: 30 })).toEqual([
-      { index: 1, from: 1, to: 1 },
-      { index: 2, from: 2, to: 2 },
-      { index: 3, from: 3, to: 4 },
-    ])
-  })
-
-  it('plans no window for a doc with no sentences', () => {
-    expect(planSentenceWindows([], { maxSentences: 10, maxChars: 100 })).toEqual([])
   })
 })
 
