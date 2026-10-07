@@ -14,6 +14,7 @@
  * materialize and collect) never spell a segment themselves.
  *
  *   specs/corpus.json              the curated document corpus
+ *   specs/claims.json              every claim the scan read from the documents
  *   specs/decisions.json           the curation the corpus was folded with
  *   guard/LATEST.json              the current run state
  *   guard/runs/<runId>.json        per-run snapshots
@@ -71,6 +72,7 @@ const TEST_RESULTS_DIR = 'results';
 const LOGS_DIR = 'logs';
 
 const CORPUS_FILE = 'corpus.json';
+const SPEC_CLAIMS_FILE = 'claims.json';
 const SPEC_DECISIONS_FILE = 'decisions.json';
 const LATEST_FILE = 'LATEST.json';
 const HISTORY_FILE = 'history.json';
@@ -115,6 +117,11 @@ export function corpusFilePath(workDir: string): string {
 
 export function specDecisionsPath(workDir: string): string {
   return path.join(specsDir(workDir), SPEC_DECISIONS_FILE);
+}
+
+/** The claims the scan read from the corpus's documents. */
+export function specClaimsFilePath(workDir: string): string {
+  return path.join(specsDir(workDir), SPEC_CLAIMS_FILE);
 }
 
 // --- guard run store --------------------------------------------------------

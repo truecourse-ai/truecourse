@@ -18,6 +18,7 @@
  *   high-confidence recommendations as `resolvedBy: 'auto'` verdicts.
  */
 
+import type { ClaimsFile } from '@truecourse/shared';
 import fs from 'node:fs';
 import path from 'node:path';
 import { type StageTransportTally } from '@truecourse/shared/llm';
@@ -89,6 +90,8 @@ export interface CurateResult {
   decisions: DecisionsFile;
   /** Summary counts for dashboard status. */
   stats: CurateStats;
+  /** Every claim the scan read from the kept documents (what `specs/claims.json` holds). */
+  claims: ClaimsFile;
 }
 
 /**

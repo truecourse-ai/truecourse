@@ -80,6 +80,7 @@ import {
   aliasMatcher,
   applySubjectAttribution,
   assignDocPairArea,
+  atomicWriteJson,
   autoApplyHighConfidenceRecommendations,
   classifyStatusValue,
   discoverDocs,
@@ -115,6 +116,7 @@ import {
 } from '@truecourse/spec-consolidator'
 import { LlmStageFailureError, type StageTransportTally } from '@truecourse/shared/llm'
 import { dedupeCrossAreaConflicts, type ConflictLike } from '@truecourse/shared'
+import { specClaimsFilePath } from '@truecourse/shared/work-tree'
 import { cachedSessionOutcome } from '../agent/session-cache.js'
 import { runSessionPool } from '../agent/session-pool.js'
 import {
@@ -184,6 +186,7 @@ import {
   RECORD_FACTS_SESSION_KIND,
   describeDocLedger,
   docFactLedger,
+  claimsFromLedgers,
   docLedgerCounts,
   factAreaIds,
   recordFactsBriefing,
@@ -873,6 +876,7 @@ export async function runSpecScanSessions(
       pendingQuestions,
       scanFindings,
       stoppedAfter,
+      claims: claimsFromLedgers([], new Date().toISOString()),
     }
   }
   if (only === 'orchestrate') {
@@ -1633,9 +1637,11 @@ export async function runSpecScanSessions(
   }))
   // A recorded doc carries its ledger's counts; the ledger itself stays in the cache.
   const ledgerCounts = new Map(factLedgers.map((ledger) => [ledger.doc, docLedgerCounts(ledger)]))
+  const generatedAt = new Date().toISOString()
+  const claims = claimsFromLedgers(factLedgers, generatedAt)
   const corpus: CuratedCorpus = {
     version: 5,
-    generatedAt: new Date().toISOString(),
+    generatedAt,
     docs: [
       ...grouped.docs.map((doc) => {
         const ledger = ledgerCounts.get(doc.ref)
@@ -1661,6 +1667,8 @@ export async function runSpecScanSessions(
       ...(corpus.comparison ? { comparison: corpus.comparison } : {}),
     })
     fact('verify', 'corpus.json written')
+    atomicWriteJson(specClaimsFilePath(repoRoot), claims)
+    fact('verify', `claims.json written, ${claims.claims.length} claims`)
     effectiveDecisions = pruneOrphanedConflictResolutions(repoRoot, corpus, decisions)
     const auto = opts.skipAutoApply
       ? { decisions: effectiveDecisions, applied: [] }
@@ -1721,6 +1729,7 @@ export async function runSpecScanSessions(
     pendingQuestions,
     scanFindings,
     factLedgers,
+    claims,
   }
 }
 

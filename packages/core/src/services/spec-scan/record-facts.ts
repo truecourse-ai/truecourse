@@ -47,11 +47,17 @@ import {
   type VocabMap,
 } from '@truecourse/spec-consolidator'
 import {
+  CLAIMS_FILE_VERSION,
+  ClaimUntestableReasonSchema,
   SENTENCE_SPLITTER_VERSION,
+  claimId,
   docOutline,
   parseDocTree,
   planWindows,
   presentSentence,
+  sentenceKey,
+  type Claim,
+  type ClaimsFile,
   type DocSentence,
   type DocWindow,
 } from '@truecourse/shared'
@@ -75,7 +81,7 @@ export const RECORD_FACTS_CACHE_NAME = 'consolidator/fact-record'
  * THE RECORD STEP'S VERSION, bumped by hand. A prompt change that fixes wrong
  * output bumps it in the same commit; any other prompt edit invalidates nothing.
  */
-export const RECORD_STAGE_VERSION = 2
+export const RECORD_STAGE_VERSION = 3
 
 /** Most sentences one window holds. */
 export const RECORD_WINDOW_SENTENCES = 120
@@ -111,6 +117,10 @@ const RecordedFactWireSchema = z
       .string()
       .describe('The fact as ONE declarative sentence that can be read alone, naming the product thing it is about.'),
     areas: z.array(z.string()).describe('One or more of the document\'s area tags, exactly as the briefing lists them.'),
+    testable: z
+      .boolean()
+      .describe('Whether a test could set the product up, do what the statement describes and see the result it names.'),
+    reason: ClaimUntestableReasonSchema.nullable().describe('Why the fact is not testable; null when it is.'),
   })
   .strict()
 type RecordedFactWire = z.infer<typeof RecordedFactWireSchema>
@@ -295,6 +305,8 @@ function factProblems(fact: RecordedFactWire, scope: LedgerScope, known: Readonl
   else if (unknown.length > 0) {
     problems.push(`names ${unknown.map((a) => `"${a}"`).join(', ')}, not an area of this document (${scope.areas.join(', ')})`)
   }
+  if (fact.testable && fact.reason !== null) problems.push(`is testable and gives a reason it is not; the reason is null for a testable fact`)
+  if (!fact.testable && fact.reason === null) problems.push(`is not testable and gives no reason`)
   return problems
 }
 
@@ -378,7 +390,7 @@ const skippedTotal = (skipped: Partial<Record<FactSkipReason, number>>): number 
 const CHECK_LEDGER = defineToolSpec({
   name: 'check_ledger',
   description:
-    'Check a draft ledger the way the run will: every sentence of your window cited by a fact or inside a skip, each fact citing 1 to 3 sentences of the window and areas the document has, no sentence both cited and skipped, a note on every "other" skip. Call it on your complete draft before you give the outcome.',
+    'Check a draft ledger the way the run will: every sentence of your window cited by a fact or inside a skip, each fact citing 1 to 3 sentences of the window and areas the document has, a reason on every fact that is not testable and none on one that is, no sentence both cited and skipped, a note on every "other" skip. Call it on your complete draft before you give the outcome.',
   kind: 'check-fact-ledger',
   readOnly: true,
   destructive: false,
@@ -414,8 +426,9 @@ const RECORD_FACTS_SESSION = defineSessionKind({
 
 function presentLedger(ledger: FactLedger): KnownDisplayBlock[] {
   const skipped = ledger.skips.reduce((sum, s) => sum + Math.max(0, s.to - s.from + 1), 0)
+  const testable = ledger.facts.filter((f) => f.testable).length
   const lines = [
-    `I recorded ${ledger.facts.length} fact${ledger.facts.length === 1 ? '' : 's'} and skipped ${skipped} sentence${skipped === 1 ? '' : 's'}`,
+    `I recorded ${ledger.facts.length} fact${ledger.facts.length === 1 ? '' : 's'}, ${testable} of them testable, and skipped ${skipped} sentence${skipped === 1 ? '' : 's'}`,
   ]
   if (ledger.unrecorded.length > 0) lines.push(`I left sentence ${sentenceRanges(ledger.unrecorded, REFUSAL_RANGES_MAX)} unrecorded`)
   return [{ kind: 'facts', lines }]
@@ -510,6 +523,18 @@ Three kinds of sentence look skippable and are not:
   - \`sentences\`: the numbers of the sentences the fact is stated in: one, or up to three when it spans them (a list item and the sentence introducing the list).
   - \`areas\`: the ones the fact belongs to among the document's area tags, exactly as the briefing lists them.
 
+# Testable
+
+Say for each fact whether an outside observer could check it against the running product: \`testable\` is true when a test could set the product up, do what the statement describes and see the result it names. Otherwise it is false, with the \`reason\`:
+  - "hedge": the sentence only says something may or can happen, without saying when;
+  - "advice": a recommendation about using the product, not a statement of how it behaves;
+  - "example": a sample value or output that illustrates, not a rule;
+  - "navigation": what the document covers, or where to read on;
+  - "process": how the team works: releases, contributions, support;
+  - "legal": licence terms and legal statements;
+  - "not-observable": an internal detail nothing outside the product shows: an implementation choice, an algorithm, a file layout.
+A fact that is not testable is still a fact: another document can still contradict it. \`reason\` is null for a testable fact.
+
 A sentence that states two facts yields two facts. Every clause that asserts something is a fact of its own: a second sentence, a recommendation ("prefer the named volume from the example Compose file"), a condition, a default, an exception. A fact that keeps one clause of a sentence and drops the rest has lost what another document may contradict. A table row and a list item each need their own decision: a table of 40 rows is 40 sentences, and every row that states a fact yields one. A code block that names commands, variables, keys or endpoints states facts.
 
 # Skipping
@@ -534,7 +559,7 @@ You have ${RECORD_FACTS_BUDGET.turns} turns, and one more grant of as many when 
 
 # The outcome
 
-One object: { "facts": [{ "sentences": [17], "subject": "Export my data", "statement": "Export my data is under Settings, Account.", "areas": ["core/exports"] }], "skips": [{ "from": 1, "to": 3, "why": "navigation" }] }`
+One object: { "facts": [{ "sentences": [17], "subject": "Export my data", "statement": "Export my data is under Settings, Account.", "areas": ["core/exports"], "testable": true, "reason": null }], "skips": [{ "from": 1, "to": 3, "why": "navigation" }] }`
 
 // ---------------------------------------------------------------------------
 // The doc's ledger, folded
@@ -550,6 +575,8 @@ export interface RecordedFact {
   statement: string
   /** Its areas, as canonical area ids. */
   areas: string[]
+  /** Whether a test could check it, or why not. */
+  testable: Claim['testable']
 }
 
 /** One doc's facts and skips across its windows, as the run folds them. */
@@ -599,6 +626,7 @@ export function docFactLedger(input: DocLedgerInput): DocFactLedger {
         subject: fact.subject.trim(),
         statement: fact.statement.trim(),
         areas: [...new Set(fact.areas.flatMap((raw) => input.canonicalAreas(raw)))].sort(),
+        testable: fact.testable || fact.reason === null ? true : { reason: fact.reason },
       })
     }
     for (const reason of FactSkipReasonSchema.options) {
@@ -608,6 +636,29 @@ export function docFactLedger(input: DocLedgerInput): DocFactLedger {
     unrecorded.push(...check.uncovered)
   }
   return { doc: input.doc, sentences: input.sentences, facts, skipped, unrecorded, failed }
+}
+
+/**
+ * The claims the ledgers hold, as the scan stores them: one per fact, named by
+ * its doc and the keys of the sentences it cites, in corpus and doc order.
+ */
+export function claimsFromLedgers(ledgers: readonly DocFactLedger[], generatedAt: string): ClaimsFile {
+  const claims: Claim[] = []
+  for (const ledger of ledgers) {
+    for (const fact of ledger.facts) {
+      const sentences = fact.sentences.map((s) => sentenceKey(s.text, s.repeat))
+      claims.push({
+        id: claimId(fact.doc, sentences),
+        doc: fact.doc,
+        sentences,
+        subject: fact.subject,
+        statement: fact.statement,
+        areas: fact.areas,
+        testable: fact.testable,
+      })
+    }
+  }
+  return { version: CLAIMS_FILE_VERSION, generatedAt, claims }
 }
 
 /** What a doc's ledger came to, counted, as the corpus records it. */

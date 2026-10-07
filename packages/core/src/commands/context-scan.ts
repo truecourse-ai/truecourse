@@ -226,6 +226,7 @@ export async function workspaceContextScanInProcess(
       };
       const target = pullRequest ? { workspaceOrgId: org, scope: pullRequest.scope } : ref;
       await saveWorkspaceSpec(target, 'corpus', corpus, provenance);
+      await saveWorkspaceSpec(target, 'claims', curate.claims, provenance);
       if (!pullRequest) await saveWorkspaceSpec(ref, 'decisions', curate.decisions);
       await saveWorkspaceSpecDocs(target, snapshotBodies(corpus, materialized.bodies), provenance);
       await closeRun(org, runId, options.signal?.aborted ? 'interrupted' : 'completed');

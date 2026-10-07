@@ -52,8 +52,8 @@ export interface GuardVersion extends StoredVersion {
   restoredFrom: string | null;
 }
 
-/** The two workspace series. Decisions are a ledger people edit, not a series. */
-export type WorkspaceSpecVersionArtifact = 'corpus' | 'docs';
+/** The workspace series: the corpus, the claims read from its documents, and the document snapshot. Decisions are a ledger people edit, not a series. */
+export type WorkspaceSpecVersionArtifact = 'corpus' | 'claims' | 'docs';
 
 export interface WorkspaceSpecVersion extends StoredVersion {
   artifact: WorkspaceSpecVersionArtifact;

@@ -101,6 +101,7 @@ function factsOf(
     subject: spec.subject,
     statement: spec.statement ?? `${spec.subject} is stated in sentence ${spec.sentences.join(',')}.`,
     areas: spec.areas,
+    testable: true,
   }))
 }
 

@@ -46,6 +46,8 @@ export function recordBriefing(briefing: string): { doc: string; areas: string[]
 interface StatedFact {
   subject: string
   statement: string
+  testable?: boolean
+  reason?: FactLedgerWire['facts'][number]['reason']
 }
 
 /** What a sentence states (one fact, or several), or `null` to skip it. */
@@ -58,7 +60,7 @@ export async function record(call: StubCall, factOf: SentenceFact): Promise<Driv
   for (const sentence of sentences) {
     const stated = factOf(sentence, doc)
     if (stated === null) ledger.skips.push({ from: sentence.n, to: sentence.n, why: 'other', note: 'nothing to record' })
-    else for (const fact of [stated].flat()) ledger.facts.push({ sentences: [sentence.n], areas, ...fact })
+    else for (const fact of [stated].flat()) ledger.facts.push({ sentences: [sentence.n], areas, testable: true, reason: null, ...fact })
   }
   await useTool(call, 'check_ledger', ledger)
   return outcome(ledger)
