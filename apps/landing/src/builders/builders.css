@@ -24,6 +24,12 @@
   letter-spacing: -0.035em;
   margin: 0;
 }
+/* A headline that repeats a longer search, set smaller so it keeps to a few lines. */
+.bs-hero h1.long {
+  font-size: clamp(38px, 4.4vw, 58px);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
 .bs-hero .sub {
   font-size: clamp(17px, 1.6vw, 21px);
   line-height: 1.5;
@@ -118,6 +124,17 @@
   font-size: clamp(17px, 1.5vw, 19px);
   max-width: 46ch;
   margin: 18px auto 0;
+}
+/* The booking calendar, set into the final section on a card of its own. */
+.bs-calendar {
+  max-width: 1000px;
+  min-height: 560px;
+  margin: 36px auto 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: #fff;
+  overflow: hidden;
+  text-align: left;
 }
 .bs-foot {
   padding-block: 0 32px;
@@ -338,6 +355,182 @@ section.band:has(.bs-ask) {
   width: 100%;
   max-width: 320px;
   margin-inline: auto;
+}
+
+/* The hero told in numbers: an example business's dashboard over a year. */
+.bs-growth {
+  width: 100%;
+  max-width: 620px;
+  margin-inline: auto;
+}
+.bs-dash {
+  position: absolute;
+  inset: 0;
+  padding: 22px 24px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 24px 60px -24px rgba(17, 24, 39, 0.25), 0 2px 6px rgba(17, 24, 39, 0.05);
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}
+.bs-dash-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 16px;
+}
+.bs-dash-head span {
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--bg-elev2);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+.bs-dash-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 16px;
+}
+.bs-dash-stats > div {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-elev);
+}
+.bs-dash-stats span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.bs-dash-stats b {
+  font-size: 24px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.bs-dash-stats b.bad {
+  color: var(--fail);
+}
+.bs-dash-stats b.good {
+  color: var(--accent);
+}
+.bs-dash-stats em {
+  font-style: normal;
+  font-size: 12px;
+  color: var(--muted);
+}
+.bs-dash-stats em.up {
+  color: var(--accent);
+  font-weight: 600;
+}
+.bs-dash-chart {
+  display: block;
+  margin-top: 18px;
+  overflow: visible;
+}
+.bs-dash-chart .grid,
+.bs-dash-bars .grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.bs-dash-chart .month {
+  font-size: 11px;
+  fill: var(--muted);
+}
+.bs-dash-chart .before {
+  fill: none;
+  stroke: var(--muted-2);
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.bs-dash-chart .after {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.bs-dash-chart .area {
+  fill: url(#bs-growth-fill);
+  stroke: none;
+}
+.bs-dash-chart .head {
+  fill: #fff;
+  stroke: var(--fg);
+  stroke-width: 2;
+}
+.bs-dash-chart .marker {
+  stroke: var(--fg);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  opacity: 0.5;
+}
+.bs-dash-chart .marker-pill {
+  fill: var(--fg);
+}
+.bs-dash-chart .marker-text {
+  font-size: 12px;
+  font-weight: 600;
+  fill: #fff;
+}
+.bs-dash-chart .pill {
+  stroke-width: 1;
+}
+.bs-dash-chart .pill-text {
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.bs-dash-chart .bad .pill {
+  fill: oklch(0.97 0.02 27);
+  stroke: oklch(0.55 0.2 27 / 0.3);
+}
+.bs-dash-chart .bad .pill-text {
+  fill: var(--fail);
+}
+.bs-dash-chart .bad .dot {
+  fill: var(--fail);
+  stroke: #fff;
+  stroke-width: 2;
+}
+.bs-dash-chart .good .pill {
+  fill: oklch(0.97 0.03 155);
+  stroke: var(--accent-line);
+}
+.bs-dash-chart .good .pill-text {
+  fill: var(--accent-strong);
+}
+.bs-dash-chart .good .dot {
+  fill: var(--accent);
+  stroke: #fff;
+  stroke-width: 2;
+}
+.bs-dash-chart .check {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.bs-dash-label {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.bs-dash-bars {
+  display: block;
+  margin-top: 6px;
+}
+.bs-dash-bars .bad {
+  fill: var(--fail);
+  opacity: 0.7;
+}
+.bs-dash-bars .good {
+  fill: var(--accent);
+  opacity: 0.55;
 }
 @media (max-width: 640px) {
   .bs-morning {
@@ -1570,6 +1763,23 @@ section.band:has(.bs-ask) {
   font-weight: 650;
   letter-spacing: -0.03em;
   line-height: 1;
+}
+.bs-plan-price s {
+  margin-right: 12px;
+  font-size: 32px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.bs-plan-early {
+  display: block;
+  width: fit-content;
+  margin: 10px auto 0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
 }
 .bs-plan-price span {
   margin-left: 8px;

@@ -6,13 +6,15 @@ import { cn } from '@/lib/cn';
 import { Reveal } from '@/components/Reveal';
 import { Clouds } from '@/components/Clouds';
 import { Voyage } from '@/components/Voyage';
-import { BookLink } from '@/builders/BookLink';
+import { BookLink, BookingCalendar } from '@/builders/BookLink';
 import type { BookPlacement } from '@/builders/BookLink';
 import { Who } from '@/builders/Who';
 import { Check } from '@/builders/icons';
 import { BuiltWith } from '@/builders/BuiltWith';
 import { useSectionViews } from '@/builders/useSectionViews';
+import { useHeroCopy, useHeroScene } from '@/builders/heroCopy';
 import { MorningScene } from '@/builders/scenes/MorningScene';
+import { GrowthScene } from '@/builders/scenes/GrowthScene';
 import { JobsChecklist } from '@/builders/scenes/JobsChecklist';
 import { EveningScene } from '@/builders/scenes/EveningScene';
 import { ReviewScene } from '@/builders/scenes/ReviewScene';
@@ -34,7 +36,7 @@ export const meta = () =>
   pageMeta({
     title: 'TrueCourse · Your AI CTO',
     description:
-      'An AI CTO for professionals who build their own apps with AI, for $99 a month. Get your evenings and weekends back while it keeps your app working.',
+      'An AI CTO for professionals who build their own apps with AI, for $49 a month for early adopters. Get your evenings and weekends back while it keeps your app working.',
     path: '/builders',
   });
 
@@ -122,6 +124,8 @@ function BuildersHeader() {
 
 export default function BuildersPage() {
   useSectionViews(SECTIONS);
+  const hero = useHeroCopy();
+  const scene = useHeroScene();
   return (
     <div className="builders">
       <BuildersHeader />
@@ -131,15 +135,11 @@ export default function BuildersPage() {
           <Clouds className="hero-clouds" layout="narrow" />
           <div className="wrap bs-hero-inner">
             <div className="bs-hero-text">
-              <Reveal as="p" className="kicker" delay={20} rise>
-                For professionals who build their own apps with AI
-              </Reveal>
-              <Reveal as="h1" delay={60} rise>
-                Your AI CTO
+              <Reveal as="h1" className={cn(hero.long && 'long')} delay={60} rise>
+                {hero.title}
               </Reveal>
               <Reveal as="p" className="sub" delay={140} rise>
-                Get your evenings and weekends back. It keeps your app working while you focus on your
-                business and the people you care about.
+                {hero.sub}
               </Reveal>
               <Reveal className="bs-cta-row" delay={220} rise>
                 <BookLink className="btn btn-primary" placement="hero">
@@ -155,7 +155,7 @@ export default function BuildersPage() {
               </Reveal>
             </div>
             <Reveal className="bs-hero-scene" delay={300} rise>
-              <MorningScene />
+              {scene === 'growth' ? <GrowthScene /> : <MorningScene />}
             </Reveal>
           </div>
         </section>
@@ -236,8 +236,9 @@ export default function BuildersPage() {
             <Reveal className="bs-plan">
               <div className="bs-plan-head">
                 <b>AI CTO</b>
+                <p className="bs-plan-early">Early adopter price</p>
                 <p className="bs-plan-price">
-                  $99<span>a month</span>
+                  <s>$99</s>$49<span>a month</span>
                 </p>
                 <p className="bs-muted">Less than one hour of a developer's time.</p>
               </div>
@@ -304,11 +305,7 @@ export default function BuildersPage() {
               Start with a free 30-minute app checkup. We look at your app and how you run it, then send you a
               short plan for what you actually need.
             </p>
-            <div className="cta-row">
-              <BookLink className="btn btn-primary" placement="cta">
-                Book a free app checkup
-              </BookLink>
-            </div>
+            <BookingCalendar className="bs-calendar" />
           </div>
           <Voyage />
         </section>
