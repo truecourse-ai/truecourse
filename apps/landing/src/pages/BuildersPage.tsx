@@ -6,14 +6,15 @@ import { cn } from '@/lib/cn';
 import { Reveal } from '@/components/Reveal';
 import { Clouds } from '@/components/Clouds';
 import { Voyage } from '@/components/Voyage';
-import { BookLink } from '@/builders/BookLink';
+import { BookLink, BookingCalendar } from '@/builders/BookLink';
 import type { BookPlacement } from '@/builders/BookLink';
 import { Who } from '@/builders/Who';
 import { Check } from '@/builders/icons';
 import { BuiltWith } from '@/builders/BuiltWith';
 import { useSectionViews } from '@/builders/useSectionViews';
-import { useHeroCopy } from '@/builders/heroCopy';
+import { useHeroCopy, useHeroScene } from '@/builders/heroCopy';
 import { MorningScene } from '@/builders/scenes/MorningScene';
+import { GrowthScene } from '@/builders/scenes/GrowthScene';
 import { JobsChecklist } from '@/builders/scenes/JobsChecklist';
 import { EveningScene } from '@/builders/scenes/EveningScene';
 import { ReviewScene } from '@/builders/scenes/ReviewScene';
@@ -124,6 +125,7 @@ function BuildersHeader() {
 export default function BuildersPage() {
   useSectionViews(SECTIONS);
   const hero = useHeroCopy();
+  const scene = useHeroScene();
   return (
     <div className="builders">
       <BuildersHeader />
@@ -156,7 +158,7 @@ export default function BuildersPage() {
               </Reveal>
             </div>
             <Reveal className="bs-hero-scene" delay={300} rise>
-              <MorningScene />
+              {scene === 'growth' ? <GrowthScene /> : <MorningScene />}
             </Reveal>
           </div>
         </section>
@@ -305,11 +307,7 @@ export default function BuildersPage() {
               Start with a free 30-minute app checkup. We look at your app and how you run it, then send you a
               short plan for what you actually need.
             </p>
-            <div className="cta-row">
-              <BookLink className="btn btn-primary" placement="cta">
-                Book a free app checkup
-              </BookLink>
-            </div>
+            <BookingCalendar className="bs-calendar" />
           </div>
           <Voyage />
         </section>

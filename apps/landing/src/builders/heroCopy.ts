@@ -11,7 +11,7 @@ import { registerProperties } from '@/lib/posthog';
 export type HeroCopy = { variant: string; title: string; sub: string; long?: boolean };
 
 const FILTER_SUB =
-  'You built the app with Lovable, Replit or Claude Code. We test it, watch it and fix it, for $99 a month.';
+  'You built the app with Lovable, Replit or Claude Code. Your AI CTO tests it, watches it and fixes it.';
 
 const DEFAULT: HeroCopy = {
   variant: 'default',
@@ -22,13 +22,13 @@ const DEFAULT: HeroCopy = {
 const VARIANTS: Record<string, HeroCopy> = {
   'fractional-cto': {
     variant: 'fractional-cto',
-    title: 'A fractional CTO for apps built with AI',
+    title: 'Fractional CTO work, done by AI',
     sub: FILTER_SUB,
     long: true,
   },
   'part-time-cto': {
     variant: 'part-time-cto',
-    title: 'A part-time CTO for your AI-built app',
+    title: 'Why part time? Your AI CTO never clocks out.',
     sub: FILTER_SUB,
     long: true,
   },
@@ -46,4 +46,22 @@ export function useHeroCopy(): HeroCopy {
     registerProperties({ hero_variant: chosen.variant });
   }, []);
   return copy;
+}
+
+/** The picture beside the headline: the year in numbers, or the morning phone. */
+export type HeroScene = 'phone' | 'growth';
+
+/**
+ * The hero scene for this visit, from /builders?scene=phone, recorded on
+ * every PostHog event as `hero_scene`. Without it the page shows the growth chart.
+ */
+export function useHeroScene(): HeroScene {
+  const [scene, setScene] = useState<HeroScene>('growth');
+  useEffect(() => {
+    const chosen: HeroScene =
+      new URLSearchParams(window.location.search).get('scene') === 'phone' ? 'phone' : 'growth';
+    setScene(chosen);
+    registerProperties({ hero_scene: chosen });
+  }, []);
+  return scene;
 }

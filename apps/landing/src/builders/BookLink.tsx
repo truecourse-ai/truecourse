@@ -1,10 +1,11 @@
-import { useEffect, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { getCalApi } from '@calcom/embed-react';
 import { trackEvent } from '@/lib/posthog';
 
 export const BOOKING_URL = 'https://cal.com/mushegh-gevorgyan-asax6e/your-app-checkup';
 const CAL_LINK = 'mushegh-gevorgyan-asax6e/your-app-checkup';
 const NAMESPACE = 'checkup';
+const INLINE_NAMESPACE = 'checkup-inline';
 
 /** The ad tags Cal.com records with a booking when they are on its link. */
 const UTM = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'];
@@ -28,7 +29,7 @@ function bookingUrl(search: string): string {
 }
 
 /** Where on the /builders page the click happened, so placements can be compared. */
-export type BookPlacement = 'header' | 'hero' | 'after-evening' | 'after-jobs' | 'pricing' | 'cta';
+export type BookPlacement = 'header' | 'hero' | 'after-evening' | 'after-jobs' | 'pricing';
 
 /** The placement whose click opened the calendar, credited when the booking lands. */
 let openedFrom: BookPlacement | undefined;
@@ -86,4 +87,30 @@ export function BookLink({
       {children}
     </a>
   );
+}
+
+/**
+ * The app checkup calendar set into the page, carrying this visit's ad tags.
+ * It has a namespace of its own, apart from the popup's, and records each
+ * booking made in it as `checkup_booked` from the `calendar` placement.
+ */
+export function BookingCalendar({ className }: { className?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    void getCalApi({ namespace: INLINE_NAMESPACE }).then((cal) => {
+      cal('ui', { theme: 'light', layout: 'month_view' });
+      cal('on', {
+        action: 'bookingSuccessfulV2',
+        callback: () => trackEvent('checkup_booked', { placement: 'calendar', page: 'builders' }),
+      });
+      cal('inline', {
+        elementOrSelector: el,
+        calLink: CAL_LINK,
+        config: { layout: 'month_view', ...adTags(window.location.search) },
+      });
+    });
+  }, []);
+  return <div ref={ref} className={className} />;
 }
