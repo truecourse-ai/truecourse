@@ -159,62 +159,6 @@ describe('workerCacheKey — security fold', () => {
   })
 })
 
-// The scan reads no claims from an OpenAPI document yet, so a generate over one composes no flows.
-// These cases wait for OpenAPI operations to become claims.
-describe.skip('generateGuards — the api worker briefing carries the operation-auth mapping', () => {
-  /** Collect every (flow, surface) worker BRIEFING, authoring nothing. */
-  function collectAuth(): { byFlow: Map<string, string>; runner: FlowWorkerSessionSeam } {
-    const byFlow = new Map<string, string>()
-    const runner = submitWorkerSessions(() => ({ blocked: [{ order: 1, capability: 'a spy worker authors nothing' }] }), {
-      onBriefing: (task, briefing) => byFlow.set(task.flowId, briefing),
-    })
-    return { byFlow, runner }
-  }
-
-  it('advertises the satisfying credential for a matched scheme and blocks on an unsatisfied one', async () => {
-    const r = setupRepo(openapi(), API_KEY)
-    const { byFlow, runner } = collectAuth()
-    await runGenerate({
-      repoRoot: r,
-      interfaces: meInterfaces(r),
-      claims: claimsBy({
-        'paths/get-getme': [{ claim: 'GET /me returns the caller', driver: 'api', reason: 'HTTP 200' }],
-        'paths/get-getadmin': [{ claim: 'GET /admin returns admin data', driver: 'api', reason: 'HTTP 200' }],
-        'paths/get-getpublic': [{ claim: 'GET /public returns data', driver: 'api', reason: 'HTTP 200' }],
-      }),
-      flowWorkerSession: runner,
-    })
-    // Every bound operation gets a worker, so the mapping must reach some briefing.
-    expect([...byFlow.keys()].sort()).toEqual(['paths-get-getadmin', 'paths-get-getme', 'paths-get-getpublic'])
-    const all = [...byFlow.values()].join('\n')
-    // apiKeyAuth (GET /me) is satisfied by the api-key credential via the header heuristic.
-    expect(byFlow.get('paths-get-getme')!).toContain('apiKeyAuth')
-    expect(byFlow.get('paths-get-getme')!).toContain('X-API-Key')
-    // oauth2Auth (GET /admin) has no declared credential → named as unsatisfied.
-    expect(all).toContain('oauth2Auth')
-  }, 60_000)
-
-  it('names the required scheme as unsatisfied when the recipe declares no credential for it', async () => {
-    const r = setupRepo(openapi(), undefined)
-    const { byFlow, runner } = collectAuth()
-    await runGenerate({
-      repoRoot: r,
-      interfaces: meInterfaces(r),
-      claims: claimsBy({
-        'paths/get-getme': [{ claim: 'GET /me returns the caller', driver: 'api', reason: 'HTTP 200' }],
-        'paths/get-getadmin': { untestable: 'needs oauth' },
-        'paths/get-getpublic': { untestable: 'trivial' },
-      }),
-      flowWorkerSession: runner,
-    })
-    // No credentials → apiKeyAuth is unsatisfiable, so the secured GET /me is
-    // briefed with the scheme named as unsatisfied and no credential beside it.
-    const me = byFlow.get('paths-get-getme')!
-    expect(me).toContain('apiKeyAuth')
-    expect(me).not.toContain('X-API-Key')
-  }, 60_000)
-})
-
 describe('generateGuards — `satisfies` validation', () => {
   /** A worker seam that must never be reached: validation stops the run first. */
   const neverAuthors: FlowWorkerSessionSeam = async () => {
