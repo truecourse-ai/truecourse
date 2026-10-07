@@ -545,6 +545,8 @@ export interface SuppressedClaim {
   anchor: string | null;
   /** The verbatim disputed sentence — no claim asserting it may be extracted. */
   quote: string;
+  /** The losing sentence's key: a claim read from it is suppressed. */
+  sentence: string;
 }
 
 /**
@@ -576,7 +578,7 @@ export function suppressedClaims(corpus: CorpusLike, decisions: DecisionsLike): 
     // have moved on since the verdict was recorded.
     const current = c.sections.find((s) => s.doc === loser.doc && s.sentence === loser.sentence);
     const quote = current?.quote?.trim() || loser.quote?.trim();
-    if (quote) out.push({ doc: loser.doc, anchor: current?.heading ?? loser.anchor, quote });
+    if (quote) out.push({ doc: loser.doc, anchor: current?.heading ?? loser.anchor, quote, sentence: loser.sentence });
   }
   return out;
 }
