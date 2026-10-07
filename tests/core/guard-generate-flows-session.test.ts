@@ -67,7 +67,7 @@ import { buildGuardDocUniverse } from '../../packages/core/src/services/guard-ge
 import { memoryPersistence, stubDriver, outcome } from './spec-scan-session-stub'
 import {
   DEFAULT_INTERFACES,
-  extractSessionBy,
+  claimsBy,
   flowsAreaSessionOf,
   interfacesOf,
   makeTempRepo,
@@ -412,32 +412,14 @@ describe('checkFlowSet — the tool and the fold agree', () => {
     expect(res.unsettled[0].reason).toContain('claim(s) left unaccounted')
   })
 
-  it('does NOT count a non-runnable claim toward coverage', () => {
-    const withTui: FlowSynthesisArea = { ...AREA, claims: [...CLAIMS, claim(LIST, 'the board shows one card per task', { driver: 'tui' })] }
-    const report = checkFlowSet(LIFECYCLE, { area: withTui, ...CHECKER })
-    expect(report.uncoveredClaims).toEqual([])
-    expect(isFlowSetClean(report)).toBe(true)
-  })
-
-  it('reports unbindable milestones and unbound needs as OBSERVATIONS only', () => {
-    const area: FlowSynthesisArea = {
-      ...AREA,
-      claims: [
-        claim(CREATE, ADD, { needs: [{ kind: 'credential', name: 'github-token' }] }),
-        claim(LIST, LS),
-        claim(DONE, FIN),
-      ],
-    }
+  it('reports unbindable milestones as OBSERVATIONS only', () => {
     const report = checkFlowSet(LIFECYCLE, {
-      area,
+      area: AREA,
       // The `Creating tasks` section has left the live index.
       sectionKeys: new Set([flowSectionKey(DOC, LIST), flowSectionKey(DOC, DONE)]),
-      catalogNames: new Set(['a-project']),
     })
     expect(report.unbindable).toHaveLength(1)
     expect(report.unbindable[0]).toContain(CREATE)
-    expect(report.unboundNeeds).toHaveLength(1)
-    expect(report.unboundNeeds[0]).toContain('github-token')
     // Neither refuses.
     expect(isFlowSetClean(report)).toBe(true)
     expect(flowSetRefusalReason(report)).toBeNull()
@@ -569,21 +551,7 @@ describe('flowsSessionBriefing', () => {
     expect(briefing).toContain(`${CREATE} — Creating tasks`)
     expect(briefing).toContain('CLAIMS IN THIS AREA')
     expect(briefing).toContain(`claim: ${ADD}`)
-    expect(briefing).toContain('account: required')
     expect(briefing).toContain('Check the draft with `check_flows`')
-  })
-
-  it('marks a non-runnable claim optional', () => {
-    const area: FlowSynthesisArea = { ...AREA, claims: [claim(LIST, 'the board shows a card', { driver: 'tui' })] }
-    expect(flowsSessionBriefing(area, undefined)).toContain('account: optional')
-  })
-
-  it('renders a claim’s needs inline', () => {
-    const area: FlowSynthesisArea = {
-      ...AREA,
-      claims: [claim(CREATE, ADD, { needs: [{ kind: 'credential', name: 'github-token' }, { kind: 'fixture', name: 'sample-repo' }] })],
-    }
-    expect(flowsSessionBriefing(area, undefined)).toContain('needs: credential github-token; fixture sample-repo')
   })
 
   it('renders the grounding block and caps digests at 40 per surface', () => {
@@ -680,20 +648,6 @@ describe('the session cache keys', () => {
     expect(flowsSessionCacheKey({ ...AREA, docs: [{ ...AREA.docs[0], outline: AREA.docs[0].outline.slice(1) }] })).not.toBe(base)
   })
 
-  it('moves when a claim gains needs, and not otherwise', () => {
-    const base = flowsSessionCacheKey(AREA)
-    const withNeeds: FlowSynthesisArea = {
-      ...AREA,
-      claims: [claim(CREATE, ADD, { needs: [{ kind: 'credential', name: 'github-token' }] }), claim(LIST, LS), claim(DONE, FIN)],
-    }
-    expect(flowsSessionCacheKey(withNeeds)).not.toBe(base)
-    // An EMPTY needs array is the same as none — a one-shot-era inventory keys
-    // byte-identically to before needs existed.
-    const emptyNeeds: FlowSynthesisArea = { ...AREA, claims: CLAIMS.map((c) => ({ ...c, needs: [] })) }
-    expect(flowAreaClaimsMaterial(emptyNeeds)).toBe(flowAreaClaimsMaterial(AREA))
-    expect(flowsSessionCacheKey(emptyNeeds)).toBe(base)
-  })
-
   it('the claims material is order-independent and sorted', () => {
     const reversed: FlowSynthesisArea = { ...AREA, claims: [...CLAIMS].reverse() }
     expect(flowAreaClaimsMaterial(reversed)).toBe(flowAreaClaimsMaterial(AREA))
@@ -723,7 +677,6 @@ describe('the flows system prompts', () => {
 
   it('states the coverage honesty rule', () => {
     expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('# Coverage honesty')
-    expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('account: required')
     expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('noFlowClaims')
     expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('One flow has ONE coherent goal')
   })
@@ -772,7 +725,7 @@ describe('the procedure gate', () => {
       repoRoot: r,
       stopAfterFlows: true,
       interfaces: interfacesOf(r, plainApiInterface(), procedureInterface()),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowsAreaSession: async (input) => {
         grounding = input.grounding
         return flowsAreaSessionOf(() => ({ flows: [], noFlowClaims: [] }))(input)
@@ -794,7 +747,7 @@ describe('the procedure gate', () => {
       repoRoot: r,
       stopAfterFlows: true,
       interfaces: DEFAULT_INTERFACES(r),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowsAreaSession: async (input) => {
         docs = input.docs
         return flowsAreaSessionOf(() => ({ flows: [], noFlowClaims: [] }))(input)
@@ -822,7 +775,7 @@ describe('the flow-synthesis wipeout', () => {
     const res = await generateGuards({
       repoRoot: r,
       interfaces: DEFAULT_INTERFACES(r),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       // Every area answers with a draft the fold refuses.
       flowsAreaSession: flowsAreaSessionOf(() => ({
         flows: [{ title: 'Invented', goal: 'g', milestones: [{ doc: DOC, anchor: CREATE, claimTitle: 'nothing like a claim', order: 1 }] }],

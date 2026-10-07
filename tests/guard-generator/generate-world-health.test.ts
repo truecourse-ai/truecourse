@@ -14,7 +14,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { API_SERVER_BOOT_EXPECTED, readManifest, type GuardExecReport, type GuardExecutor } from '@truecourse/guard-runner'
 import {
   PASSING_STEPS,
-  extractSessionBy,
+  claimsBy,
   flowWorkerSessionOf,
   makeTempRepo,
   raw,
@@ -87,7 +87,7 @@ describe('generateGuards — the world-health latch', () => {
     const res = await runGenerate({
       repoRoot: r,
       executor: exec,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         reports.push(await task.runScenario(draft(task)))
         reports.push(await task.runScenario(draft(task)))
@@ -110,7 +110,7 @@ describe('generateGuards — the world-health latch', () => {
     const res = await runGenerate({
       repoRoot: r,
       executor: exec,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         const reports: { content: string; isError?: boolean }[] = []
         byFlow.set(task.flowId, reports)
@@ -150,7 +150,7 @@ describe('generateGuards — the world-health latch', () => {
     await runGenerate({
       repoRoot: r,
       executor: exec,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         reports.push(await task.runScenario(draft(task)))
         reports.push(await task.runScenario(draft(task, { setup: { env: { RELKIT_MODE: 'broken' } } })))
@@ -170,7 +170,7 @@ describe('generateGuards — the world-health latch', () => {
     const res = await runGenerate({
       repoRoot: r,
       executor: exec,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         reports.push(await task.runScenario(draft(task)))
         reports.push(await task.runScenario(draft(task)))

@@ -47,8 +47,6 @@ describe('proof grounding', () => {
 
 it('keeps ordinary CLI commands outside the server-startup proof gate', async () => {
   const { partitionFlowPrerequisites } = await import('../../packages/guard-generator/src/prerequisites.js')
-  const { EXTRACT_SESSION_SYSTEM_PROMPT } = await import('../../packages/core/src/services/guard-generate/extract.js')
-  expect(EXTRACT_SESSION_SYSTEM_PROMPT).toContain('Ordinary CLI behavior (for example relkit --version)')
   const flow = {
     id: 'version',
     title: 'Version',

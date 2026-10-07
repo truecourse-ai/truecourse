@@ -30,7 +30,7 @@ import {
   writeRecipe,
   writeDoc,
   writeCorpus,
-  extractSessionBy,
+  claimsBy,
   submitWorkerSessions,
   raw,
   PASSING_STEPS,
@@ -110,7 +110,7 @@ describe('generateGuards — blocked-on gaps carry the detected services', () =>
         { service: 'stripe', category: 'payment' },
         { service: 'sendgrid', category: 'messaging' },
       ),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => ({ blocked: [{ order: 1, capability: 'external-service' }] })),
     })
 
@@ -128,7 +128,7 @@ describe('generateGuards — blocked-on gaps carry the detected services', () =>
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => ({ blocked: [{ order: 1, capability: 'external-service' }] })),
     })
 
@@ -142,7 +142,7 @@ describe('generateGuards — blocked-on gaps carry the detected services', () =>
     const res = await runGenerate({
       repoRoot: r,
       interfaces: withExternalServices(DEFAULT_INTERFACES(r), { service: 'stripe', category: 'payment' }),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       // Nothing is blocked — the dependency is still a fact about the repo.
       flowWorkerSession: submitWorkerSessions(() => raw('the version prints', PASSING_STEPS)),
     })
@@ -169,7 +169,7 @@ describe('generateGuards — the api worker briefing advertises the detected ser
         interfacesOf(r, apiInterface('GET', '/todos')),
         { service: 'stripe', category: 'payment' },
       ),
-      extractSession: extractSessionBy({
+      claims: claimsBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
       flowWorkerSession: submitWorkerSessions(() => rawApi('GET /todos answers 200', PASSING_API_STEPS), {
@@ -212,7 +212,7 @@ describe('generateGuards — the api worker briefing advertises the detected ser
         interfacesOf(r, apiInterface('GET', '/todos')),
         { service: 'stripe', category: 'payment', baseUrlEnv: 'STRIPE_API_BASE' },
       ),
-      extractSession: extractSessionBy({
+      claims: claimsBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
       flowWorkerSession: submitWorkerSessions(() => rawApi('GET /todos answers 200', PASSING_API_STEPS), {
@@ -254,7 +254,7 @@ describe('generateGuards — the api worker briefing advertises the detected ser
           },
         ],
       }),
-      extractSession: extractSessionBy({
+      claims: claimsBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
       flowWorkerSession: submitWorkerSessions(() => rawApi('GET /todos answers 200', PASSING_API_STEPS), {

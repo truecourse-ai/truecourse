@@ -21,57 +21,6 @@ import {
   guardProviderTargets,
 } from '@truecourse/shared'
 
-/** Resolve case requirements; claim-wide needs supply identifiers, never case scope. */
-export function bindClaimPrerequisites(
-  verification: GuardVerification | undefined,
-  needs: readonly ClaimNeed[],
-  targets: readonly GuardPrerequisiteTarget[],
-): GuardVerification | undefined {
-  if (!verification?.cases) return verification
-  const requirements = needs
-    .filter((n) => n.kind === 'credential' || n.kind === 'external')
-    .map((need) => {
-      const resolved = resolveGuardPrerequisiteNormalized(need.name, targets)
-      // Environment evidence is an explicit identifier, never a guessed suffix alias.
-      const evidenced = targets.filter((t) =>
-        t.credentialEnv.some((key) => need.detail?.split(/[^A-Za-z0-9_]+/).includes(key)),
-      )
-      const name =
-        resolved.kind === 'resolved' ? resolved.target.name : evidenced.length === 1 ? evidenced[0].name : need.name
-      return {
-        dependency: name,
-        mode: 'provided' as const,
-        originalNames: [need.name],
-        ...(need.detail ? { evidence: need.detail } : {}),
-      }
-    })
-  return {
-    ...verification,
-    cases: verification.cases.map((c) => ({
-      ...c,
-      ...(c.providerControls ? { providerControls: c.providerControls.map(p => {
-        const resolved = resolveGuardPrerequisiteNormalized(p.service, guardProviderTargets(targets))
-        return resolved.kind === 'resolved' && resolved.target.name !== p.service
-          ? { ...p, service: resolved.target.name, originalNames: [...new Set([...(p.originalNames ?? []), p.service])] } : p
-      }) } : {}),
-      prerequisites: (c.prerequisites ?? []).map((p) => {
-        const resolved = resolveGuardPrerequisiteNormalized(p.dependency, targets)
-        const evidenced = targets.filter((t) =>
-          t.credentialEnv.some((key) => p.evidence?.split(/[^A-Za-z0-9_]+/).includes(key)),
-        )
-        const declared = requirements.find((r) => r.originalNames.includes(p.dependency))
-        const name =
-          resolved.kind === 'resolved' ? resolved.target.name : evidenced.length === 1 ? evidenced[0].name : declared?.dependency ?? p.dependency
-        return {
-          ...p,
-          dependency: name,
-          ...(name !== p.dependency ? { originalNames: [...new Set([...(p.originalNames ?? []), p.dependency])] } : {}),
-        }
-      }),
-    })),
-  }
-}
-
 export function scenarioCasePrerequisites(
   flow: GuardFlow,
   scenario: Pick<GuardScenario, 'steps'>,

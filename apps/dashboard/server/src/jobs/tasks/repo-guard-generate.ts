@@ -341,15 +341,6 @@ export function createRepoGuardGenerateTask(
               throw new UserFacingError("Generation finished, but we couldn't save all its results.", { cause });
             }
 
-            // Keep successful documents and the failure report, but do not present
-            // an incomplete extraction as success or chain its baseline run.
-            if (report.extractionFailures.length > 0) {
-              const docs = report.extractionFailures.map(failure => failure.doc).join(', ');
-              activityTracker.error('extract', `Claim extraction failed for ${docs}`);
-              throw new Error(
-                `Claim extraction failed for ${docs}. Partial results were saved. Retry generation to complete coverage.`,
-              );
-            }
 
             // A product-world generate: the flow tests and their index were
             // stored with the set above. What it reports is the tests.

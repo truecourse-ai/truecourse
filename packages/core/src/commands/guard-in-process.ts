@@ -33,9 +33,6 @@ import {
   validateCredentialSatisfies,
   type SatisfiesDiagnostics,
   type GuardGenerateResult,
-  type ExtractSessionSeam,
-  type ReuseExtractionSeam,
-  type ClaimDiffRunner,
   type RecipeRunner,
   type WorldClassifyRunner,
   type FlowsAreaSessionSeam,
@@ -81,7 +78,6 @@ import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardTokens } from '../services/llm/spec-estimate.js';
 import { mapInterfaces } from '../services/interface.service.js';
 import {
-  CLAIM_DIFF_SESSION_KIND,
   MATCH_SESSION_KIND,
   WORLD_CLASSIFY_SESSION_KIND,
   createGuardGenerateLeafSessions,
@@ -89,7 +85,6 @@ import {
 import { createRecipeProposeSession } from '../services/guard-setup/recipe-propose.js';
 import {
   createGuardGenerateSessionSeams,
-  EXTRACT_SESSION_KIND,
   FIDELITY_SESSION_KIND,
   FLOW_WORKER_SESSION_KIND,
   FLOWS_SESSION_KIND,
@@ -164,7 +159,7 @@ function assertNoOpenConflicts(repoRoot: string): void {
 /** Stable step taxonomy for the guard generate progress UI. */
 export const GUARD_GENERATE_STEPS = [
   { key: 'index', label: 'Indexing sections' },
-  { key: 'extract', label: 'Extracting claims' },
+  { key: 'extract', label: 'Reading claims' },
   { key: 'interfaces', label: 'Mapping interfaces' },
   { key: 'flows', label: 'Synthesizing flows' },
   { key: 'match', label: 'Matching flows' },
@@ -177,8 +172,7 @@ export const GUARD_GENERATE_STEPS = [
  * checklist so a surface reading run.json can file every session under its
  * step. The fidelity judge is a child the flow worker dispatches, so it rides
  * the author step with its parent; the world classification decides how the
- * workers are scheduled, so it rides there too; the claim-diff gate runs
- * before extraction and rides the extract step. A step listed empty is
+ * workers are scheduled, so it rides there too. A step listed empty is
  * deterministic and owns no session. A kind no step claims is shown under its
  * own raw id, after the list.
  */
@@ -189,7 +183,7 @@ export const GUARD_GENERATE_STEPS = [
  */
 export const WORLD_GENERATE_STEPS = [
   { key: 'index', label: 'Indexing sections' },
-  { key: 'extract', label: 'Extracting claims' },
+  { key: 'extract', label: 'Reading claims' },
   { key: 'flows', label: 'Synthesizing flows' },
   { key: 'world', label: 'Bringing the product up' },
   { key: 'author', label: 'Writing tests' },
@@ -197,7 +191,7 @@ export const WORLD_GENERATE_STEPS = [
 
 const GUARD_GENERATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
   index: [],
-  extract: [CLAIM_DIFF_SESSION_KIND, EXTRACT_SESSION_KIND],
+  extract: [],
   interfaces: [],
   flows: [FLOWS_SESSION_KIND],
   match: [MATCH_SESSION_KIND],
@@ -208,7 +202,7 @@ const GUARD_GENERATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
 /** The same, for {@link WORLD_GENERATE_STEPS}: the flow-test sessions are the author step's. */
 const WORLD_GENERATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
   index: [],
-  extract: [CLAIM_DIFF_SESSION_KIND, EXTRACT_SESSION_KIND],
+  extract: [],
   flows: [FLOWS_SESSION_KIND],
   world: [],
   author: [FLOW_TEST_SESSION_KIND, FLOW_TEST_FIDELITY_SESSION_KIND],
@@ -217,8 +211,8 @@ const WORLD_GENERATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
 /**
  * Which LLM stage(s) each guard step covers — so a step line shows the model +
  * live tokens/$ of the work it's doing (the scan/contracts convention). Recipe
- * discovery rides `index` (the section-indexing window), extraction rides
- * `extract`, synthesis rides `flows`, realization matching rides `match`, and
+ * discovery rides `index` (the section-indexing window), reading the claims
+ * rides `extract` and spends nothing, synthesis rides `flows`, realization matching rides `match`, and
  * per-(flow, surface) authoring rides `author` (stage `guard.generate`). Interface
  * mapping is deterministic tree derivation — no stage, no spend. Birth EXECUTION
  * is deterministic sandbox work, but the one evidence-retry per birth-failed flow
@@ -306,7 +300,6 @@ export interface GuardGenerateInProcessOptions {
   // sessions in `createGuardGenerateLeafSessions`) ---
   recipeRunner?: RecipeRunner;
   matchRunner?: MatchRunner;
-  claimDiffRunner?: ClaimDiffRunner;
   worldClassifyRunner?: WorldClassifyRunner;
   /**
    * Session-seam overrides — tests inject stubs here. Unset, production wires
@@ -314,11 +307,6 @@ export interface GuardGenerateInProcessOptions {
    * by the engine, which is why a run with no session driver is refused up
    * front unless every seam is injected.
    */
-  extractSession?: ExtractSessionSeam;
-  /** The claim-diff gate's extract-cache access; unset, production wires the
-   *  cache-backed seam beside `extractSession`. Absent entirely (an injected
-   *  `extractSession` with no `reuseExtraction`), the gate is skipped. */
-  reuseExtraction?: ReuseExtractionSeam;
   flowsAreaSession?: FlowsAreaSessionSeam;
   flowsEpicSession?: FlowsEpicSessionSeam;
   flowWorkerSession?: FlowWorkerSessionSeam;
@@ -581,14 +569,8 @@ export async function guardGenerateInProcess(
     // Single-step mode: the seams enforce the cache-only replay of every step
     // before the chosen one (the engine enforces the stop after it).
     ...(options.only ? { only: options.only } : {}),
-    ...(options.resume ? { replaySteps: (['extract', 'flows'] as const).filter(step => restored.has(step)) } : {}),
+    ...(options.resume ? { replaySteps: (['flows'] as const).filter(step => restored.has(step)) } : {}),
   });
-  const extractSession = options.extractSession ?? sessionSeams.extractSession;
-  // An injected extraction seam owns no cache, so the production reuse seam
-  // would address entries the injected seam never wrote: the gate only rides
-  // with the seam it was injected beside, or with production extraction.
-  const reuseExtraction =
-    options.reuseExtraction ?? (options.extractSession ? undefined : sessionSeams?.reuseExtraction);
   const flowsAreaSession = options.flowsAreaSession ?? sessionSeams.flowsAreaSession;
   const flowsEpicSession = options.flowsEpicSession ?? sessionSeams.flowsEpicSession;
   const flowWorkerSession = options.flowWorkerSession ?? sessionSeams.flowWorkerSession;
@@ -611,12 +593,8 @@ export async function guardGenerateInProcess(
       requireExistingRecipe: options.requireExistingRecipe ?? false,
       recipeRunner: options.recipeRunner ?? refuseRestored('index', leafRecipe.runner),
       matchRunner: options.matchRunner ?? refuseRestored('match', leafSessions.matchRunner),
-      claimDiffRunner:
-        options.claimDiffRunner ?? refuseRestored('extract', leafSessions.claimDiffRunner),
       worldClassifyRunner: options.worldClassifyRunner ?? leafSessions.worldClassifyRunner,
       leafSummaries: () => [...leafSessions.summaries(), leafRecipe.summary()],
-      extractSession,
-      ...(reuseExtraction ? { reuseExtraction } : {}),
       flowsAreaSession,
       flowsEpicSession,
       flowWorkerSession,
@@ -651,17 +629,11 @@ export async function guardGenerateInProcess(
         // detail immediately (recipe-discovery usage rides its tag), never a live phase.
         tracker?.done('index', `${work} of ${total} section${total === 1 ? '' : 's'} changed`);
         cur = STEPS.indexOf('extract');
-        // No detail yet — the seam's initial onDoc(0, total) supplies the
-        // "docs 0/N" counter the moment the pool is planned.
         if (!restored.has('extract')) tracker?.start('extract');
       },
-      onExtractProgress: (done, total) => {
+      onClaims: (claims, docs) => {
         advanceTo('extract');
-        if (done >= total) {
-          tracker?.done('extract', `${total} doc${total === 1 ? '' : 's'}`);
-        } else {
-          tracker?.detail('extract', `docs ${done}/${total}`);
-        }
+        tracker?.done('extract', `${claims} claim${claims === 1 ? '' : 's'} from ${docs} doc${docs === 1 ? '' : 's'}`);
       },
       onInterfaces: (interfaces, surfaces) => {
         // Interface mapping is deterministic and free — it completes as one step with

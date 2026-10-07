@@ -14,7 +14,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { interfaceFingerprint, type Interface } from '@truecourse/shared'
 import {
   FIXTURE_WEB_SERVER,
-  extractSessionBy,
+  claimsBy,
   flowWorkerSessionOf,
   interfacesOf,
   makeTempRepo,
@@ -63,7 +63,7 @@ describe('generateGuards — the web briefing advertises the seed fixtures', () 
     await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, webInterface()),
-      extractSession: extractSessionBy({ home: [{ driver: 'web' }] }),
+      claims: claimsBy({ home: [{ driver: 'web' }] }),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         briefings.push(await task.prepare())
         return {

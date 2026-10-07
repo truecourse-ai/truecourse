@@ -40,8 +40,7 @@ import {
   writeCorpus,
   bindsFor,
   raw,
-  extractSessionBy,
-  extractSessionOf,
+  claimsBy,
   runGenerate,
   flowStageSeams,
   flowOfAllSession,
@@ -55,7 +54,6 @@ import {
   apiInterface,
   interfacesOf,
   sessionSummary,
-  EXTRACT_KIND,
   PASSING_STEPS,
   FAILING_STEPS,
   writeScenarioFile,
@@ -107,7 +105,7 @@ const TWO_CLI_CONTENT = [
 ].join('\n')
 
 /** version testable, background untestable — the honesty baseline. */
-const versionCliBgUntestable = extractSessionBy({ background: { untestable: 'design history, nothing observable' } })
+const versionCliBgUntestable = claimsBy({ background: { untestable: 'design history, nothing observable' } })
 
 /** Seed the standard one-doc repo. */
 function seed(content = DOC_CONTENT, areaTags?: string[]): string {
@@ -137,7 +135,7 @@ describe('generateGuards — extraction honesty + gaps', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: authorsEvery(raw('relkit --version prints the version', PASSING_STEPS)),
     })
 
@@ -145,7 +143,7 @@ describe('generateGuards — extraction honesty + gaps', () => {
     expect(res.written.map((w) => w.flowId)).toEqual(['version'])
     const gap = res.coverageGaps.find((g) => g.anchor === 'background')!
     expect(gap.kind).toBe('untestable')
-    expect(gap.reason).toMatch(/history/)
+    expect(gap.reason).toBe('not testable: not-observable')
 
     // The guarded section is reachable through its flow; the untestable one binds
     // no flow at all, which is exactly what makes it a visible gap.
@@ -156,44 +154,6 @@ describe('generateGuards — extraction honesty + gaps', () => {
     expect(ver.flowIds).toEqual(['version'])
   }, 60_000)
 
-  it('records an api-driver claim as blocked-on when the recipe has no api block', async () => {
-    const r = seed()
-
-    const res = await runGenerate({
-      repoRoot: r,
-      extractSession: extractSessionBy({
-        version: [{ driver: 'api', reason: 'returns a 200 with the version body' }],
-        background: { untestable: 'history' },
-      }),
-    })
-
-    // The api driver is runnable, but THIS recipe carries no api preparation — the
-    // claim is an honest blocked-on gap, never composed into a flow that could only
-    // die at birth.
-    expect(res.written).toEqual([])
-    const gap = res.coverageGaps.find((g) => g.anchor === 'version')!
-    expect(gap.kind).toBe('blocked-on')
-    expect(gap.reason).toContain('a recipe `api` block')
-  })
-
-  it('records a library-driver claim (programmatic API) as an awaiting-driver gap', async () => {
-    const r = seed()
-
-    const res = await runGenerate({
-      repoRoot: r,
-      extractSession: extractSessionBy({
-        version: [{ driver: 'library', reason: 'register() hooks the loader when imported from user code' }],
-        background: { untestable: 'history' },
-      }),
-    })
-
-    // No scenario is authored for an import-by-name programmatic API until the
-    // library driver ships — the claim surfaces as an honest awaiting gap.
-    expect(res.written).toEqual([])
-    const gap = res.coverageGaps.find((g) => g.anchor === 'version')!
-    expect(gap.kind).toBe('awaiting-driver')
-    expect(gap.driver).toBe('library')
-  })
 })
 
 describe('generateGuards — realization gaps', () => {
@@ -203,7 +163,7 @@ describe('generateGuards — realization gaps', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r), // the mapper found nothing
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       matchRunner: async () => {
         throw new Error('matching must never run against an empty catalog')
       },
@@ -226,7 +186,7 @@ describe('generateGuards — realization gaps', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       matchRunner: matchBy({ version: 'no interface prints a version — the catalog only lists `boom`' }),
     })
 
@@ -247,7 +207,7 @@ describe('generateGuards — realization gaps', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowsAreaSession: flowOfAllSession('the two-step path'),
       flowWorkerSession: authorsEvery(),
       // A bounded correction preserves the usable portion and records the omission.
@@ -263,66 +223,6 @@ describe('generateGuards — realization gaps', () => {
     expect(gap.reason).toContain('Milestone 2')
   })
 
-  it('a surface whose runner has not shipped is an awaiting-driver gap on the flow', async () => {
-    const r = seed()
-    const tuiInterface: Interface = {
-      id: 'tui/board',
-      type: 'tui',
-      title: 'Board',
-      entry: { command: ['/'] },
-      steps: [{ kind: 'navigate', route: '/' }],
-      fingerprint: 'sha256:tui',
-    }
-
-    const res = await runGenerate({
-      repoRoot: r,
-      interfaces: interfacesOf(r, cliInterface(['relkit']), tuiInterface),
-      extractSession: extractSessionBy({ version: [{ driver: 'cli', alternativeDrivers: ['tui'] }], background: { untestable: 'background' } }),
-      flowWorkerSession: authorsEvery(),
-    })
-
-    // cli still guards it; tui is recorded as realizable-but-unrunnable.
-    expect(res.written.map((w) => w.surface)).toEqual(['cli'])
-    const gap = res.coverageGaps.find((g) => g.kind === 'awaiting-driver' && g.flowId === 'version')!
-    expect(gap.surface).toBe('tui')
-    expect(gap.driver).toBe('tui')
-    expect(gap.reason).toContain('Needs TUI driver')
-  }, 60_000)
-
-  // The web arm: a prepared web surface reaches a WORKER SESSION — matched,
-  // planned, and briefed under the web preparation framing — instead of the
-  // awaiting-driver treatment it got while the flow worker had two arms. The
-  // full author-and-execute path (a real browser) lives in generate-web.test.ts;
-  // here the web session ends `blocked` so the case stays browser-free.
-  it('hands a prepared web surface to a worker session instead of recording awaiting-driver', async () => {
-    const r = repo()
-    writeRecipe(r, { web: { serve: ['node', 'server.js'], healthPath: '/' } })
-    writeCorpus(r, [{ ref: DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-
-    const surfaces: string[] = []
-    const briefings = new Map<string, string>()
-    const res = await runGenerate({
-      repoRoot: r,
-      interfaces: interfacesOf(r, cliInterface(['relkit']), webInterface()),
-      extractSession: extractSessionBy({ version: [{ driver: 'web' }], background: { untestable: 'background' } }),
-      flowWorkerSession: submitWorkerSessions(
-        (task) => {
-          surfaces.push(task.surface)
-          return task.surface === 'web'
-            ? { blocked: [{ order: 1, capability: 'credentials' }] }
-            : raw('v', PASSING_STEPS)
-        },
-        { onBriefing: (task, briefing) => briefings.set(task.surface, briefing) },
-      ),
-    })
-
-    expect(surfaces).toContain('web')
-    expect(res.coverageGaps.some((g) => g.kind === 'awaiting-driver' && g.driver === 'web')).toBe(false)
-    // The web briefing opens on the web preparation framing, not the cli one.
-    expect(briefings.get('web')).toContain('Web surface serve command')
-    expect(briefings.get('web')).toContain('polled until 2xx before the first browser step')
-  }, 60_000)
 })
 
 describe('browser setup grounding', () => {
@@ -341,7 +241,7 @@ describe('browser setup grounding', () => {
     const run = (setup: Interface) => runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, webInterface(), setup),
-      extractSession: extractSessionBy({ version: [{ driver: 'web' }], background: { untestable: 'background' } }),
+      claims: claimsBy({ version: [{ driver: 'web' }], background: { untestable: 'background' } }),
       matchRunner: async () => ({ plan: [{ interfaceId: 'web/board', milestone: 1 }] }),
       flowWorkerSession: submitWorkerSessions((task) => {
         cacheInputs.push(task.cacheMaterial.interfaceFingerprints)
@@ -380,7 +280,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       // The flow needs world-state the sandbox can't express — no scenario, a reason.
       flowWorkerSession: blockedOn('Git', ' git ', 'DB'),
     })
@@ -407,7 +307,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
 
     await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: authorsEvery(raw('relkit --version', PASSING_STEPS)),
     })
 
@@ -420,7 +320,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     const r = seed()
     const opts = {
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: blockedOn('db'),
     }
     await runGenerate(opts)
@@ -436,7 +336,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     const r = seed()
     const opts = {
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: blockedOn('db'),
     }
     await runGenerate(opts)
@@ -462,7 +362,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
     const r = seed()
     const opts = {
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: blockedOn('db'),
     }
     await runGenerate(opts)
@@ -492,7 +392,7 @@ describe('generateGuards — blocked-on world-state gaps', () => {
 
     await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       // One flow authors a test, the other refuses — both must settle accounted for.
       flowWorkerSession: submitWorkerSessions((task) =>
         task.flowId === 'version'
@@ -521,17 +421,16 @@ describe('generateGuards — change detection', () => {
 
     await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: authorsEvery(),
     })
 
-    let extractCalls = 0
     let flowCalls = 0
     let matchCalls = 0
     let workerTasks = 0
     const res2 = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({ background: { untestable: 'bg' } }, () => extractCalls++),
+      claims: claimsBy({ background: { untestable: 'bg' } }),
       flowsAreaSession: flowPerClaimSession(() => flowCalls++),
       matchRunner: matchAll(() => matchCalls++),
       flowWorkerSession: submitWorkerSessions(() => raw('v', PASSING_STEPS), {
@@ -547,7 +446,7 @@ describe('generateGuards — change detection', () => {
     // seams here do not model; the engine's own change detection is what these
     // two counters prove.
     expect([matchCalls, workerTasks]).toEqual([0, 0])
-    expect([extractCalls, flowCalls]).toEqual([1, 1])
+    expect(flowCalls).toBe(1)
     // The flow is skipped, not re-settled: its stored scenario stands.
     expect(res2.flows).toMatchObject({ total: 1, skipped: 1, settled: 1, unsettled: 0 })
     expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version'])
@@ -575,7 +474,7 @@ describe('generateGuards — change detection', () => {
       }
     })
 
-    const first = await runGenerate({ repoRoot: r, extractSession: versionCliBgUntestable, flowsAreaSession: reconciling, flowWorkerSession: authorsEvery() })
+    const first = await runGenerate({ repoRoot: r, claims: versionCliBgUntestable, flowsAreaSession: reconciling, flowWorkerSession: authorsEvery() })
     expect(first.written).toHaveLength(1)
     expect(briefed[0]).toEqual([])
     const flowsBefore = readFlowsFile(r)!.flows
@@ -584,7 +483,7 @@ describe('generateGuards — change detection', () => {
     let workerTasks = 0
     const second = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowsAreaSession: reconciling,
       flowWorkerSession: submitWorkerSessions(() => raw('v', PASSING_STEPS), { onBriefing: () => workerTasks++ }),
     })
@@ -633,7 +532,7 @@ describe('generateGuards — change detection', () => {
       await runGenerate({
         repoRoot: r,
         interfaces: interfacesOf(r, ...interfaces),
-        extractSession: extractSessionBy({}),
+        claims: claimsBy({}),
         matchRunner: ownInterface,
         flowWorkerSession: authorsEvery(),
       })
@@ -644,7 +543,7 @@ describe('generateGuards — change detection', () => {
       const res = await runGenerate({
         repoRoot: r,
         interfaces: interfacesOf(r, ...interfaces),
-        extractSession: extractSessionBy({}),
+        claims: claimsBy({}),
         matchRunner: ownInterface,
         flowWorkerSession: submitWorkerSessions(() => raw('v', PASSING_STEPS), {
           onBriefing: (task) => worked.push(task.flowId),
@@ -709,7 +608,7 @@ describe('generateGuards — the committed scenario', () => {
     let refusal = ''
     await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowsAreaSession: flowOfAllSession('a user checks the version then the help'),
       flowWorkerSession: flowWorkerSessionOf(async (task: FlowWorkerTask) => {
         refusal = (
@@ -786,7 +685,7 @@ describe('generateGuards — the committed scenario', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: authorsEvery(raw('generated', PASSING_STEPS)),
     })
 
@@ -830,7 +729,7 @@ describe('generateGuards — birth validation', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: authorsEvery(),
     })
     expect(res.written).toHaveLength(1)
@@ -852,7 +751,7 @@ describe('generateGuards — birth validation', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: authorsEvery(),
       executor: unservedExecutor,
     })
@@ -876,7 +775,7 @@ describe('generateGuards — birth validation', () => {
     const r = seed()
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       executor: unservedExecutor,
       flowWorkerSession: flowWorkerSessionOf(async (task: FlowWorkerTask) => {
         await task.runScenario(
@@ -916,7 +815,7 @@ describe('generateGuards — birth validation', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions((task) => raw(task.flowId, PASSING_STEPS)),
       executor: refusingExecutor,
     })
@@ -944,7 +843,7 @@ describe('generateGuards — birth validation', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: submitWorkerSessions(() => ({ red: raw('always broken', FAILING_STEPS) })),
     })
 
@@ -995,7 +894,7 @@ describe('generateGuards — birth validation', () => {
     const run = () =>
       runGenerate({
         repoRoot: r,
-        extractSession: versionCliBgUntestable,
+        claims: versionCliBgUntestable,
         flowWorkerSession: submitWorkerSessions(() => ({ red: raw('always broken', FAILING_STEPS) }), {
           onBriefing: () => workers++,
         }),
@@ -1023,7 +922,7 @@ describe('generateGuards — birth validation', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions((task) =>
         task.flowId === 'version' ? raw('good', PASSING_STEPS) : { red: raw('bad', FAILING_STEPS) },
       ),
@@ -1051,7 +950,7 @@ describe('generateGuards — birth validation', () => {
     // the chain broke mid-path — the "milestones don't chain" category.
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}), // one claim per section, named `<anchor> claim`
+      claims: claimsBy({}), // one claim per section, named `<anchor> claim`
       flowsAreaSession: flowOfAllSession('the two-step path'),
       flowWorkerSession: submitWorkerSessions(
         () => ({
@@ -1079,7 +978,7 @@ describe('generateGuards — birth validation', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: submitWorkerSessions(() => ({ red: raw('broken', FAILING_STEPS) })),
     })
 
@@ -1097,7 +996,7 @@ describe('generateGuards — failure output excerpts', () => {
     // FAILING_STEPS runs `boom` → exit 7, stderr "fatal: intentional failure".
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: submitWorkerSessions(() => ({ red: raw('always broken', FAILING_STEPS) })),
     })
     const finding = res.birthFindings[0]
@@ -1111,7 +1010,7 @@ describe('generateGuards — failure output excerpts', () => {
     let report = ''
     await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: flowWorkerSessionOf(async (task: FlowWorkerTask) => {
         const yamlText = yaml.dump(
           { title: 'broken', steps: [{ run: ['boom'], expect: { exit: 0 }, milestone: 1 }] },
@@ -1134,7 +1033,7 @@ describe('generateGuards — failure output excerpts', () => {
 describe('generateGuards — dismissals (decisions.json)', () => {
   // Two cli claims in ONE section, composed into one flow: dismissing one changes
   // the flow's composition, which is the whole point of the milestone identity.
-  const twoClaims = extractSessionBy({
+  const twoClaims = claimsBy({
     version: [{ claim: 'CLAIM_BAD' }, { claim: 'CLAIM_GOOD' }],
     background: { untestable: 'bg' },
   })
@@ -1144,7 +1043,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: twoClaims,
+      claims: twoClaims,
       flowsAreaSession: flowOfAllSession('the bad path'),
       flowWorkerSession: submitWorkerSessions(() => ({ red: raw('bad', FAILING_STEPS) })),
     })
@@ -1160,7 +1059,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
     const runOnce = () =>
       runGenerate({
         repoRoot: r,
-        extractSession: twoClaims,
+        claims: twoClaims,
         flowsAreaSession: flowOfAllSession('the whole path'),
         // The flow's milestone count DROPS with the dismissal; the stub follows
         // the task's own `milestoneCount`, so it never over-stamps.
@@ -1191,7 +1090,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
     const run = () =>
       runGenerate({
         repoRoot: r,
-        extractSession: versionCliBgUntestable,
+        claims: versionCliBgUntestable,
         flowWorkerSession: submitWorkerSessions(() => ({ red: raw('always broken', FAILING_STEPS) })),
       })
 
@@ -1227,7 +1126,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: authorsEvery(),
     })
 
@@ -1241,7 +1140,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
     const run = () =>
       runGenerate({
         repoRoot: r,
-        extractSession: versionCliBgUntestable,
+        claims: versionCliBgUntestable,
         flowWorkerSession: authorsEvery(),
       })
 
@@ -1283,7 +1182,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: authorsEvery(),
     })
 
@@ -1305,7 +1204,7 @@ describe('generateGuards — capability/materialization errors', () => {
     let firstReport = ''
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: flowWorkerSessionOf(async (task: FlowWorkerTask) => {
         // Round 1: a git commit of an unseeded file → materialization fails.
         firstReport = (
@@ -1339,7 +1238,7 @@ describe('generateGuards — capability/materialization errors', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: flowWorkerSessionOf(async (task: FlowWorkerTask) => {
         const yamlText = yaml.dump(
           { title: 'broken', setup: UNSEEDED_GIT, steps: [{ run: ['--version'], expect: { exit: 0 }, milestone: 1 }] },
@@ -1357,70 +1256,6 @@ describe('generateGuards — capability/materialization errors', () => {
   }, 60_000)
 })
 
-describe('generateGuards — extraction failures (fail-soft)', () => {
-  it('records a per-document extraction failure; other docs continue', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeCorpus(r, [{ ref: DOC }, { ref: TWO_CLI_DOC }])
-    writeDoc(r, DOC, DOC_CONTENT)
-    writeDoc(r, TWO_CLI_DOC, TWO_CLI_CONTENT)
-
-    const res = await runGenerate({
-      repoRoot: r,
-      extractSession: async ({ docs }) => ({
-        byDoc: new Map(
-          docs.map((doc) =>
-            doc.doc === DOC
-              ? [doc.doc, { ok: false as const, reason: 'extraction session failed: the provider is gone' }]
-              : [
-                  doc.doc,
-                  {
-                    ok: true as const,
-                    complete: true,
-                    failedViews: 0,
-                    data: {
-                      claims: doc.sections.map((s) => ({
-                        claim: 'c',
-                        driver: 'cli' as const,
-                        sectionAnchor: s.anchor,
-                        reason: 'exit',
-                      })),
-                      untestable: [],
-                    },
-                  },
-                ],
-          ),
-        ),
-        summary: sessionSummary(EXTRACT_KIND, { ran: docs.length, failed: 1, allTransport: false }),
-      }),
-      flowWorkerSession: submitWorkerSessions((task) => raw(task.flowId, PASSING_STEPS)),
-    })
-
-    expect(res.status).toBe('ok') // fail-soft: never throws
-    expect(res.extractionFailures.map((f) => f.doc)).toEqual([DOC])
-    // The other doc's claims still compose into flows and settle.
-    expect(res.written.map((w) => w.flowId).sort()).toEqual(['help', 'version'])
-    // The failed doc contributed no claim, so no flow binds it — nothing to settle.
-    expect(manifestSections(r).some((s) => s.doc === DOC)).toBe(false)
-  }, 90_000)
-
-  it('an all-doc extraction loss records every doc and writes nothing', async () => {
-    const r = seed()
-
-    const res = await runGenerate({
-      repoRoot: r,
-      extractSession: extractSessionOf(
-        new Map([[DOC, { ok: false as const, reason: 'extraction session failed: call failed' }]]),
-        { ran: 1, failed: 1 },
-      ),
-    })
-
-    expect(res.extractionFailures.map((f) => f.doc)).toEqual([DOC])
-    expect(res.extractionFailures[0].reason).toMatch(/call failed/)
-    expect(res.written).toEqual([])
-  })
-})
-
 describe('generateGuards — worker robustness', () => {
   it('one flow’s worker failure never costs its siblings their scenarios', async () => {
     const r = repo()
@@ -1430,7 +1265,7 @@ describe('generateGuards — worker robustness', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task: FlowWorkerTask) => {
         if (task.flowId === 'version') return { kind: 'failed', reason: 'the transport exploded' }
         const accepted = await task.submitScenario(
@@ -1455,7 +1290,7 @@ describe('generateGuards — worker robustness', () => {
     let report = ''
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: flowWorkerSessionOf(async (task: FlowWorkerTask) => {
         report = (
           await task.runScenario(
@@ -1498,7 +1333,7 @@ describe('generateGuards — manifest + orphans', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: authorsEvery(),
     })
 
@@ -1522,7 +1357,7 @@ describe('generateGuards — manifest + orphans', () => {
   it('PRUNES an orphaned flow with no test — its stale gaps die with it', async () => {
     const r = seed()
     const seams = {
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: authorsEvery(),
     }
     // A first, ordinary generate — `version` settles and flows.json is written.
@@ -1566,7 +1401,7 @@ describe('generateGuards — manifest + orphans', () => {
     const r = seed()
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: authorsEvery(),
     })
     expect(() => GuardGenerateReportSchema.parse({ ...res, generatedAt: '2026-07-25T00:00:00.000Z' })).not.toThrow()
@@ -1646,7 +1481,7 @@ describe('generateGuards — universe + recipe discovery', () => {
     const res = await runGenerate({
       repoRoot: r,
       recipeRunner: async () => ({ build: 'true', entry: ['node', (await import('./helpers.js')).FIXTURE_BIN] }),
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: authorsEvery(),
     })
 
@@ -1669,7 +1504,7 @@ describe('generateGuards — universe + recipe discovery', () => {
         build: 'test -f install-marker',
         entry: ['node', (await import('./helpers.js')).FIXTURE_BIN],
       }),
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: authorsEvery(),
     })
 
@@ -1692,7 +1527,7 @@ describe('generateGuards — universe + recipe discovery', () => {
         build: 'true',
         entry: ['node', (await import('./helpers.js')).FIXTURE_BIN],
       }),
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: authorsEvery(),
     })
 
@@ -1788,7 +1623,7 @@ describe('generateGuards — live progress', () => {
     const matches: Array<[number, number, number]> = []
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions((task) => raw(task.flowId, PASSING_STEPS)),
       onInterfaces: (interfaces, surfaces) => (mapped = [interfaces, surfaces]),
       onFlowProgress: (done, total) => flows.push([done, total]),
@@ -1803,24 +1638,23 @@ describe('generateGuards — live progress', () => {
     expect(matches).toEqual([[0, 2, 0], [1, 2, 1], [2, 2, 2]])
   }, 90_000)
 
-  it('fires onExtractProgress with the planned total upfront, then once per doc', async () => {
+  it('reports the claims read, once, with the documents they came from', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: 'docs/a.md' }, { ref: 'docs/b.md' }])
     writeDoc(r, 'docs/a.md', '# Alpha\n\nRunning with --version prints the version.\n')
     writeDoc(r, 'docs/b.md', '# Beta\n\nRunning with --version prints the version.\n')
 
-    const docs: Array<[number, number]> = []
+    const seen: Array<[number, number]> = []
     await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions((task) => raw(task.flowId, PASSING_STEPS)),
-      onExtractProgress: (done, total) => docs.push([done, total]),
+      onClaims: (claims, docs) => seen.push([claims, docs]),
     })
 
-    // Two docs → one session each. The planned denominator is announced up front
-    // (0/2 before any call), then the counter ticks per DOC (the session unit).
-    expect(docs).toEqual([[0, 2], [1, 2], [2, 2]])
+    // One default claim per doc, read once: the claims are the scan's, not a session's.
+    expect(seen).toEqual([[2, 2]])
   }, 90_000)
 
   it('fires onWorkerProgress with the pool total and the running settled/blocked tally', async () => {
@@ -1832,7 +1666,7 @@ describe('generateGuards — live progress', () => {
     const ticks: { done: number; total: number; settled: number; blocked: number }[] = []
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions((task) =>
         task.flowId === 'version' ? raw('good', PASSING_STEPS) : { blocked: [{ order: 1, capability: 'db' }] },
       ),
@@ -1854,7 +1688,7 @@ describe('generateGuards — live progress', () => {
     const ticks: Array<[number, number]> = []
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions((task) =>
         task.flowId === 'version' ? raw('good', PASSING_STEPS) : { red: raw('bad', FAILING_STEPS) },
       ),
@@ -1880,7 +1714,7 @@ describe('generateGuards — grounded authoring', () => {
     let briefing = ''
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({
+      claims: claimsBy({
         version: [{ claim: '`--version` prints the version and exits 0' }],
         background: { untestable: 'bg' },
       }),
@@ -1905,7 +1739,7 @@ describe('generateGuards — grounded authoring', () => {
     let briefing = ''
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: submitWorkerSessions(() => raw('v', PASSING_STEPS), {
         onBriefing: (_t, text) => (briefing = text),
       }),
@@ -1927,7 +1761,7 @@ describe('generateGuards — grounded authoring', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: authorsEvery(),
     })
 
@@ -1944,7 +1778,7 @@ describe('generateGuards — grounded authoring', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: authorsEvery(),
     })
 
@@ -1958,7 +1792,7 @@ describe('generateGuards — grounded authoring', () => {
     const ground: Array<[number, number]> = []
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({
+      claims: claimsBy({
         version: [{ claim: '`--version` prints the version and exits 0' }],
         background: { untestable: 'bg' },
       }),
@@ -2018,7 +1852,7 @@ describe('generateGuards — matching runs concurrently', () => {
     return runGenerate({
       repoRoot: r,
       concurrency,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       // Ends every flow `blocked`, so nothing authors and no birth subprocess runs —
       // matching is the stage under test and stays the only real work.
       flowWorkerSession: submitWorkerSessions(() => ({ blocked: [{ order: 1, capability: 'db' }] })),
@@ -2055,7 +1889,7 @@ describe('generateGuards — the per-flow pipeline', () => {
     const res = await runGenerate({
       repoRoot: r,
       concurrency: 4, // both flows work concurrently
-      extractSession: extractSessionBy({}), // one cli claim per doc → two independent flows
+      claims: claimsBy({}), // one cli claim per doc → two independent flows
       flowWorkerSession: submitWorkerSessions((task) => raw(task.flowId, PASSING_STEPS)),
     })
 
@@ -2076,7 +1910,7 @@ describe('generateGuards — the per-flow pipeline', () => {
     let sawMarker = false
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: submitWorkerSessions(() => raw('v', PASSING_STEPS), {
         onBriefing: () => {
           sawMarker = fs.existsSync(path.join(r, 'build-marker'))
@@ -2099,7 +1933,7 @@ describe('generateGuards — the per-flow pipeline', () => {
     const opts = {
       repoRoot: r,
       concurrency: 4,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions((task) => raw(task.flowId, PASSING_STEPS)),
     }
     const first = await runGenerate(opts)
@@ -2122,7 +1956,7 @@ describe('generateGuards — the per-flow pipeline', () => {
     const r = seed()
     const opts = {
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       // The scenario names a fixture no prior scenario named: the roster the
       // compare read BEFORE the session ran is not the roster the flow holds now.
       flowWorkerSession: submitWorkerSessions((task) => raw(`${task.flowId} for {{fixture:org.id}}`, PASSING_STEPS)),
@@ -2139,7 +1973,7 @@ describe('generateGuards — the per-flow pipeline', () => {
     const r = seed()
     const opts = {
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: submitWorkerSessions((task) => raw(task.flowId, PASSING_STEPS)),
     }
     const first = await runGenerate(opts)
@@ -2187,7 +2021,7 @@ describe('generateGuards — the per-flow pipeline', () => {
     const res = await runGenerate({
       repoRoot: r,
       stopAfterFlows: true,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       matchRunner: matchAll(() => matchCalls++),
     })
 
@@ -2210,7 +2044,7 @@ describe('generateGuards — the committed flow corpus', () => {
 
     await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: authorsEvery(),
     })
 
@@ -2232,7 +2066,7 @@ describe('generateGuards: the step facts', () => {
     const r = seed()
     const opts = {
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: authorsEvery(raw('relkit --version', PASSING_STEPS)),
     }
 
@@ -2240,7 +2074,7 @@ describe('generateGuards: the step facts', () => {
     await runGenerate({ ...opts, onFact: (step, line) => fresh.push(`${step} | ${line}`) })
 
     expect(fresh).toContain('index | docs/cli.md#version: changed')
-    expect(fresh).toContain('extract | docs/cli.md: 1 claim, extracted')
+    expect(fresh).toContain('extract | docs/cli.md: 1 testable claim from the scan')
     expect(fresh).toContain('interfaces | cli/relkit: cli')
     expect(fresh).toContain('flows | doc:docs/cli.md: 1 flow, synthesized')
     expect(fresh).toContain('match | version x cli: matched, 1 interface')
@@ -2260,72 +2094,5 @@ describe('generateGuards: the step facts', () => {
     expect(cached.some((line) => line.startsWith('author |'))).toBe(false)
   }, 60_000)
 
-  it('files a pair the engine refused before matching, and tallies it as blocked', async () => {
-    const r = seed()
-    const facts: string[] = []
-    const ticks: Array<{ done: number; total: number; matched: number; unmatched: number; blocked: number }> = []
-    let matchCalls = 0
-    const res = await runGenerate({
-      repoRoot: r,
-      extractSession: extractSessionBy({
-        background: { untestable: 'design history, nothing observable' },
-        version: [{
-          claim: '`relkit --version` prints the version',
-          verification: {
-            method: 'behavior',
-            scope: 'configuration',
-            observable: 'stdout carries the version',
-            cases: [{
-              id: 'prints-version', claim: 'prints the version', method: 'behavior', requires: ['process'],
-              conditions: [], prerequisites: [{ dependency: 'Stripe', mode: 'provided' }],
-            }],
-          },
-        }],
-      }),
-      flowWorkerSession: authorsEvery(raw('relkit --version', PASSING_STEPS)),
-      matchRunner: matchAll(() => matchCalls++),
-      onFact: (step, line) => facts.push(`${step} | ${line}`),
-      onMatchProgress: (progress) => ticks.push(progress),
-    })
-
-    // No case survived the gate, so no matcher verdict was ever bought — and the
-    // pair says why instead of vanishing between the counter and the facts.
-    expect(matchCalls).toBe(0)
-    expect(facts).toContain('match | version x cli: blocked, Prerequisite Stripe (provided) matches no declared dependency.')
-    expect(ticks).toEqual([
-      { done: 0, total: 1, matched: 0, unmatched: 0, blocked: 0 },
-      { done: 1, total: 1, matched: 0, unmatched: 0, blocked: 1 },
-    ])
-    expect(res.written).toEqual([])
-  }, 60_000)
 })
 
-it('admits a recipe-only controlled provider to matching and briefs the worker with its declared wiring', async () => {
-  const r = seed()
-  writeRecipe(r, { api: { serve: ['node', '-e', 'setInterval(() => {}, 1000)'], healthPath: '/health', externals: { currencybeacon: { baseUrlEnv: 'DECLARED_BASE', env: { PROVIDER_KEY: {} } } } } })
-  let matches = 0
-  const briefings: string[] = []
-  const ticks: unknown[] = []
-  await runGenerate({ repoRoot: r,
-    interfaces: interfacesOf(r, apiInterface('GET', '/quote')),
-    extractSession: extractSessionBy({ background: { untestable: 'background' }, version: [{ driver: 'api', claim: 'A controlled rate sets the quote', verification: {
-      method: 'behavior', scope: 'api', observable: 'chosen provider rate', cases: [{ id: 'quote', claim: 'chosen rate', method: 'behavior', requires: ['http', 'provider-control'], conditions: [], prerequisites: [], providerControls: [{ service: 'CurrencyBeacon', operations: ['response'] }] }],
-    } }] }),
-    matchRunner: async ctx => {
-      matches++
-      expect(ctx.providerControls).toEqual([{ service: 'currencybeacon', realization: 'stub', baseUrlEnvs: ['DECLARED_BASE'], credentialEnv: ['PROVIDER_KEY'], operations: ['response'] }])
-      if (matches === 1) return { gaps: ctx.milestones.map(m => ({ milestone: m.order, checks: m.verification!.cases!.map(c => c.id), kind: 'capability', reason: 'No provider-control interface is mapped or available' })) }
-      expect(ctx.issues?.gapErrors?.join()).toContain('contradicts the runner registry')
-      return matchAll()(ctx)
-    },
-    flowWorkerSession: submitWorkerSessions(() => ({ blocked: [{ order: 1, capability: 'fixture worker intentionally stops after inspecting its briefing' }] }), { onBriefing: (_task, text) => briefings.push(text) }),
-    onMatchProgress: progress => ticks.push(progress),
-  })
-  expect(matches).toBe(2)
-  expect(ticks.at(-1)).toMatchObject({ done: 1, total: 1, matched: 1, unmatched: 0, blocked: 0 })
-  expect(briefings).toHaveLength(1)
-  expect(briefings[0]).toContain('currencybeacon: stub (setup.http)')
-  expect(briefings[0]).toContain('DECLARED_BASE')
-  expect(briefings[0]).toContain('PROVIDER_KEY')
-  expect(briefings[0]).toContain('providerControls')
-}, 60000)

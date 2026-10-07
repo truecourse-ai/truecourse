@@ -29,7 +29,7 @@ import {
   writeDoc,
   writeCorpus,
   writeApiRecipe,
-  extractSessionBy,
+  claimsBy,
   submitWorkerSessions,
   runGenerate,
   interfacesOf,
@@ -332,7 +332,7 @@ describe('generateGuards — the grounding rides the SAME provider the interface
         ],
         outboundRequests: [FORECAST],
       }),
-      extractSession: extractSessionBy({
+      claims: claimsBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
       flowWorkerSession: submitWorkerSessions(() => rawApi('GET /todos answers 200', PASSING_API_STEPS), {
@@ -367,7 +367,7 @@ describe('generateGuards — the grounding rides the SAME provider the interface
           ],
         },
       ),
-      extractSession: extractSessionBy({
+      claims: claimsBy({
         list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status' }],
       }),
       flowWorkerSession: submitWorkerSessions(() => rawApi('GET /todos answers 200', PASSING_API_STEPS), {

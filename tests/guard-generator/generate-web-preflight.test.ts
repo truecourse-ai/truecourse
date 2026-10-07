@@ -16,7 +16,7 @@ import { readManifest } from '@truecourse/guard-runner'
 import { interfaceFingerprint, type Interface } from '@truecourse/shared'
 import {
   FIXTURE_WEB_SERVER,
-  extractSessionBy,
+  claimsBy,
   flowWorkerSessionOf,
   interfacesOf,
   makeTempRepo,
@@ -62,7 +62,7 @@ describe('generateGuards — the web browser preflight', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, webInterface()),
-      extractSession: extractSessionBy({ home: [{ driver: 'web' }] }),
+      claims: claimsBy({ home: [{ driver: 'web' }] }),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         sessionsSeen.push(task.workItem)
         return undefined
@@ -91,7 +91,7 @@ describe('generateGuards — the web browser preflight', () => {
     await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, webInterface()),
-      extractSession: extractSessionBy({ home: [{ driver: 'web' }] }),
+      claims: claimsBy({ home: [{ driver: 'web' }] }),
       flowWorkerSession: flowWorkerSessionOf(async () => undefined),
       browserPreflight: async () => ({ ok: false, reason: 'no chromium (test)' }),
     })
@@ -102,7 +102,7 @@ describe('generateGuards — the web browser preflight', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, webInterface()),
-      extractSession: extractSessionBy({ home: [{ driver: 'web' }] }),
+      claims: claimsBy({ home: [{ driver: 'web' }] }),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         sessionsSeen.push(task.workItem)
         return {

@@ -909,7 +909,9 @@ function flowSurfaces(flowId: string, join: FlowJoin): GuardFlowSurface[] {
     const casesReviewed = !milestones.some(m => m.verification?.cases) || !!(scenario && recorded?.reviewPolicyVersion === GUARD_REVIEW_POLICY_VERSION && recorded?.caseEvidence && recorded.reviewedScenarioFingerprint === scenarioReviewFingerprint(scenario) && !scenarioFullFlowDefect(milestones, scenario.steps, recorded.caseEvidence))
     const proof = current && recorded?.reviewed !== false && casesReviewed
       ? (scenario ? scenarioMilestoneProof(scenario.steps) : recorded?.milestoneCoverage ?? []) : []
-    const complete = coversFlowMilestones(milestones, proof)
+    // With neither the scenario's steps nor a recorded coverage to read, the
+    // proof is unknown rather than missing.
+    const complete = scenario || recorded?.milestoneCoverage ? coversFlowMilestones(milestones, proof) : undefined
     if (complete !== undefined) {
       row.coverageComplete = complete
       if (row.status === 'guarded' && !join.birthStatusByScenario.has(row.scenarioId!)) row.status = 'never-run'
@@ -924,7 +926,7 @@ function flowSurfaces(flowId: string, join: FlowJoin): GuardFlowSurface[] {
       const milestone = milestones.find(m => m.order === ref.milestone)
       if (!milestone) return false
       if (ref.caseId) return !!milestone.verification?.cases?.some(c => c.id === ref.caseId) &&
-        passingProof.some(p => p.milestone === ref.milestone && milestone.proofDrivers?.includes(p.driver) && p.checks?.includes(ref.caseId!))
+        passingProof.some(p => p.milestone === ref.milestone && (!milestone.proofDrivers?.length || milestone.proofDrivers.includes(p.driver)) && p.checks?.includes(ref.caseId!))
       return coversFlowMilestones([milestone], passingProof) === true
     }) : proven
     const flowGap = toFlowGap(gap, join.externals)
@@ -933,7 +935,7 @@ function flowSurfaces(flowId: string, join: FlowJoin): GuardFlowSurface[] {
       status: gapStatus(gap, flowGap.needsSetup),
       // Only unsuccessful realization attempts can be alternatives. Failures,
       // authoring errors, dismissals and unrelated/legacy gaps never disappear.
-      ...(gapProven && gap.surface && milestones.some((m) => m.proofDrivers?.includes(gap.surface!)) &&
+      ...(gapProven && gap.surface && milestones.some((m) => !m.proofDrivers?.length || m.proofDrivers.includes(gap.surface!)) &&
         ['no-interface', 'unrealizable', 'blocked-on', 'awaiting-driver'].includes(gap.kind)
         ? { coveredByAlternative: true } : {}),
       gap: flowGap,
@@ -1728,7 +1730,7 @@ function caseVerified(
   return proof.some(
     (p) =>
       p.milestone === milestone.order &&
-      milestone.proofDrivers?.includes(p.driver) &&
+      (!milestone.proofDrivers?.length || milestone.proofDrivers.includes(p.driver)) &&
       p.checks?.includes(caseId),
   )
 }
@@ -1763,7 +1765,7 @@ function flowProgress(flowId: string, view: FlowViewSources, surfaces: GuardFlow
     : gaps.some(g => g.blocker?.kind === 'unsupported-capability' || g.kind === 'awaiting-driver') ? 'unsupported'
     : verified === total && total > 0 ? 'ready' : 'incomplete'
   return { execution, scenarios: rows.length, passed, verified, total, unit: cases ? 'cases' : 'milestones',
-    coverage: !total || milestones.some(m => !m.proofDrivers) ? 'unknown' : verified === total ? 'complete' : verified ? 'partial' : 'unverified',
+    coverage: !total ? 'unknown' : verified === total ? 'complete' : verified ? 'partial' : 'unverified',
     category: !systemCount ? 'behavior' : systemCount === milestones.length ? 'system' : 'mixed', generation }
 }
 

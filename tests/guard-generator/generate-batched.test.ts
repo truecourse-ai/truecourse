@@ -27,7 +27,7 @@ import { type GuardScenarioResult } from '@truecourse/shared'
 import {
   FAILING_STEPS,
   PASSING_STEPS,
-  extractSessionBy,
+  claimsBy,
   makeTempRepo,
   raw,
   rmrf,
@@ -94,7 +94,7 @@ describe('generateGuards — multi-flow attribution', () => {
       repoRoot: r,
       executor: exec,
       concurrency: 4,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       // alpha passes; beta always fails → beta is committed RED, alpha green.
       flowWorkerSession: submitWorkerSessions((task) =>
         task.flowId === 'alpha' ? raw('a-good', PASSING_STEPS) : { red: raw('b-bad', FAILING_STEPS) },
@@ -142,7 +142,7 @@ describe('generateGuards — multi-flow attribution', () => {
       repoRoot: r,
       executor: exec,
       concurrency: 4,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions((task) => raw(task.flowId, PASSING_STEPS)),
     })
 

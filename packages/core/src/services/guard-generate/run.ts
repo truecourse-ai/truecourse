@@ -40,10 +40,8 @@ import type {
 import { getCacheEntry, getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
 import {
   GUARD_REVIEW_POLICY_VERSION,
-  ExtractOutcomeSchema,
   isCreditsExhausted,
   settledScenariosOf,
-  type ExtractOutcome,
   type GuardFlowWorkerOutcome,
   type GuardPrerequisiteTarget,
 } from '@truecourse/shared'
@@ -51,14 +49,9 @@ import {
   GENERATE_SESSION_STEPS,
   checkEpicSet,
   checkFlowSet,
-  snapExtraction,
   flowSectionKey,
   EpicSynthesisSchema,
   FlowSetSchema,
-  type ExtractPrior,
-  type ExtractResult,
-  type ExtractSessionSeam,
-  type ReuseExtractionSeam,
   type FlowsAreaSessionResult,
   type FlowsAreaSessionSeam,
   type FlowsEpicSessionResult,
@@ -80,18 +73,6 @@ import { cachedSessionOutcome } from '../agent/session-cache.js'
 import { runSessionPool } from '../agent/session-pool.js'
 import { describeSessionFailure } from '../guard-setup/session-context.js'
 import { buildGuardDocUniverse } from './tools.js'
-import {
-  EXTRACT_SESSION_CACHE_NAME,
-  EXTRACT_SESSION_KIND,
-  extractSessionBriefing,
-  extractContextSchema,
-  extractSessionCacheKey,
-  extractSessionLegacyCacheKey,
-  extractSessionCacheKeyForContentHash,
-  extractSessionLegacyCacheKeyForContentHash,
-  extractSessionDef,
-  extractSessionWorkItem,
-} from './extract.js'
 import {
   FLOWS_EPIC_WORK_ITEM,
   FLOWS_SESSION_CACHE_NAME,
@@ -159,9 +140,6 @@ export class GenerateStepNotReadyError extends Error {
 }
 
 export interface GuardGenerateSessionSeams {
-  extractSession: ExtractSessionSeam
-  /** The claim-diff gate's access to the extract cache (prior-outcome lookup + reuse). */
-  reuseExtraction: ReuseExtractionSeam
   flowsAreaSession: FlowsAreaSessionSeam
   flowsEpicSession: FlowsEpicSessionSeam
   /** The flow-worker pool — waves, cache, fidelity children. */
@@ -463,63 +441,12 @@ export function createGuardGenerateSessionSeams(
     opts.replaySteps?.includes(step) === true ||
     (opts.only !== undefined && GENERATE_SESSION_STEPS.indexOf(step) < GENERATE_SESSION_STEPS.indexOf(opts.only))
 
-  const extractSession: ExtractSessionSeam = async (input) => {
-    const universe = buildGuardDocUniverse(input.docs)
-    // The document's last extraction rides the session, never its cache key.
-    const priorOf = (doc: GuardDoc): { prior?: ExtractPrior } => {
-      const prior = input.priors?.get(doc.doc)
-      return prior ? { prior } : {}
-    }
-    const byDoc = new Map<string, ExtractResult>()
-    let done = 0
-    const total = input.docs.length
-    input.onDoc?.(0, total)
-    const summary = await runCachedGuardPool<GuardDoc, ExtractOutcome>({
-      repoRoot: opts.repoRoot,
-      kind: EXTRACT_SESSION_KIND,
-      cacheName: EXTRACT_SESSION_CACHE_NAME,
-      items: input.docs,
-      workItem: (doc) => extractSessionWorkItem(doc.doc),
-      cacheKey: (doc) => extractSessionCacheKey(doc, input.prerequisiteTargets),
-      legacyCacheKeys: (doc) => [extractSessionLegacyCacheKey(doc, input.prerequisiteTargets)],
-      schema: extractContextSchema(input.prerequisiteTargets),
-      session: (doc) => extractSessionDef({ doc, universe, prerequisiteTargets: input.prerequisiteTargets, ...priorOf(doc) }),
-      briefing: (doc) => extractSessionBriefing(doc, input.prerequisiteTargets, input.priors?.get(doc.doc)),
-      driver: acquire,
-      ...(replayOnly('extract') ? { cacheOnly: 'extract' as const } : {}),
-      ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
-      ...(opts.onSessionEvent ? { onSessionEvent: opts.onSessionEvent } : {}),
-      fold: (doc, result) => {
-        if (result.outcome.status === 'completed') {
-          // THE FOLD RE-SNAP: the cache holds the raw outcome (model anchors),
-          // and the snap runs here on hit and fresh alike — so a section
-          // renamed since the entry was written still binds correctly today.
-          byDoc.set(doc.doc, {
-            ok: true,
-            data: snapExtraction(result.outcome.output, doc.sections),
-            complete: true,
-            failedViews: 0,
-          })
-        } else {
-          byDoc.set(doc.doc, {
-            ok: false,
-            reason: `extraction session failed: ${describeSessionFailure(result.outcome.failure)}`,
-          })
-        }
-        input.onDoc?.(++done, total)
-      },
-    })
-    note(summary)
-    return { byDoc, summary }
-  }
-
   const flowsAreaSession: FlowsAreaSessionSeam = async (input) => {
     const universe = buildGuardDocUniverse(input.docs ?? [])
     const checker: FlowsCheckerContext = {
       sectionKeys: new Set(
         (input.docs ?? []).flatMap((d) => d.sections.map((s) => flowSectionKey(s.doc, s.anchor))),
       ),
-      catalogNames: new Set((input.grounding?.dependencies ?? []).map((d) => d.name)),
     }
     const byArea = new Map<string, FlowsAreaSessionResult>()
     const summary = await runCachedGuardPool({
@@ -540,7 +467,7 @@ export function createGuardGenerateSessionSeams(
       // The fold-side refusal (never trust the transcript): the SAME checker
       // `check_flows` ran in-session, so a draft that checked clean lands clean.
       rejectOutput: (area, output) =>
-        flowSetRefusalReason(checkFlowSet(output, { area, sectionKeys: checker.sectionKeys, catalogNames: checker.catalogNames, prior: input.prior?.get(flowAreaKey(area)) ?? [] })),
+        flowSetRefusalReason(checkFlowSet(output, { area, sectionKeys: checker.sectionKeys, prior: input.prior?.get(flowAreaKey(area)) ?? [] })),
       fold: (area, result) => {
         if (result.outcome.status === 'completed') {
           byArea.set(flowAreaKey(area), {
@@ -856,46 +783,7 @@ export function createGuardGenerateSessionSeams(
     return { byTask, summary, ...(fidelitySummary ? { fidelitySummary } : {}) }
   }
 
-  // The claim-diff gate's view of the extract cache. `lookup` reads the raw
-  // outcome cached for the doc's PRIOR content; `reuse` copies it under the
-  // doc's CURRENT key so the pool above hits without a session. Both address
-  // the cache through the same key recipe the pool uses — including its OLD
-  // key, because the prior extraction the gate is looking for was written
-  // before the formula changed, and not finding it costs a full re-extraction
-  // of every edited document.
-  const priorExtraction = async (
-    doc: GuardDoc,
-    priorContentHash: string,
-    targets: readonly GuardPrerequisiteTarget[],
-  ): Promise<unknown | null> =>
-    getCacheEntryOrLegacy(
-      opts.repoRoot,
-      EXTRACT_SESSION_CACHE_NAME,
-      extractSessionCacheKeyForContentHash(priorContentHash, doc.suppressedQuotes, targets),
-      extractSessionLegacyCacheKeyForContentHash(priorContentHash, doc.suppressedQuotes, targets),
-    ).catch(() => null)
-
-  const reuseExtraction: ReuseExtractionSeam = {
-    async lookup(doc, priorContentHash, targets = []) {
-      const parsed = extractContextSchema(targets).safeParse(
-        await priorExtraction(doc, priorContentHash, targets),
-      )
-      return parsed.success ? parsed.data : null
-    },
-    async reuse(doc, priorContentHash, targets = []) {
-      const parsed = extractContextSchema(targets).safeParse(
-        await priorExtraction(doc, priorContentHash, targets),
-      )
-      if (!parsed.success) return
-      await setCacheEntry(opts.repoRoot, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(doc, targets), parsed.data).catch(
-        () => undefined,
-      )
-    },
-  }
-
   return {
-    extractSession,
-    reuseExtraction,
     flowsAreaSession,
     flowsEpicSession,
     flowWorkerSession,

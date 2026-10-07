@@ -7,8 +7,9 @@
  *
  * A claim's identity is its document and the keys of the sentences it is read
  * from, the same rule a conflict's side goes by, so an unchanged sentence keeps
- * its claim across rescans and a reworded one gets a new claim. Everything else
- * on it is what the extraction read.
+ * its claim across rescans and a reworded one gets a new claim; two claims read
+ * from the same sentences are told apart by their order. Everything else on it
+ * is what the extraction read.
  */
 
 import { z } from 'zod'
@@ -66,9 +67,14 @@ export type ClaimsFile = z.infer<typeof ClaimsFileSchema>
 
 const CLAIM_ID_PREFIX = 'claim::'
 
-/** A claim's id: its doc and the hash of its sentence keys, order-free. */
-export function claimId(doc: string, sentences: readonly string[]): string {
-  return `${CLAIM_ID_PREFIX}${doc}::${shortHash([...sentences].sort().join('\x00'))}`
+/**
+ * A claim's id: its doc and the hash of its sentence keys, order-free, with a
+ * doc-order ordinal when more than one claim is read from the same sentences
+ * (a sentence that states two facts yields two claims).
+ */
+export function claimId(doc: string, sentences: readonly string[], repeat = 0): string {
+  const base = `${CLAIM_ID_PREFIX}${doc}::${shortHash([...sentences].sort().join('\x00'))}`
+  return repeat > 0 ? `${base}-${repeat + 1}` : base
 }
 
 export function isClaimId(id: string): boolean {

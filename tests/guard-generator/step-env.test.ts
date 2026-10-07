@@ -16,7 +16,7 @@ import {
   writeCorpus,
   writeDoc,
   raw,
-  extractSessionBy,
+  claimsBy,
   runGenerate,
   submitWorkerSessions,
 } from './helpers.js'
@@ -58,7 +58,7 @@ describe('generateGuards — per-step env', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: authoring([
         { run: ['env', 'MODE'], expect: { exit: 0, stdout: { equals: 'MODE=(unset)\n' } } },
         { run: ['env', 'MODE'], env: { MODE: 'ci' }, expect: { exit: 0, stdout: { equals: 'MODE=ci\n' } } },
@@ -83,7 +83,7 @@ describe('generateGuards — per-step env', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       // The env is declared on step 1, but step 2 — with no overlay of its own —
       // asserts it too. It must NOT leak, so birth fails on step 2.
       flowWorkerSession: authoringRed([

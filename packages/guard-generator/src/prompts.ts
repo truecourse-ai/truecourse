@@ -2698,53 +2698,6 @@ export function buildWorldClassifyUserPrompt(flows: readonly WorldClassifyFlowIn
 // Claim-diff gate — did an edited section change any obligation?
 // ---------------------------------------------------------------------------
 
-/** One edited section as the claim-diff gate sees it: the section's OWN text
- *  before and after the edit (subsections are judged on their own), plus the
- *  claims the last extraction pinned to this section. */
-export interface ClaimDiffSectionInput {
-  doc: string
-  anchor: string
-  headingText: string
-  /** The section's own text before the edit (no subsections). */
-  oldText: string
-  /** The section's own text now. */
-  newText: string
-  /** Claims the prior extraction pinned to this section; empty when it found
-   *  nothing testable here. */
-  priorClaims: readonly { claim: string; reason: string }[]
-  /** The prior extraction's untestable note for the section, when it had one. */
-  priorUntestable?: string
-}
-
-export const CLAIM_DIFF_SYSTEM_PROMPT = `You judge whether an edit to ONE section of a specification changed what a test would verify.
-
-You are given the section's own text BEFORE and AFTER the edit (its subsections are judged separately), and the CLAIMS a previous reading extracted from the old text — each a single externally-observable behavior the document guaranteed, with the observable a test would assert. Compare the two texts.
-
-Answer "cosmetic" when the edit changes no externally-observable guarantee: rewording, typo fixes, reformatting, reordering, punctuation, added or removed examples that illustrate what was already guaranteed, added prose with nothing a test could assert. Text the edit did not touch is, by definition, cosmetic — judge the DIFFERENCE, not the section as a whole.
-
-Answer "changed" when the difference alters, adds, removes, or weakens an observable behavior: a value, a condition, an actor, an ordering, an outcome, a default, an error, a limit. A prior claim that no longer holds as stated is "changed"; a new sentence that states a behavior a test could assert is "changed".
-
-When unsure whether the difference is observable, answer "changed" — a needless re-author costs time; a missed obligation costs correctness.
-
-Return EXACTLY ONE JSON object: { "verdict": "cosmetic" | "changed", "reason": "<one sentence naming the difference that decided it>" }. No prose, no fences.`
-
-/** Folded into the gate's cache key: a doctrine change must re-judge. */
-export const CLAIM_DIFF_PROMPT_FINGERPRINT = fingerprint(CLAIM_DIFF_SYSTEM_PROMPT)
-
-export function buildClaimDiffUserPrompt(input: ClaimDiffSectionInput): string {
-  const lines = [`SECTION ${input.doc} #${input.anchor} — "${input.headingText}"`, '']
-  if (input.priorClaims.length > 0) {
-    lines.push('PRIOR CLAIMS (extracted from the text before the edit):')
-    for (const c of input.priorClaims) lines.push(`- ${c.claim}`, `  observable: ${c.reason}`)
-  } else {
-    lines.push(
-      `PRIOR CLAIMS: none — the section was judged untestable${input.priorUntestable ? ` (${input.priorUntestable})` : ''}.`,
-    )
-  }
-  lines.push('', 'TEXT BEFORE THE EDIT:', '<<<BEFORE', input.oldText, 'BEFORE>>>')
-  lines.push('', 'TEXT AFTER THE EDIT:', '<<<AFTER', input.newText, 'AFTER>>>')
-  return lines.join('\n')
-}
 
 export const MATCH_SYSTEM_PROMPT = `\
 Use structured plan/gaps for new responses. Never combine unrealizable with plan or gaps. Retain independently testable HTTP status cases when outbound request observation is unavailable. A query trigger needs a documented or mapped action; generic navigation does not imply arbitrary query contracts.

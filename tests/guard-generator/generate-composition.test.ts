@@ -26,7 +26,7 @@ import {
   writeRecipe,
   writeDoc,
   writeCorpus,
-  extractSessionBy,
+  claimsBy,
   flowWorkerSessionOf,
   faithfulJudge,
   acceptedSha,
@@ -168,7 +168,7 @@ describe('generateGuards — the composition defect is the worker’s pre-flight
     const reports: { content: string; isError?: boolean }[] = []
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         // Round 1 composes a whole command line (the recipe entry is
         // `["node", "…/bin.mjs"]`); round 2 returns argv only.
@@ -199,7 +199,7 @@ describe('generateGuards — the composition defect is the worker’s pre-flight
     const reports: { content: string; isError?: boolean }[] = []
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         reports.push(await task.runScenario(foreign))
         reports.push(await task.submitScenario(foreign, [], faithfulJudge))

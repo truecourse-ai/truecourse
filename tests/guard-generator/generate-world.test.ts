@@ -18,7 +18,7 @@ import {
   FIXTURE_BIN,
   PASSING_STEPS,
   cliInterface,
-  extractSessionBy,
+  claimsBy,
   flowWorkerSessionOf,
   interfacesOf,
   makeTempRepo,
@@ -73,7 +73,7 @@ describe('generateGuards — the world-mutator wave', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['add']), cliInterface(['admin', 'delete-user'])),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       worldClassifyRunner: async (flows) => {
         // The classifier sees every changed flow and names the destructive one.
         classified.push(...flows.map((f) => f.id))
@@ -117,7 +117,7 @@ describe('generateGuards — the world-mutator wave', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['add'])),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() =>
         raw('Adding works', PASSING_STEPS, { world: 'mutates' }),
       ),
@@ -135,7 +135,7 @@ describe('generateGuards — the world-mutator wave', () => {
     const first = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['add'])),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => raw('Adding works', PASSING_STEPS)),
     })
     expect(first.errors).toEqual([])
@@ -154,7 +154,7 @@ describe('generateGuards — the world-mutator wave', () => {
     const second = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['add'])),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         briefings.push(await task.prepare())
         return {
@@ -190,7 +190,7 @@ describe('generateGuards — classifier loss fails closed', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['add']), cliInterface(['admin', 'delete-user'])),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       worldClassifyRunner: async () => {
         calls++
         if (calls === 1) throw new Error('transient timeout')
@@ -211,7 +211,7 @@ describe('generateGuards — classifier loss fails closed', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['add']), cliInterface(['admin', 'set-password'])),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       worldClassifyRunner: async () => {
         throw new Error('claude timed out after 300000ms')
       },
@@ -248,7 +248,7 @@ describe('generateGuards — classifier loss fails closed', () => {
       runGenerate({
         repoRoot: r,
         interfaces,
-        extractSession: extractSessionBy({}),
+        claims: claimsBy({}),
         worldClassifyRunner: async (flows) => {
           classified.push(flows.map((f) => f.id))
           return { mutators: flows.filter((f) => f.id.includes('delet')).map((f) => f.id) }
@@ -305,7 +305,7 @@ describe('generateGuards — classifier loss fails closed', () => {
     await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['add']), cliInterface(['admin', 'delete-user'])),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       worldClassifyRunner: async (flows) => {
         batch = flows.map((f) => ({ id: f.id, title: f.title, milestones: [...f.milestones] }))
         throw new Error('lost')
@@ -326,7 +326,7 @@ describe('generateGuards — classifier loss fails closed', () => {
       // Both interfaces moved, so both flows are work again — what the
       // classifier reads about them did not.
       interfaces: interfacesOf(r, cliInterface(['add'], ['--json']), cliInterface(['admin', 'delete-user'], ['--force'])),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       worldClassifyRunner: async () => {
         throw new Error('the batch entry should have answered')
       },
@@ -360,7 +360,7 @@ describe('generateGuards — the deterministic mutator gate', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['add'])),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         invocations++
         const yaml = scenarioYaml(stampMilestones(raw('Adding works', PASSING_STEPS, { world: 'mutates' }), task.milestoneCount))
@@ -390,7 +390,7 @@ describe('generateGuards — the deterministic mutator gate', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['add'])),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: async ({ tasks, epicTasks, mutatorTasks, onTask }) => {
         invocationWaves.push({ tasks: tasks.map((t) => t.flowId), mutators: mutatorTasks.map((t) => t.flowId) })
         const byTask = new Map()
@@ -446,7 +446,7 @@ describe('generateGuards — the deterministic mutator gate', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['add'])),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         invocations++
         const mutYaml = scenarioYaml(stampMilestones(raw('Adding works', PASSING_STEPS, { world: 'mutates' }), task.milestoneCount))

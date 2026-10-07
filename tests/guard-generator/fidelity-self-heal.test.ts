@@ -16,7 +16,7 @@ import {
   FAILING_STEPS,
   PASSING_STEPS,
   acceptedSha,
-  extractSessionBy,
+  claimsBy,
   flowWorkerSessionOf,
   judgeBy,
   makeTempRepo,
@@ -60,7 +60,7 @@ function seed(): string {
   return r
 }
 
-const versionCliBgUntestable = extractSessionBy({ background: { untestable: 'design history' } })
+const versionCliBgUntestable = claimsBy({ background: { untestable: 'design history' } })
 const KEY = autoResolutionKey('version', 'cli')
 const MISMATCH = 'asserts exit 0 where the claim quotes the exact version line'
 
@@ -116,7 +116,7 @@ describe('fidelity self-heal', () => {
     const { seam, reports } = healingWorker(
       judgeBy({ weak: { mismatch: MISMATCH, confidence: 'high' } }, () => reviews++),
     )
-    const res = await runGenerate({ repoRoot: r, extractSession: versionCliBgUntestable, flowWorkerSession: seam })
+    const res = await runGenerate({ repoRoot: r, claims: versionCliBgUntestable, flowWorkerSession: seam })
 
     // The flag was an in-loop correction, not a separate round.
     expect(reports[0].isError).toBe(true)
@@ -148,7 +148,7 @@ describe('fidelity self-heal', () => {
         strong: { mismatch: 'still weak', confidence: 'low' },
       }),
     )
-    const res = await runGenerate({ repoRoot: r, extractSession: versionCliBgUntestable, flowWorkerSession: seam })
+    const res = await runGenerate({ repoRoot: r, claims: versionCliBgUntestable, flowWorkerSession: seam })
 
     expect(reports[1].isError).toBe(true)
     expect(reports[1].content).toContain('REJECTED')
@@ -168,7 +168,7 @@ describe('fidelity self-heal', () => {
       steps: FAILING_STEPS,
       declaresRed: true,
     })
-    const res = await runGenerate({ repoRoot: r, extractSession: versionCliBgUntestable, flowWorkerSession: seam })
+    const res = await runGenerate({ repoRoot: r, claims: versionCliBgUntestable, flowWorkerSession: seam })
 
     expect(res.written).toMatchObject([{ title: 'strong', status: 'failing' }])
     expect(res.birthFindings).toMatchObject([{ title: 'strong', committed: true }])
@@ -181,7 +181,7 @@ describe('fidelity self-heal', () => {
     let submits = 0
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: submitWorkerSessions(() => raw('weak', PASSING_STEPS), {
         judge: judgeBy({ weak: { mismatch: MISMATCH, confidence: 'medium' } }),
         onSubmit: () => submits++,
@@ -207,7 +207,7 @@ describe('fidelity self-heal', () => {
     const reports: { content: string; isError?: boolean }[] = []
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: submitWorkerSessions(() => raw('weak', PASSING_STEPS), {
         judge: judgeBy({ weak: { mismatch: MISMATCH, confidence: 'high' } }),
         onSubmit: (_t, report) => reports.push(report),

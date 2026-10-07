@@ -10,7 +10,7 @@ import {
   writeApiRecipe,
   writeDoc,
   writeCorpus,
-  extractSessionBy,
+  claimsBy,
   submitWorkerSessions,
   runGenerate,
   interfacesOf,
@@ -44,7 +44,7 @@ const DOC_CONTENT = [
 ].join('\n')
 
 /** The api claim on `list`; `version` states nothing a driver can assert. */
-const listExtract = extractSessionBy({
+const listExtract = claimsBy({
   list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status + body' }],
   version: { untestable: 'covered elsewhere' },
 })
@@ -59,7 +59,7 @@ describe('generateGuards — api surface authoring + birth', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, apiInterface('GET', '/todos')),
-      extractSession: listExtract,
+      claims: listExtract,
       flowWorkerSession: submitWorkerSessions(() => rawApi('GET /todos answers 200 with the empty list', PASSING_API_STEPS)),
     })
 
@@ -117,7 +117,7 @@ describe('generateGuards — api surface authoring + birth', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, apiInterface('GET', '/todos')),
-      extractSession: listExtract,
+      claims: listExtract,
       flowWorkerSession: submitWorkerSessions(() =>
         rawApi('the todos server comes up', PASSING_API_STEPS, {
           setup: { env: { TC_FAIL_BOOT: '1', TC_LEAK: SECRET } },
@@ -151,7 +151,7 @@ describe('generateGuards — api surface authoring + birth', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, apiInterface('GET', '/boom')),
-      extractSession: extractSessionBy({
+      claims: claimsBy({
         list: [{ driver: 'api', claim: 'GET /boom answers 200', reason: 'HTTP status' }],
         version: { untestable: 'covered elsewhere' },
       }),
@@ -197,7 +197,7 @@ describe('generateGuards — api surface authoring + birth', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['relkit']), apiInterface('GET', '/todos')),
-      extractSession: extractSessionBy({ list: [{ driver: 'api', alternativeDrivers: ['cli'], claim: 'The todo list can be retrieved' }], version: { untestable: 'covered elsewhere' } }),
+      claims: claimsBy({ list: [{ driver: 'api', alternativeDrivers: ['cli'], claim: 'The todo list can be retrieved' }], version: { untestable: 'covered elsewhere' } }),
       flowWorkerSession: submitWorkerSessions(
         (task) =>
           task.surface === 'api'
@@ -219,7 +219,7 @@ describe('generateGuards — api surface authoring + birth', () => {
 
   it('a runnable surface with an EMPTY interface catalog settles as a no-interface gap', async () => {
     // The recipe prepares api, but nothing api-shaped was mapped from the code: the
-    // flow is accounted for with a stated gap and nothing is authored for it.
+    // api side of the flow is accounted for with a stated gap.
     const r = repo()
     writeApiRecipe(r) // both surfaces prepared
     writeCorpus(r, [{ ref: DOC }])
@@ -228,11 +228,13 @@ describe('generateGuards — api surface authoring + birth', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['relkit'])), // cli only
-      extractSession: listExtract,
+      claims: listExtract,
       flowWorkerSession: submitWorkerSessions(() => raw('relkit --version exits 0', PASSING_STEPS)),
     })
 
-    expect(res.written).toEqual([])
+    // The claim names no surface, so the prepared cli surface, which has
+    // interfaces, writes the test; the api surface states its gap beside it.
+    expect(res.written.map((w) => w.surface)).toEqual(['cli'])
     const gap = res.coverageGaps.find((g) => g.flowId === 'list' && g.surface === 'api')!
     expect(gap.kind).toBe('no-interface')
     expect(readManifest(r)!.flows.find((f) => f.flowId === 'list')!.gaps).toEqual([

@@ -36,15 +36,13 @@ import {
   writeScenarioFile,
   bindsFor,
   raw,
-  extractSessionBy,
-  extractSessionOf,
+  claimsBy,
   flowsAreaSessionOf,
   flowStageSeams,
   flowWorkerSessionOf,
   runGenerate,
   sessionSummary,
   submitWorkerSessions,
-  EXTRACT_KIND,
   FLOWS_KIND,
   WORKER_KIND,
   PASSING_STEPS,
@@ -125,46 +123,6 @@ function commitPriorFlow(r: string): { manifest: string; scenario: string; file:
     file,
   }
 }
-
-describe('extraction losing every session aborts the run', () => {
-  it('returns llm-failed naming the session kind and the affected documents, writing no manifest', async () => {
-    const r = seed(...ONE_DOC)
-
-    const res = await runGenerate({
-      repoRoot: r,
-      extractSession: extractionLost("Invalid schema for response_format: Missing 'extension'.", [DOC]),
-    })
-
-    expect(res.status).toBe('llm-failed')
-    expect(res.reason).toContain(EXTRACT_KIND)
-    expect(res.reason).toContain("Missing 'extension'")
-    expect(res.reason).toContain('the committed scenarios and manifest are unchanged')
-    expect(res.written).toEqual([])
-    // The affected document is NAMED, not just counted.
-    expect(res.extractionFailures.map((f) => f.doc)).toEqual([DOC])
-    expect(res.llmFailures).toEqual([
-      {
-        stage: EXTRACT_KIND,
-        attempts: 1,
-        failures: 1,
-        firstError: "Invalid schema for response_format: Missing 'extension'.",
-      },
-    ])
-    // A healthy-looking empty manifest is exactly what made this invisible.
-    expect(fs.existsSync(manifestPath(r))).toBe(false)
-  })
-
-  it('leaves a prior manifest and the scenario it binds byte-identical', async () => {
-    const r = seed(...ONE_DOC)
-    const prior = commitPriorFlow(r)
-
-    const res = await runGenerate({ repoRoot: r, extractSession: extractionLost('claude exited 1', [DOC]) })
-
-    expect(res.status).toBe('llm-failed')
-    expect(fs.readFileSync(manifestPath(r), 'utf-8')).toBe(prior.manifest)
-    expect(fs.readFileSync(prior.file, 'utf-8')).toBe(prior.scenario)
-  })
-})
 
 describe('flow synthesis losing every session aborts before flows.json is rewritten', () => {
   const flowsPath = (r: string): string => path.join(scenariosDir(r), 'flows.json')
@@ -344,48 +302,12 @@ describe('fidelity ships unadjudicated on a systemic loss, never aborts', () => 
 })
 
 describe('isolated failures stay fail-soft but are reported', () => {
-  it('one document of two failed extraction: the other is generated and the failure is named', async () => {
-    const r = seed({ ref: DOC, content: DOC_CONTENT }, { ref: OTHER_DOC, content: OTHER_CONTENT })
-
-    const res = await runGenerate({
-      repoRoot: r,
-      extractSession: extractSessionOf(
-        new Map<string, ExtractResult>([
-          [
-            DOC,
-            {
-              ok: true,
-              data: {
-                claims: [
-                  { claim: 'prints the version', driver: 'cli', sectionAnchor: 'version', reason: 'exit code is observable' },
-                ],
-                untestable: [],
-              },
-              complete: true,
-              failedViews: 0,
-            },
-          ],
-          [OTHER_DOC, { ok: false, reason: 'extraction session failed: claude API error (api 500)' }],
-        ]),
-        { ran: 2, failed: 1, firstError: 'claude API error (api 500)' },
-      ),
-      flowWorkerSession: submitWorkerSessions(() => raw('prints the version', PASSING_STEPS)),
-    })
-
-    expect(res.status).toBe('ok')
-    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
-    expect(res.extractionFailures.map((f) => f.doc)).toEqual([OTHER_DOC])
-    expect(res.llmFailures).toEqual([
-      { stage: EXTRACT_KIND, attempts: 2, failures: 1, firstError: 'claude API error (api 500)' },
-    ])
-  })
-
   it('a run that loses nothing reports no failures', async () => {
     const r = seed(...ONE_DOC)
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => raw('prints the version', PASSING_STEPS)),
     })
 

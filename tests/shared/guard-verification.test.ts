@@ -9,12 +9,6 @@ describe('verification obligations and scoped proof', () => {
     expect(GuardFlowMilestoneSchema.parse(next).verification).toEqual(next.verification)
     expect(flowFingerprint([next])).not.toBe(flowFingerprint([m]))
   })
-  it('round-trips a separate verification requirement at extraction', () => {
-    const claim = { claim: 'Amounts are stored as integers', driver: 'api', sectionAnchor: 'money', reason: 'Inspect storage', needs: [],
-      verification: { method: 'datastore' as const, observable: 'Inspect stored column type and values' } }
-    expect(SessionExtractedClaimSchema.parse(claim)).toEqual(claim)
-    expect(verificationCapabilityGap(claim.verification, 'api')).toContain('datastore')
-  })
   it('allows a nonempty subset while refusing vacuous or wrong-driver proof', () => {
     const ms = [m, { ...m, order: 2 }]
     const apiSteps = [{ request: { method: 'GET', path: '/money' }, milestone: 1, expect: { status: 200 } }]

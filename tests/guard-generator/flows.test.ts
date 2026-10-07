@@ -290,23 +290,6 @@ describe('synthesizeFlows — composition', () => {
     expect(area.docs.map((d) => d.doc)).toEqual([TASKS_DOC])
   })
 
-  it('never requires a claim on a non-runnable surface to be accounted for', async () => {
-    const r = repo()
-    const area: FlowSynthesisArea = {
-      ...tasksArea,
-      claims: [...TASK_CLAIMS, claim(TASKS, 'Listing tasks', 'the board shows one card per open task', 'tui')],
-    }
-    const runner = areaSessions({ tasks: TASK_LIFECYCLE })
-    const res = await synth(r, [area], runner)
-
-    // The tui claim reaches the session, but leaving it out of every flow is
-    // not a refusal — the area settles. (`tui`, not `web`: web's row flips to
-    // runnable once generate can author it.)
-    expect(res.calls).toBe(1)
-    expect(res.unsettled).toEqual([])
-    expect(runner.seen[0].claims.some((c) => c.driver === 'tui')).toBe(true)
-  })
-
   it('records a claim whose section is not in the live index as a no-flow claim', async () => {
     const r = repo()
     const area: FlowSynthesisArea = {
@@ -1068,34 +1051,6 @@ describe('synthesizeFlows — reconciliation against the committed corpus', () =
     expect(seam.prior.get('tasks')!.map((f) => f.id)).toEqual([LIFECYCLE_ID])
     expect(res.retired).toEqual([{ flow: previous[1], reason: 'none of its claims is in the live claim inventory' }])
     expect(res.flows.map((f) => f.id)).toEqual([LIFECYCLE_ID])
-  })
-
-  it('AMENDS, never retires, a prior flow whose claim a re-extraction reworded and said so', async () => {
-    const previous = await baseline()
-    const r = repo()
-    // The empty-title claim came back reworded, naming the sentence it replaces.
-    const REWORDED = '`relkit add` without a title exits 2 and reports `title is required` on stderr'
-    const reworded: FlowSynthesisArea = {
-      ...tasksArea,
-      claims: TASK_CLAIMS.map((c) => (c.title === ADD_EMPTY ? { ...c, title: REWORDED, replaces: ADD_EMPTY } : c)),
-    }
-    // The session continues both flows by id; the edge flow's milestone still
-    // names the prior sentence, as the committed flow it was briefed with does.
-    const seam = recordingSessions({
-      flows: [
-        { ...TASK_LIFECYCLE.flows[0], id: LIFECYCLE_ID },
-        { ...TASK_LIFECYCLE.flows[1], id: EDGE_ID },
-      ],
-      noFlowClaims: [],
-    })
-    const res = await synth(r, [reworded], seam, { previous })
-
-    expect(seam.prior.get('tasks')!.map((f) => f.id)).toEqual([LIFECYCLE_ID, EDGE_ID])
-    expect(res.retired).toEqual([])
-    expect(res.reconciliation).toEqual({ kept: [LIFECYCLE_ID], amended: [EDGE_ID], added: [], carried: [] })
-    const edge = res.flows.find((f) => f.id === EDGE_ID)!
-    expect(edge.milestones[0].claimTitle).toBe(REWORDED)
-    expect(edge.fingerprint).not.toBe(previous[1].fingerprint)
   })
 
   it('a prior no-flow decision keeps its reason verbatim when re-emitted, is accounted by a milestone, and is refused when dropped', async () => {

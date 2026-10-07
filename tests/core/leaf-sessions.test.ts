@@ -19,7 +19,6 @@
 import { describe, it, expect } from 'vitest';
 import { CreditsExhaustedError } from '@truecourse/shared';
 import {
-  CLAIM_DIFF_SESSION_KIND,
   MATCH_SESSION_KIND,
   RECIPE_PROPOSE_SESSION_KIND,
   WORLD_CLASSIFY_SESSION_KIND,
@@ -50,14 +49,6 @@ const MATCH_CTX = {
   capabilities: [],
 } as never;
 
-const CLAIM_DIFF_SECTION = {
-  doc: 'docs/auth.md',
-  anchor: 'signin',
-  oldText: '## signin\nold',
-  newText: '## signin\nnew',
-  priorClaims: [{ claim: 'the user can sign in', reason: 'stated' }],
-} as never;
-
 const WORLD_FLOWS = [{ id: 'flow-1', goal: 'sign in', milestones: ['the user can sign in'] }] as never;
 
 const RECIPE_INPUT = { packageJson: '{}', presentInputs: ['package.json'] } as never;
@@ -79,45 +70,11 @@ function seams(script: (kind: string) => DriverResult): {
 
 const ANSWERS: Record<string, unknown> = {
   [MATCH_SESSION_KIND]: { plan: [{ interfaceId: 'cli:login', milestone: 1 }] },
-  [CLAIM_DIFF_SESSION_KIND]: {
-    verdict: 'cosmetic',
-    reason: 'the wording moved, the obligation did not',
-  },
   [WORLD_CLASSIFY_SESSION_KIND]: { mutators: [] },
   [RECIPE_PROPOSE_SESSION_KIND]: { build: 'pnpm build', entry: ['node', 'dist/cli.js'] },
 };
 
 describe('a leaf judgement is one session, with no tools and one turn', () => {
-  it('asks once per question and hands the engine the model’s answer', async () => {
-    const { stub, leaves, recipe } = seams((kind) => outcome(ANSWERS[kind]));
-
-    const match = await leaves.matchRunner(MATCH_CTX);
-    const diff = await leaves.claimDiffRunner(CLAIM_DIFF_SECTION);
-    const world = await leaves.worldClassifyRunner(WORLD_FLOWS);
-    const proposal = await recipe.runner(RECIPE_INPUT);
-
-    expect(stub.kinds).toEqual([
-      MATCH_SESSION_KIND,
-      CLAIM_DIFF_SESSION_KIND,
-      WORLD_CLASSIFY_SESSION_KIND,
-      RECIPE_PROPOSE_SESSION_KIND,
-    ]);
-    expect(match).toMatchObject({ plan: [{ interfaceId: 'cli:login' }] });
-    expect(diff).toMatchObject({ verdict: 'cosmetic' });
-    expect(world).toMatchObject({ mutators: [] });
-    expect(proposal).toMatchObject({ build: 'pnpm build' });
-  });
-
-  it('runs tool-less, for one turn plus its single re-ask, and never resumes', async () => {
-    const { stub, leaves } = seams((kind) => outcome(ANSWERS[kind]));
-    await leaves.claimDiffRunner(CLAIM_DIFF_SECTION);
-
-    const def = stub.calls[0].def;
-    expect(def.tools).toEqual([]);
-    expect(def.budget).toMatchObject({ turns: 2, maxResumes: 0 });
-    expect(def.outcomeSchemaRepairs).toBe(1);
-  });
-
   it('a leaf whose engine re-asks itself takes ONE turn and hands the raw answer over', async () => {
     // The match and the recipe proposal quote an invalid answer back with
     // their own correction: a shell repair under that would double the spend
@@ -134,13 +91,6 @@ describe('a leaf judgement is one session, with no tools and one turn', () => {
       // The model is still asked for the engine's shape.
       expect(call.def.outcomeInputSchema).toBeDefined();
     }
-  });
-
-  it('opens with the engine’s own briefing, and nothing else', async () => {
-    const { stub, leaves } = seams((kind) => outcome(ANSWERS[kind]));
-    await leaves.claimDiffRunner(CLAIM_DIFF_SECTION);
-    expect(stub.calls[0].input.initialMessages).toHaveLength(1);
-    expect(stub.calls[0].briefing).toContain('signin');
   });
 
   it('shares the catalog at the system cache boundary across flows and corrections', async () => {
@@ -194,18 +144,6 @@ describe('a lost ask', () => {
     const match = leaves.summaries().find((s) => s.kind === MATCH_SESSION_KIND)!;
     expect(match).toMatchObject({ ran: 1, failed: 1, allTransport: false });
     expect(isSystemicSessionLoss(match)).toBe(false);
-  });
-
-  it('leaves the OTHER kinds’ tallies untouched', async () => {
-    const { leaves } = seams((kind) =>
-      kind === MATCH_SESSION_KIND ? transportFailure() : outcome(ANSWERS[kind]),
-    );
-    await expect(leaves.matchRunner(MATCH_CTX)).rejects.toThrow();
-    await leaves.claimDiffRunner(CLAIM_DIFF_SECTION);
-
-    const byKind = new Map(leaves.summaries().map((s) => [s.kind, s]));
-    expect(byKind.get(MATCH_SESSION_KIND)).toMatchObject({ ran: 1, failed: 1 });
-    expect(byKind.get(CLAIM_DIFF_SESSION_KIND)).toMatchObject({ ran: 1, failed: 0 });
   });
 
   it('an EMPTY BALANCE stops the run rather than counting as a lost ask', async () => {

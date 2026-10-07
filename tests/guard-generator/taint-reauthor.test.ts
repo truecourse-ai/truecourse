@@ -13,7 +13,7 @@ import { readGuardAutoResolutions, writeGuardAutoResolutions, writeManifest } fr
 import type { FlowWorkerTask } from '@truecourse/guard-generator'
 import {
   PASSING_STEPS,
-  extractSessionBy,
+  claimsBy,
   flowWorkerSessionOf,
   makeTempRepo,
   raw,
@@ -52,7 +52,7 @@ function seed(): string {
   return r
 }
 
-const versionCliBgUntestable = extractSessionBy({ background: { untestable: 'design history' } })
+const versionCliBgUntestable = claimsBy({ background: { untestable: 'design history' } })
 const KEY = autoResolutionKey('version', 'cli')
 
 function taintedLedger(mismatch: string) {
@@ -81,7 +81,7 @@ describe('flow taint — what the worker is told, and when the taint clears', ()
     let briefing = ''
     await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: submitWorkerSessions(
         (task) => {
           taints.push(task.taint)
@@ -103,7 +103,7 @@ describe('flow taint — what the worker is told, and when the taint clears', ()
     writeManifest(r, { flows: [] })
     await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         briefing = await task.prepare()
         return { kind: 'outcome', outcome: { kind: 'retired', attempts: 1, lastEvidence: 'briefing only' } }
@@ -119,7 +119,7 @@ describe('flow taint — what the worker is told, and when the taint clears', ()
     writeGuardAutoResolutions(r, taintedLedger('the prior rejection'))
     await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: flowWorkerSessionOf(async () => ({ kind: 'failed', reason: 'the transport died' })),
     })
     expect(readGuardAutoResolutions(r).tainted[KEY]).toMatchObject({ mismatch: 'the prior rejection' })
@@ -130,7 +130,7 @@ describe('flow taint — what the worker is told, and when the taint clears', ()
     writeGuardAutoResolutions(r, taintedLedger('the prior rejection'))
     await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: submitWorkerSessions(() => ({ blocked: [{ order: 1, capability: 'a live database' }] })),
     })
     expect(readGuardAutoResolutions(r).tainted[KEY]).toBeUndefined()
@@ -143,7 +143,7 @@ describe('flow taint — what the worker is told, and when the taint clears', ()
     // Run 1 — the fidelity judge rejects, and the worker retires.
     await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         await task.submitScenario(
           `title: always broken\nsteps:\n  - run: ["--version"]\n    expect:\n      exit: 0\n    milestone: 1\n`,
@@ -159,7 +159,7 @@ describe('flow taint — what the worker is told, and when the taint clears', ()
     let briefing = ''
     await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         briefing = await task.prepare()
         return { kind: 'outcome', outcome: { kind: 'retired', attempts: 1, lastEvidence: 'still stuck' } }
@@ -174,7 +174,7 @@ describe('flow taint — what the worker is told, and when the taint clears', ()
     // Commit a scenario first, so edit mode WOULD apply on the re-author…
     const first = await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: submitWorkerSessions(() => raw('relkit --version prints the version', PASSING_STEPS)),
     })
     expect(first.written.length).toBe(1)
@@ -188,7 +188,7 @@ describe('flow taint — what the worker is told, and when the taint clears', ()
     let mode = ''
     await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         prior = task.prior
         mode = task.cacheMaterial.mode

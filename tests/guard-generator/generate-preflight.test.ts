@@ -10,7 +10,7 @@ import {
   writeDoc,
   writeCorpus,
   raw,
-  extractSessionBy,
+  claimsBy,
   runGenerate,
   submitWorkerSessions,
   PASSING_STEPS,
@@ -49,7 +49,7 @@ describe('generateGuards — entry pre-flight', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => raw('relkit --version prints the version', PASSING_STEPS)),
     })
 
@@ -93,7 +93,7 @@ describe('generateGuards — entry pre-flight', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => raw('relkit --version prints the version', PASSING_STEPS)),
     })
 
@@ -120,7 +120,7 @@ describe('generateGuards — entry pre-flight', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => raw('relkit --version prints the version', PASSING_STEPS)),
     })
 
@@ -148,7 +148,7 @@ describe('recipe discovery — post-build entry existence check', () => {
     const res = await runGenerate({
       repoRoot: r,
       recipeRunner: async () => ({ build: 'true', entry: ['node', 'dist/cli.js'] }),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => raw('relkit --version prints the version', PASSING_STEPS)),
     })
 

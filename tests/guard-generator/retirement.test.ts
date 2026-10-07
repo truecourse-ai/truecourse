@@ -36,12 +36,10 @@ import {
   raw,
   runGenerate,
   flowStageSeams,
-  extractSessionBy,
-  extractSessionOf,
+  claimsBy,
   flowsAreaSessionOf,
   submitWorkerSessions,
   sessionSummary,
-  EXTRACT_KIND,
   FLOWS_KIND,
   PASSING_STEPS,
 } from './helpers.js'
@@ -272,7 +270,7 @@ describe('generateGuards — the retired pipeline runs end to end on seams alone
     const result = await runGenerate({
       repoRoot: r,
       ...flowStageSeams(r),
-      extractSession: extractSessionBy({ background: { untestable: 'design history' } }),
+      claims: claimsBy({ background: { untestable: 'design history' } }),
       flowWorkerSession: submitWorkerSessions(() => raw('relkit --version exits 0', PASSING_STEPS)),
     })
 
@@ -298,16 +296,15 @@ describe('generateGuards — a match wipeout reports the SESSION tallies too', (
     const r = seed()
     const seams = flowStageSeams(r)
 
-    // One of two docs lost (non-systemic, so extraction fails open) and one of
-    // two areas lost the same way; matching then loses every SESSION, which is
-    // what puts its kind in the run's tallies beside the pooled kinds'.
+    // One of two areas lost (non-systemic, so synthesis fails open); matching
+    // then loses every SESSION, which is what puts its kind in the run's
+    // tallies beside the pooled kind's.
     const result = await generateGuards({
       repoRoot: r,
       interfaces: seams.interfaces,
       flowsEpicSession: seams.flowsEpicSession,
       flowWorkerSession: seams.flowWorkerSession,
       recipeRunner: seams.recipeRunner,
-      claimDiffRunner: seams.claimDiffRunner,
       worldClassifyRunner: seams.worldClassifyRunner,
       matchRunner: async () => {
         throw new Error('the match session died')
@@ -315,13 +312,6 @@ describe('generateGuards — a match wipeout reports the SESSION tallies too', (
       leafSummaries: () => [
         sessionSummary(MATCH_SESSION_KIND, { ran: 1, failed: 1, firstError: 'the match session died' }),
       ],
-      extractSession: async (input) => {
-        const inner = await extractSessionBy({ background: { untestable: 'design history' } })(input)
-        return {
-          byDoc: inner.byDoc,
-          summary: sessionSummary(EXTRACT_KIND, { ran: 2, failed: 1, firstError: 'transport died' }),
-        }
-      },
       flowsAreaSession: async (input) => {
         const inner = await seams.flowsAreaSession(input)
         return {
@@ -334,28 +324,12 @@ describe('generateGuards — a match wipeout reports the SESSION tallies too', (
     expect(result.status).toBe('llm-failed')
     expect(result.reason).toContain(MATCH_SESSION_KIND)
     const byStage = new Map((result.llmFailures ?? []).map((f) => [f.stage, f]))
-    // Every kind's losses ride the abort: the leaf that died and the two
-    // pooled kinds beside it.
+    // Every kind's losses ride the abort: the leaf that died and the pooled
+    // kind beside it.
     expect(byStage.get(MATCH_SESSION_KIND)).toMatchObject({ attempts: 1, failures: 1 })
-    expect(byStage.get(EXTRACT_KIND)).toMatchObject({ attempts: 2, failures: 1 })
     expect(byStage.get(FLOWS_KIND)).toMatchObject({ attempts: 2, failures: 1 })
     // Nothing was written.
     expect(fs.existsSync(path.join(r, '.truecourse', 'scenarios', 'manifest.json'))).toBe(false)
   })
 
-  it('aborts on a systemic extraction loss before any session tally is lost', async () => {
-    const r = seed()
-
-    const result = await runGenerate({
-      repoRoot: r,
-      ...flowStageSeams(r),
-      extractSession: extractSessionOf(new Map(), { ran: 1, failed: 1, allTransport: true, firstError: 'boom' }),
-      flowsAreaSession: flowsAreaSessionOf(() => {
-        throw new Error('synthesis must not run after a systemic extraction loss')
-      }),
-    })
-
-    expect(result.status).toBe('llm-failed')
-    expect((result.llmFailures ?? []).map((f) => f.stage)).toContain(EXTRACT_KIND)
-  })
 })

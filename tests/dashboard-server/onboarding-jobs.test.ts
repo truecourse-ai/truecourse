@@ -1373,9 +1373,9 @@ describe('the guard generate job', () => {
     expect(enqueued).toEqual(['repo.guard-generate']);
   }, 60_000);
 
-  it('saves partial extraction results but fails the job and Activity without chaining', async () => {
+  it('saves a report naming the claims the documents no longer hold, and still chains the run', async () => {
     await saveSetupBundle();
-    const extractionFailures = [{ doc: 'docs/app.md', reason: 'outcome failed schema: invalid web verification method' }];
+    const extractionFailures = [{ doc: 'docs/app.md', reason: '"Amounts are stored as integers" is read from 1 sentence the document no longer holds' }];
     generateImpl = async (repoRoot, options) => {
       const result = await authoring(repoRoot, options);
       writeCloneGuardResult(repoRoot, {
@@ -1387,28 +1387,15 @@ describe('the guard generate job', () => {
     await jobs.enqueueGuardGenerate(request);
     await Promise.all(running);
 
+    // A claim the repository's document no longer states is reported, not a
+    // failed generate: the flows the other claims gave are real coverage.
     const [job] = await jobsOfType('repo.guard-generate');
-    expect(job).toMatchObject({ status: 'failed', error: expect.stringContaining('Claim extraction failed for docs/app.md') });
-    expect(job.error).toContain('Partial results were saved');
+    expect(job).toMatchObject({ status: 'succeeded', error: null });
     const baseline = await readGuardBaselineCommit(REPO);
     expect(baseline).toMatch(/^[0-9a-f]{40}$/);
     expect(await readGuardResult(REPO, { commitSha: baseline! })).toMatchObject({ extractionFailures });
     expect((await loadScenarios({ repoKey: REPO, commitSha: baseline! })).scenarios.map(s => s.id)).toEqual(['a1']);
-    const [run] = await listStoredSessionRuns(REPO, 'guard-generate');
-    expect(run).toMatchObject({
-      status: 'failed', error: { message: job.error },
-      display: { blocks: expect.arrayContaining([expect.objectContaining({
-        kind: 'checklist', items: expect.arrayContaining([expect.objectContaining({ key: 'extract', status: 'error' })]),
-      })]) },
-    });
-    const opened = await openStoredSessionRun(REPO, 'guard-generate', run.runId);
-    expect(opened?.record()).toMatchObject({ status: 'failed', error: { message: job.error } });
-    const notes = await new NotificationStore(db).listForOrg(ORG);
-    expect(notes).toHaveLength(1);
-    expect(notes[0]).toMatchObject({ level: 'error', title: 'Flow generation failed', body: expect.stringContaining('docs/app.md') });
-    // The moved row keeps what the started row addressed.
-    expect(notes[0]?.data).toMatchObject({ repoFullName: REPO, runId: run.runId });
-    expect(enqueued).toEqual(['repo.guard-generate']);
+    expect(enqueued).toEqual(['repo.guard-generate', 'repo.guard-run']);
     expect(disposed).toEqual([clone]);
   }, 60_000);
 
