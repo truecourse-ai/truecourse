@@ -418,6 +418,13 @@ async function runSummaryCommit(
  * the store holds it under, and the OUTCOMES from this run rather than from
  * whatever run is stored at that commit. A repository with no flow corpus at
  * all answers null, which the caller records as "not derivable".
+ *
+ * A run of the stored flow tests carries each test's own outcome, and that is
+ * the word its flow wore in the run: a test that passed is its flow succeeded
+ * and one that failed is its flow failed, whatever status it was accepted on.
+ * A seed that did not hold, or a test that was skipped, says nothing about the
+ * product, so its flow keeps the word its record gives it, as a blocked flow
+ * the run had no test for does.
  */
 export async function readGuardRunFlowSummary(
   repoKey: string,
@@ -425,6 +432,11 @@ export async function readGuardRunFlowSummary(
 ): Promise<GuardRunFlowSummary | null> {
   const view = await loadFlowView(repoKey, await runSummaryCommit(repoKey, latest), latest)
   if (!view) return null
+  for (const ran of latest.flowTests ?? []) {
+    const record = view.tests.get(ran.flowId)
+    if (!record || (ran.outcome !== 'pass' && ran.outcome !== 'fail')) continue
+    view.tests.set(ran.flowId, { ...record, status: ran.outcome === 'pass' ? 'passing' : 'failing' })
+  }
   const summary: GuardRunFlowSummary = {}
   // Only the flows the repository HAS: a manifest entry kept for its stale
   // scenarios after synthesis retired the flow is history, not coverage, and

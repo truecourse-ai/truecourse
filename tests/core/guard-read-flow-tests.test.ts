@@ -22,9 +22,11 @@ import {
   listGuardEvidenceVisuals,
   listGuardFlows,
   readGuardFlowDetail,
+  readGuardRunFlowSummary,
 } from '../../packages/core/src/commands/guard-read';
 import {
   guardFlowPlainStatus,
+  type FlowTestRunResult,
   type FlowTestsFile,
   type GuardGenerateReport,
 } from '../../packages/shared/src/index';
@@ -194,6 +196,39 @@ describe('flows proven by a Playwright test', () => {
     // A flow no test was written for reads as every ungenerated flow does.
     expect(byId.get('delete-expense')!.test).toBeUndefined();
     expect(guardFlowPlainStatus(byId.get('delete-expense')!)).toBe('blocked');
+  });
+
+  it('wear, in the summary of a run of the stored tests, the word that run left them', async () => {
+    const ranAt = '2026-10-03T12:00:00.000Z';
+    const ran = (
+      flowId: string,
+      authored: FlowTestRunResult['authored'],
+      outcome: FlowTestRunResult['outcome'],
+    ): FlowTestRunResult => ({ flowId, file: `${flowId}.spec.ts`, authored, outcome, run: { ranAt, durationMs: 1, steps: [] } });
+
+    const summary = await readGuardRunFlowSummary(REPO, {
+      run: { runId: 'run-2', ranAt, branch: 'main', commit: COMMIT, recipeFingerprint: 'product-world' },
+      summary: { total: 3, pass: 1, fail: 1, stale: 0, orphaned: 0, error: 1, blocked: 0 },
+      scenarios: [],
+      sections: [],
+      flowTests: [
+        // Accepted failing, and the product now does what the documents say.
+        ran('edit-expense', 'failing', 'pass'),
+        // Accepted passing, and the product no longer does.
+        ran('open-expense', 'passing', 'fail'),
+        // A seed that did not hold says nothing about the product.
+        ran('rename-expense', 'passing', 'seed-failed'),
+      ],
+    });
+
+    expect(summary).toEqual({
+      'edit-expense': 'succeeded',
+      'open-expense': 'failed',
+      'rename-expense': 'partially-succeeded',
+      // The run had no test for these, so they read as the Flows page reads them.
+      'convert-expense': 'blocked',
+      'delete-expense': 'blocked',
+    });
   });
 
   it('carry the spec, the seed and the accepted run in their detail', async () => {
