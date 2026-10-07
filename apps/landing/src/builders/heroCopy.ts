@@ -1,51 +1,72 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router';
 import { registerProperties } from '@/lib/posthog';
 
 /**
- * The hero's headline, matched to the search an ad answered. An ad links to
- * /builders?hero=<variant>, the hero repeats what was searched, and every
- * PostHog event from the visit carries `hero_variant` so the variants can be
- * compared. Without a known variant the page shows its own headline.
+ * The hero's headline, matched to the search an ad answered. Each ad group
+ * links to its own path, which serves the one builders page with its own
+ * headline, title and description, prerendered so the HTML already says what
+ * was searched. Every PostHog event from the visit carries `hero_variant` so
+ * the variants can be compared.
  */
 
-export type HeroCopy = { variant: string; title: string; sub: string; long?: boolean };
-
-const FILTER_SUB =
-  'Built your app with AI? Your AI CTO tests every change and fixes what breaks while you sleep.';
-
-const DEFAULT: HeroCopy = {
-  variant: 'default',
-  title: 'Your AI CTO',
-  sub: 'Get your evenings and weekends back. It keeps your app working while you focus on your business and the people you care about.',
+export type HeroCopy = {
+  variant: string;
+  path: string;
+  title: string;
+  sub: string;
+  long?: boolean;
+  pageTitle: string;
+  description: string;
 };
 
-const VARIANTS: Record<string, HeroCopy> = {
-  'fractional-cto': {
+const AD_SUB = 'Built your app with AI? Your AI CTO tests every change and fixes what breaks while you sleep.';
+
+export const HEROES: HeroCopy[] = [
+  {
+    variant: 'default',
+    path: '/builders',
+    title: 'Your AI CTO',
+    sub: 'Get your evenings and weekends back. It keeps your app working while you focus on your business and the people you care about.',
+    pageTitle: 'TrueCourse · Your AI CTO',
+    description:
+      'An AI CTO for professionals who build their own apps with AI, for $49 a month for early adopters. Get your evenings and weekends back while it keeps your app working.',
+  },
+  {
     variant: 'fractional-cto',
+    path: '/fractional-cto',
     title: 'Fractional CTO work, done by AI',
-    sub: FILTER_SUB,
+    sub: AD_SUB,
     long: true,
+    pageTitle: 'TrueCourse · Fractional CTO work, done by AI',
+    description:
+      'Fractional CTO work for apps built with AI. Your AI CTO tests every change and fixes what breaks while you sleep, for $49 a month for early adopters.',
   },
-  'part-time-cto': {
+  {
     variant: 'part-time-cto',
+    path: '/part-time-cto',
     title: 'Why a part-time CTO? AI never clocks out.',
-    sub: FILTER_SUB,
+    sub: AD_SUB,
     long: true,
+    pageTitle: 'TrueCourse · Why a part-time CTO? AI never clocks out.',
+    description:
+      'An AI CTO instead of a part-time one, for apps built with AI. It tests every change and fixes what breaks while you sleep, for $49 a month for early adopters.',
   },
-};
+];
 
-/**
- * The hero copy for this visit. The prerendered page carries the default; the
- * variant is applied once the page runs, before the hero fades in.
- */
+/** The hero a path serves, ignoring a trailing slash. */
+export function heroFor(pathname: string): HeroCopy {
+  const path = pathname.replace(/\/+$/, '') || '/';
+  return HEROES.find((h) => h.path === path) ?? HEROES[0]!;
+}
+
+/** The hero copy for this page, recorded on every PostHog event as `hero_variant`. */
 export function useHeroCopy(): HeroCopy {
-  const [copy, setCopy] = useState(DEFAULT);
+  const hero = heroFor(useLocation().pathname);
   useEffect(() => {
-    const chosen = VARIANTS[new URLSearchParams(window.location.search).get('hero') ?? ''] ?? DEFAULT;
-    setCopy(chosen);
-    registerProperties({ hero_variant: chosen.variant });
-  }, []);
-  return copy;
+    registerProperties({ hero_variant: hero.variant });
+  }, [hero.variant]);
+  return hero;
 }
 
 /** The picture beside the headline: the year in numbers, or the morning phone. */

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { LinksFunction } from 'react-router';
+import type { LinksFunction, MetaFunction } from 'react-router';
 import { pageMeta } from '@/lib/seo';
 import { cn } from '@/lib/cn';
 import { Reveal } from '@/components/Reveal';
@@ -12,7 +12,7 @@ import { Who } from '@/builders/Who';
 import { Check } from '@/builders/icons';
 import { BuiltWith } from '@/builders/BuiltWith';
 import { useSectionViews } from '@/builders/useSectionViews';
-import { useHeroCopy, useHeroScene } from '@/builders/heroCopy';
+import { heroFor, useHeroCopy, useHeroScene } from '@/builders/heroCopy';
 import { MorningScene } from '@/builders/scenes/MorningScene';
 import { GrowthScene } from '@/builders/scenes/GrowthScene';
 import { JobsChecklist } from '@/builders/scenes/JobsChecklist';
@@ -32,13 +32,10 @@ import stylesheet from '@/builders/builders.css?url';
 
 export const links: LinksFunction = () => [{ rel: 'stylesheet', href: stylesheet }];
 
-export const meta = () =>
-  pageMeta({
-    title: 'TrueCourse · Your AI CTO',
-    description:
-      'An AI CTO for professionals who build their own apps with AI, for $49 a month for early adopters. Get your evenings and weekends back while it keeps your app working.',
-    path: '/builders',
-  });
+export const meta: MetaFunction = ({ location }) => {
+  const hero = heroFor(location.pathname);
+  return pageMeta({ title: hero.pageTitle, description: hero.description, path: hero.path });
+};
 
 const JOBS: { id: string; kicker: string; title: string; body: string; scene: ReactNode }[] = [
   {
