@@ -8,7 +8,7 @@
  * account exists, the re-generate command instead.
  *
  * "Wherever" is ONE component (`GuardNeedsSetupCta`) on both surfaces that host
- * it: the section side panel and a flow detail's why-no-test row.
+ * it: a flow detail's why-no-test row.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -19,11 +19,9 @@ import type {
   GuardFlowDetail as GuardFlowDetailData,
   GuardFlowGap,
   GuardNeedsSetup,
-  GuardSectionCoverage,
 } from '@truecourse/shared';
 import { MISSING_DATA_NOUN } from '@truecourse/shared';
 import { GuardFlowDetail } from '@/components/guard/GuardFlowDetail';
-import { GuardSectionDetail } from '@/components/guard/GuardSectionDetail';
 import { useGuardView } from '@/hooks/useGuardView';
 import {
   GUARD_NEEDS_SETUP_NEXT,
@@ -37,7 +35,6 @@ import {
   guardWhyNoTest,
 } from '@/lib/guard-flow-status';
 import { guardStatusMeta } from '@/lib/guard-status';
-import { tallyNeedsSetup } from '@/lib/guard-report';
 
 afterEach(cleanup);
 
@@ -47,20 +44,6 @@ const NEEDS_SETUP_GAP: GuardFlowGap = {
   label: 'blocked-on',
   needsSetup: { services: ['open-meteo'], provided: [] },
 };
-
-const section = (over: Partial<GuardSectionCoverage> = {}): GuardSectionCoverage => ({
-  anchor: 'forecast',
-  headingText: 'Forecast',
-  level: 2,
-  fingerprint: 'sha256:x',
-  status: 'needs-setup',
-  reason: NEEDS_SETUP_GAP.reason,
-  needsSetup: { services: ['open-meteo'], provided: [] },
-  flows: [],
-  scenarioIds: [],
-  scenarios: [],
-  ...over,
-});
 
 // ---------------------------------------------------------------------------
 // The vocabulary + paint: one word, one colour, both themes.
@@ -163,73 +146,6 @@ describe('needs-setup vocabulary and paint', () => {
 });
 
 // ---------------------------------------------------------------------------
-
-describe('GuardSectionDetail — the needs-setup CTA', () => {
-  it('leads with the service and a link to the Dependencies page', async () => {
-    const onOpenExternals = vi.fn();
-    render(
-      <GuardSectionDetail
-        section={section()}
-        onOpenFlow={() => {}}
-        onOpenExternals={onOpenExternals}
-        onClose={() => {}}
-      />,
-    );
-    expect(screen.getByText(guardNeedsSetupHeadline(section().needsSetup!))).toBeInTheDocument();
-    const cta = screen.getByRole('button', { name: /Provide open-meteo/ });
-    expect(cta).toHaveTextContent('Dependencies');
-    // The colour is the STATUS's job: the block wears the Blocked word and its
-    // amber dot, and the call to action stays ordinary ink so the one amber
-    // mark a reader scans for is the status itself.
-    expect(cta.className).not.toContain('amber');
-    await userEvent.click(cta);
-    expect(onOpenExternals).toHaveBeenCalledWith('open-meteo');
-  });
-
-  // The panel and the flow row are ONE component, so the per-service split
-  // reaches both — this is the section side of the same rule.
-  it('gives every outstanding service its own link here too', async () => {
-    const onOpenExternals = vi.fn();
-    render(
-      <GuardSectionDetail
-        section={section({ needsSetup: { services: ['open-meteo', 'stripe'], provided: [] } })}
-        onOpenFlow={() => {}}
-        onOpenExternals={onOpenExternals}
-        onClose={() => {}}
-      />,
-    );
-    const links = screen.getAllByRole('button', { name: /Provide/ });
-    expect(links).toHaveLength(2);
-    await userEvent.click(links[1]);
-    expect(onOpenExternals).toHaveBeenCalledWith('stripe');
-  });
-
-  it('the provided sub-state offers the COMMAND instead of the link', () => {
-    render(
-      <GuardSectionDetail
-        section={section({ needsSetup: { services: [], provided: ['open-meteo'] } })}
-        onOpenFlow={() => {}}
-        onOpenExternals={() => {}}
-        onClose={() => {}}
-      />,
-    );
-    expect(screen.getByText(/Flow generation authors them/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Provide/ })).not.toBeInTheDocument();
-  });
-
-  it('a plain blocked section gets no CTA at all', () => {
-    render(
-      <GuardSectionDetail
-        section={section({ status: 'blocked-on', needsSetup: undefined, blockedOnCapabilities: ['external-service'] })}
-        onOpenFlow={() => {}}
-        onOpenExternals={() => {}}
-        onClose={() => {}}
-      />,
-    );
-    expect(screen.queryByRole('button', { name: /Provide/ })).not.toBeInTheDocument();
-    expect(screen.getByText('external-service')).toBeInTheDocument();
-  });
-});
 
 // ---------------------------------------------------------------------------
 // The flow detail — the same CTA on the why-no-test row.
@@ -395,32 +311,5 @@ describe('the CTA target', () => {
   it('drops a stale `dependency` like every other guard selection', async () => {
     await jump(undefined, '/repos/r?section=guard&tab=externals&dependency=stripe');
     expect(screen.getByTestId('search').textContent).not.toContain('dependency=');
-  });
-});
-
-describe('tallyNeedsSetup — the per-service breakdown', () => {
-  it('counts one per section, still-to-provide first, then by count and name', () => {
-    expect(
-      tallyNeedsSetup([
-        { services: ['open-meteo'], provided: [] },
-        { services: ['open-meteo'], provided: ['stripe'] },
-        { services: [], provided: ['stripe'] },
-        { services: ['acme'], provided: [] },
-        undefined,
-      ]),
-    ).toEqual([
-      { service: 'open-meteo', count: 2, provided: false },
-      { service: 'acme', count: 1, provided: false },
-      { service: 'stripe', count: 2, provided: true },
-    ]);
-  });
-
-  it('a service seen both ways is still-to-provide — something is genuinely missing', () => {
-    expect(
-      tallyNeedsSetup([
-        { services: [], provided: ['open-meteo'] },
-        { services: ['open-meteo'], provided: [] },
-      ]),
-    ).toEqual([{ service: 'open-meteo', count: 2, provided: false }]);
   });
 });

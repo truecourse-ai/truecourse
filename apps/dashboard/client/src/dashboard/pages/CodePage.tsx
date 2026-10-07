@@ -61,8 +61,8 @@ const CONCLUSION_WORD: Record<(typeof CONCLUSIONS)[number], string> = {
 interface RepoRow {
   repo: Repo;
   loaded: RepoSummary | undefined;
-  sections: ByStatus;
-  sectionTotal: number;
+  claims: ByStatus;
+  claimTotal: number;
   lastCheck: Repo['lastCheck'];
   lastRun: GuardLastRunSummary | null;
   requirementsEmpty: string;
@@ -88,16 +88,16 @@ export default function CodePage() {
       repos.map((repo) => {
         const loaded = summaries.get(repo.id);
         const summary = loaded?.status;
-        const sections = summary?.sections?.byStatus ?? summary?.coverage?.byStatus ?? zero();
+        const claims = summary?.claims?.byStatus ?? summary?.coverage?.byStatus ?? zero();
         const flows = summary?.coverage?.flows.byStatus ?? zero();
-        const sectionTotal = summary?.sections?.total ?? summary?.coverage?.totalSections ?? 0;
+        const claimTotal = summary?.claims?.total ?? summary?.coverage?.totalSections ?? 0;
         const lastRun = summary?.lastRun ?? null;
         const lastCheck = lastRun ? checkForRun(lastRun) : repo.lastCheck;
         const requirementsEmpty = !loaded ? 'Loading…'
           : loaded.statusError ? 'Coverage unavailable'
-          : loaded.corpus || summary?.sections ? 'No requirements yet'
+          : loaded.corpus || summary?.claims ? 'No requirements yet'
           : loaded.corpusError ? 'Requirements unavailable' : 'no corpus yet';
-        return { repo, loaded, sections, sectionTotal, lastCheck, lastRun, requirementsEmpty };
+        return { repo, loaded, claims, claimTotal, lastCheck, lastRun, requirementsEmpty };
       }),
     [repos, summaries],
   );
@@ -136,9 +136,9 @@ export default function CodePage() {
         label: 'Requirements',
         width: '22rem',
         wrap: true,
-        cell: ({ sections, sectionTotal, requirementsEmpty }) => {
-          if (sectionTotal === 0) return <span className="text-muted-foreground">{requirementsEmpty}</span>;
-          const segments = fiveWordSegments(sections).filter((seg) => seg.count > 0);
+        cell: ({ claims, claimTotal, requirementsEmpty }) => {
+          if (claimTotal === 0) return <span className="text-muted-foreground">{requirementsEmpty}</span>;
+          const segments = fiveWordSegments(claims).filter((seg) => seg.count > 0);
           return (
             <span className="flex items-center gap-3">
               <span
@@ -172,7 +172,7 @@ export default function CodePage() {
         width: '6rem',
         align: 'right',
         className: 'text-foreground',
-        cell: ({ sections }) => proven(sections),
+        cell: ({ claims }) => proven(claims),
       },
       {
         key: 'lastCheck',

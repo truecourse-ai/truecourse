@@ -23,7 +23,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { EMPTY_GUARD_DECISIONS, dismissedClaimKey } from '@truecourse/shared';
+import { EMPTY_GUARD_DECISIONS } from '@truecourse/shared';
 import type {
   GuardClaimIdentity,
   GuardDecisions,
@@ -77,11 +77,7 @@ export function useGuardDecisions(
 
   const claimsByKey = useMemo(
     () =>
-      new Map(
-        (decisions.dismissedClaims ?? []).map(
-          (c) => [dismissedClaimKey(c.doc, c.anchor, c.title), c] as const,
-        ),
-      ),
+      new Map((decisions.dismissedClaims ?? []).map((c) => [c.claimId, c] as const)),
     [decisions],
   );
   const [flowRevision, setFlowRevision] = useState(0);
@@ -98,7 +94,7 @@ export function useGuardDecisions(
 
   return useMemo<GuardDecisionsState>(
     () => ({
-      dismissalFor: (claim) => claimsByKey.get(dismissedClaimKey(claim.doc, claim.anchor, claim.title)),
+      dismissalFor: (claim) => claimsByKey.get(claim.claimId),
       dismiss: (claim) => write((id) => api.dismissGuardClaim(id, claim)),
       undismiss: (claim) => write((id) => api.undismissGuardClaim(id, claim)),
       dismissFlow: async (flow) => {

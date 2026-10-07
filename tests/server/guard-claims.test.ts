@@ -8,6 +8,7 @@ import { GuardClaimsViewSchema } from '../../packages/shared/src/index';
 import { claimContentHash } from '../../packages/shared/src/guard/claims';
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
 import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
+import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
 import { installWorkTreeDocReader, resetRepoDocReader } from '../helpers/work-tree-doc-reader';
 
 /**
@@ -91,7 +92,7 @@ const MANIFEST = {
       flowId: 'add-then-list',
       flowFingerprint: 'sha256:f',
       bindings: FLOWS.flows[0].bindings,
-      scenarios: [{ id: 'add-then-list.cli.1', surface: 'cli', status: 'never-run' }],
+      scenarios: [{ id: 'add-then-list.cli.1', drivers: ['cli'], status: 'never-run', milestoneCoverage: [{ milestone: 1, driver: 'cli' }, { milestone: 2, driver: 'cli' }] }],
       interfaces: [],
       generationInputsHash: null,
       gaps: [],
@@ -109,8 +110,8 @@ const SCENARIO = {
     { doc: DOC, section: 'listing-tasks', fingerprint: 'sha256:s2', sentences: ['listing-tasks'] },
   ],
   steps: [
-    { run: ['add', 'write the docs'], expect: { exit: 0 }, milestone: ADD.id },
-    { run: ['list'], expect: { exit: 0 }, milestone: [LIST.id] },
+    { run: ['add', 'write the docs'], expect: { exit: 0 }, milestone: [1, ADD.id] },
+    { run: ['list'], expect: { exit: 0 }, milestone: [2, LIST.id] },
     { run: ['list', '--all'], expect: { exit: 0 } },
   ],
   normalize: [],
@@ -171,6 +172,7 @@ describe('GET /guard/claims', () => {
 
   beforeEach(async () => {
     installWorkTreeGuardStore();
+    installMemoryGuardOverlays();
     installWorkTreeDocReader();
     fixture = await setupTestFixture();
     root = fixture.repoPath;
@@ -179,6 +181,7 @@ describe('GET /guard/claims', () => {
   afterEach(async () => {
     await teardownTestFixture(fixture.project.slug);
     resetGuardStore();
+    resetGuardOverlayStore();
     resetRepoDocReader();
   });
 
@@ -196,21 +199,19 @@ describe('GET /guard/claims', () => {
     expect(() => GuardClaimsViewSchema.parse(res.body)).not.toThrow();
   });
 
-  it('carries every stored field and joins the live section heading', async () => {
+  it('carries every stored field, and no section', async () => {
     seed();
     const res = await request(app).get(url('claims')).expect(200);
     const add = res.body.claims.find((c: { id: string }) => c.id === ADD.id);
     expect(add).toMatchObject({
       doc: DOC,
-      anchor: 'tasks',
       title: ADD.title,
       claim: ADD.claim,
       contentHash: ADD.contentHash,
       verifyVia: ADD.verifyVia,
-      // The frontmatter-titled lead resolves as a live section.
-      headingText: 'Tasks',
-      anchorLive: true,
     });
+    expect(add).not.toHaveProperty('anchor');
+    expect(add).not.toHaveProperty('headingText');
     // A claim is a sentence and its provenance — the retired `needs`/`notes`
     // reach no surface, and the compose has no field to put them in.
     expect(add).not.toHaveProperty('needs');
@@ -222,16 +223,21 @@ describe('GET /guard/claims', () => {
     writeJson('.truecourse/guard/LATEST.json', latestWith('pass'));
     const res = await request(app).get(url('claims')).expect(200);
     const add = res.body.claims.find((c: { id: string }) => c.id === ADD.id);
-    expect(add.flows).toEqual([
-      { flowId: 'add-then-list', title: FLOWS.flows[0].title, milestoneOrder: 1, note: 'the create half' },
-    ]);
+    expect(add.flows).toHaveLength(1);
+    expect(add.flows[0]).toMatchObject({
+      flowId: 'add-then-list',
+      title: FLOWS.flows[0].title,
+      status: 'pass',
+      milestoneOrders: [1],
+      milestoneCount: 2,
+    });
     expect(add.scenarios).toEqual([
       { scenarioId: 'add-then-list.cli.1', title: SCENARIO.title, steps: [1], outcome: 'pass' },
     ]);
-    expect(add.coverage).toBe('proven');
+    expect(add.status).toBe('pass');
   });
 
-  it('RUN-AWARE: an authored proof with no run yet is planned, never proven', async () => {
+  it('RUN-AWARE: an authored test with no run yet reads never-run, never proven', async () => {
     seed();
     const res = await request(app).get(url('claims')).expect(200);
     const add = res.body.claims.find((c: { id: string }) => c.id === ADD.id);
@@ -239,72 +245,59 @@ describe('GET /guard/claims', () => {
     expect(add.scenarios).toEqual([
       { scenarioId: 'add-then-list.cli.1', title: SCENARIO.title, steps: [1] },
     ]);
-    expect(add.coverage).toBe('planned');
+    expect(add.status).toBe('never-run');
   });
 
-  it('RUN-AWARE: a proof the latest run failed reads failing, never proven', async () => {
+  it('RUN-AWARE: a test the latest run failed reads fail, never proven', async () => {
     seed();
     writeJson('.truecourse/guard/LATEST.json', latestWith('fail'));
     const res = await request(app).get(url('claims')).expect(200);
     const add = res.body.claims.find((c: { id: string }) => c.id === ADD.id);
-    expect(add.coverage).toBe('failing');
+    expect(add.status).toBe('fail');
     expect(add.scenarios[0].outcome).toBe('fail');
-    expect(res.body.totals.failing).toBe(2);
-    expect(res.body.totals.proven).toBe(0);
+    expect(res.body.totals.byStatus.failed).toBe(2);
+    expect(res.body.totals.byStatus.succeeded).toBe(0);
   });
 
-  it('keys coverage on the claim, so a gapped claim carries its reason', async () => {
+  it('keys coverage on the claim, so a claim no flow carries wears the reason the corpus gave', async () => {
     seed();
     const res = await request(app).get(url('claims')).expect(200);
     const colour = res.body.claims.find((c: { id: string }) => c.id === COLOUR.id);
     expect(colour).toMatchObject({
-      coverage: 'gapped',
-      gapReason: 'colour is not observable in a pipe',
+      status: 'untestable',
+      reason: 'colour is not observable in a pipe',
       flows: [],
       scenarios: [],
     });
   });
 
-  it('lists the refused statements with their reasons', async () => {
+  it('lists the untestable statements with their reasons', async () => {
     seed();
     const res = await request(app).get(url('claims')).expect(200);
     expect(res.body.untestable).toEqual([
-      {
-        doc: DOC,
-        anchor: 'tasks',
-        text: 'Tasks are the heart of the product.',
-        reason: 'Marketing; states no behaviour.',
-        headingText: 'Tasks',
-        anchorLive: true,
-      },
+      { doc: DOC, text: 'Tasks are the heart of the product.', reason: 'Marketing; states no behaviour.' },
     ]);
   });
 
-  it('totals every coverage state, so the denominator is always visible', async () => {
+  it('totals the five words over every claim, so the denominator is always visible', async () => {
     seed();
     writeJson('.truecourse/guard/LATEST.json', latestWith('pass'));
     const res = await request(app).get(url('claims')).expect(200);
     expect(res.body.totals).toEqual({
       claims: 3,
-      proven: 2,
-      failing: 0,
-      planned: 0,
-      gapped: 1,
-      unplanned: 0,
+      byStatus: { failed: 0, blocked: 0, 'never-run': 0, 'partially-succeeded': 0, succeeded: 2, 'not-testable': 1 },
       dismissed: 0,
       untestable: 1,
-      orphanedAnchors: 0,
     });
   });
 
-  it('reports a claim whose section was removed instead of pointing at nothing', async () => {
+  it('narrows by status with ?status=', async () => {
     seed();
-    write(DOC, ['---', 'title: "Tasks"', '---', '', 'Only a lead now.', ''].join('\n'));
-    const res = await request(app).get(url('claims')).expect(200);
-    const list = res.body.claims.find((c: { id: string }) => c.id === LIST.id);
-    expect(list.anchorLive).toBe(false);
-    expect(list.headingText).toBeUndefined();
-    expect(res.body.totals.orphanedAnchors).toBe(2);
+    writeJson('.truecourse/guard/LATEST.json', latestWith('pass'));
+    const res = await request(app).get(url('claims?status=not-testable')).expect(200);
+    expect(res.body.claims.map((c: { id: string }) => c.id)).toEqual([COLOUR.id]);
+    // The totals stay the whole repository's.
+    expect(res.body.totals.claims).toBe(3);
   });
 
   // The claim detail's second reading: the entry as `claims.json` stores it.

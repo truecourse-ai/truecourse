@@ -694,17 +694,14 @@ export const GuardExtractionFailureSchema = z
 export type GuardExtractionFailure = z.infer<typeof GuardExtractionFailureSchema>
 
 /**
- * A dismissal in `scenarios/decisions.json` that matched NO live claim in a doc
- * generate actually re-extracted this run — the claim's section content changed
- * (or the doc was edited) so the dismissed text no longer exists. Surfaced so a
- * stale dismissal is never silently honored forever; the user re-dismisses the new
- * claim text or drops the entry.
+ * A dismissal in `scenarios/decisions.json` that named NO live claim of the
+ * documents this generate read — the sentence was reworded, so the scan gave
+ * its claim a new id. Surfaced so a stale dismissal is never silently honored
+ * forever; the user re-dismisses the new claim or drops the entry.
  */
 export const GuardOrphanedDismissalSchema = z
   .object({
-    doc: z.string(),
-    anchor: z.string(),
-    title: z.string(),
+    claimId: z.string(),
   })
   .strict()
 export type GuardOrphanedDismissal = z.infer<typeof GuardOrphanedDismissalSchema>

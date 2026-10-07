@@ -176,7 +176,7 @@ function MilestoneList({
   onOpenSpec,
 }: {
   milestones: readonly GuardFlowMilestoneView[];
-  onOpenSpec: (doc: string, section: string) => void;
+  onOpenSpec: (doc: string) => void;
 }) {
   return (
     <ol className="rounded border border-border" aria-label="Milestones">
@@ -198,15 +198,13 @@ function MilestoneList({
           </span>
           <button
             type="button"
-            onClick={() => onOpenSpec(m.doc, m.anchor)}
-            title={`${m.doc} § ${m.anchor}`}
+            onClick={() => onOpenSpec(m.doc)}
+            title={m.doc}
             className="inline-flex min-w-0 max-w-[45%] shrink-0 items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
           >
             {/* Without `min-w-0` the label refuses to shrink and spills past the
                 button, widening the pane instead of ellipsising. */}
-            <span className="min-w-0 truncate">
-              § {m.headingText ?? m.anchor}
-            </span>
+            <span className="min-w-0 truncate">{m.doc}</span>
             <ArrowUpRight className="h-3 w-3 shrink-0" />
           </button>
         </li>
@@ -430,8 +428,8 @@ function DismissFlowAction({
  * already carries a dismissal, never to offer creating one. `row.failedMilestone`
  * is the run/birth's own record of which milestone the failing step realized, so
  * this is a lookup, not a guess; a failure that named no milestone (an unmilestoned
- * setup step, or a hand-written test with no chain) resolves to null and the
- * dismissal note stays hidden.
+ * setup step, or a hand-written test with no chain), or a milestone whose claim
+ * the corpus no longer holds, resolves to null and the dismissal note stays hidden.
  */
 function failedMilestoneClaim(
   row: GuardFlowScenarioRow,
@@ -440,13 +438,7 @@ function failedMilestoneClaim(
   const failed = row.failedMilestone;
   const milestone =
     failed != null ? milestones.find((m) => m.order === failed) : undefined;
-  return milestone
-    ? {
-        doc: milestone.doc,
-        anchor: milestone.anchor,
-        title: milestone.claimTitle,
-      }
-    : null;
+  return milestone?.claimId ? { claimId: milestone.claimId } : null;
 }
 
 /**
@@ -572,7 +564,7 @@ export function GuardFlowDetail({
   binds?: ReadonlyMap<string, GuardTestBinds>;
   /** The dismissals state; omitted (guard reads off) = no ruling. */
   decisions?: GuardDecisionsState;
-  onOpenSpec: (doc: string, section: string) => void;
+  onOpenSpec: (doc: string) => void;
   onOpenInterface: (interfaceId: string) => void;
   /** Jump to the Dependencies tab, on the named service's card. */
   onOpenExternals?: (service?: string) => void;

@@ -12,7 +12,7 @@
  *    for a flow whose last finding was OUR defect rather than the repo's drift.
  */
 
-import type { GuardSectionCoverageStatus } from '@truecourse/shared';
+import type { GuardCoverageStatus } from '@truecourse/shared';
 import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import {
   GUARD_DISMISSED_LABEL,
@@ -40,7 +40,7 @@ export function GuardStatusBadge({
   status,
   className = '',
 }: {
-  status: GuardSectionCoverageStatus;
+  status: GuardCoverageStatus;
   className?: string;
 }) {
   const meta = guardStatusMeta(status);

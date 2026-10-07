@@ -5,10 +5,10 @@ import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 /**
  * Read-surface drivers for the guard dashboard. All route logic lives here so the
  * Express adapter stays thin (the CLAUDE.md route→driver→store rule): the
- * per-section coverage join, the store-only staleness probe, and the
+ * per-claim coverage join, the store-only staleness probe, and the
  * traversal-safe run / scenario-source / evidence reads.
  *
- * Pure composition (`composeDocCoverage`) takes already-parsed inputs so it is
+ * Pure composition (`composeClaimCoverage`) takes already-parsed inputs so it is
  * unit-testable without I/O; the readers below route through the pluggable
  * `GuardStore` (`../lib/guard-store.js`), which boot fills with the Postgres
  * implementation. The store readers are re-exported so the dashboard depends only
@@ -18,11 +18,11 @@ import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 import path from 'node:path'
 import yaml from 'js-yaml'
 import {
-  buildDocSectionIndex,
   computeRecipeFingerprint,
   evidenceRelPath,
   loadScenarios as loadTreeScenarios,
   readGuardFlowsCorpus as readTreeFlowsCorpus,
+  readGuardClaimsCorpus as readTreeClaimsCorpus,
   readGuardResult as readTreeGuardResult,
   readManifest as readTreeManifest,
   readGuardDecisions as readTreeGuardDecisions,
@@ -37,8 +37,6 @@ import {
   recipePath,
   RecipeSchema,
   resolveApiServers,
-  type DocSection,
-  type DocSectionIndex,
 } from '@truecourse/guard-runner'
 import {
   GUARD_SETUP_AUTHORED_INTERFACES_FILE,
@@ -53,9 +51,9 @@ import {
   type FlowTestRecord,
   type GuardFlowTestMark,
   GUARD_COVERAGE_PLAIN_ORDER,
-  guardSectionRef,
+  guardClaimRef,
   type GuardRunFlowSummary,
-  type GuardRunSectionSummary,
+  type GuardRunClaimSummary,
   scenarioMilestoneProof,
   coversFlowMilestones,
   GUARD_COVERAGE_STATUS_PRECEDENCE,
@@ -64,7 +62,7 @@ import {
   guardCoveragePlainStatus,
   guardFlowPlainStatus,
   type GuardCoveragePlainStatus,
-  type GuardSectionTotals,
+  type GuardClaimTotals,
   GuardClaimsFileSchema,
   GuardFlowsFileSchema,
   GuardOutcomeSchema,
@@ -72,6 +70,7 @@ import {
   isGuardFailure,
   awaitingDriverIds,
   claimIdentityKey,
+  claimsByIdentity,
   guardClaimKey,
   milestoneClaims,
   deriveNeedsSetup,
@@ -82,7 +81,6 @@ import {
   guardEvidenceVisuals,
   guardExecutionSteps,
   type GuardEvidenceVisual,
-  dismissedClaimKey,
   guardGapLabel,
   guardNoFlowClaimGapKind,
   guardScenarioDrivers,
@@ -98,22 +96,19 @@ import {
   type GuardBirthFinding,
   type GuardTriage,
   type GuardClaim,
-  type GuardClaimCoverage,
-  type GuardClaimFlowRef,
+  type GuardClaimFlow,
   type GuardClaimRow,
   type GuardClaimScenarioRef,
   type GuardClaimsFile,
   type GuardClaimsView,
   type GuardUntestableRow,
   type GuardUntestableStatement,
-  type GuardSectionClaimGap,
   type GuardCoverageGap,
   type GuardCoverageGapKind,
   type GuardDecisions,
   type GuardClaimIdentity,
   type GuardDismissedClaim,
   type GuardDismissedFlow,
-  type GuardDocCoverage,
   type GuardDriverId,
   type GuardFailureDetail,
   type GuardFlow,
@@ -146,7 +141,6 @@ import {
   guardManifestSections,
   type GuardManifestSectionView,
   type GuardNeedsSetup,
-  type GuardOrphanedCoverage,
   type GuardGenerateReport,
   type GuardRecipeCard,
   type GuardRecipeSurface,
@@ -157,10 +151,7 @@ import {
   type GuardScenarioResult,
   type GuardScenarioSource,
   type GuardTestStatus,
-  type GuardSectionCoverage,
-  type GuardSectionCoverageStatus,
-  type GuardSectionFlow,
-  type GuardSectionScenario,
+  type GuardCoverageStatus,
   type GuardStaleness,
   type GuardStepActual,
 } from '@truecourse/shared'
@@ -236,7 +227,7 @@ export async function guardExternalSetupIndexForView(repoKey: string, ref?: stri
 }
 
 // ---------------------------------------------------------------------------
-// Per-section coverage join (pure).
+// Per-claim coverage join (pure).
 // ---------------------------------------------------------------------------
 
 /** The parsed store inputs the coverage join reads (all nullable — absent stores). */
@@ -247,18 +238,17 @@ export interface GuardCoverageSources {
   result: GuardGenerateReport | null
   /**
    * The synthesized flow corpus (`scenarios/flows.json`) — flow titles, goals and
-   * the milestone→section map. Absent (never synthesized, or a store that does not
+   * the milestone→claim map. Absent (never synthesized, or a store that does not
    * carry it) degrades to manifest-derived flows: the flow id stands in for the
-   * title and no milestone positions are known. Never an error.
+   * title and no claim is joined. Never an error.
    */
   flows?: GuardFlowsFile | null
-  /**
-   * The extracted claim corpus (`scenarios/claims.json`) — read for ONE thing
-   * here: resolving each gapped claim to its store id, so a gap row in the
-   * coverage view can link to the claim it is about. Absent leaves the rows
-   * unlinked; it never changes a status.
-   */
+  /** The claim corpus (`scenarios/claims.json`): the rows the coverage is keyed by. */
   claims?: GuardClaimsFile | null
+  /** The flows a Playwright test proves, by flow id; a test's verdict is its flow's status. */
+  tests?: ReadonlyMap<string, FlowTestRecord>
+  /** The decisions ledger: a dismissed claim wears `dismissed`, a dismissed flow is marked. */
+  decisions?: GuardDecisions | null
   /**
    * Service → provisioning state for every external the externals machinery knows
    * (`readGuardExternalSetupIndex`). It promotes a `blocked-on` gap whose
@@ -269,228 +259,137 @@ export interface GuardCoverageSources {
   externals?: GuardExternalSetupIndex | null
 }
 
-/**
- * Join a live spec doc's sections to their guard coverage. Each section (in
- * document order) carries the FLOWS that traverse it — the user-directed
- * inversion: a section click shows flows, and scenarios are reached one click
- * further, through a flow. The section status is the worst status over those
- * flows (run outcome > `guarded` > gap), falling back to a claim-level gap from
- * the last generate and then `unguarded`. Hand-written scenarios group under a
- * Manual pseudo-flow. Guards whose bound section was removed surface in
- * `orphanedSections`. Pure: `content` is the live doc text.
- */
-export function composeDocCoverage(
-  doc: string,
-  content: string,
-  sources: GuardCoverageSources,
-): GuardDocCoverage {
-  const { manifest, latest, result } = sources
-  const index = buildDocSectionIndex(doc, content)
-  const liveAnchors = new Set(index.sections.map((s) => s.anchor))
-
-  // Run results for this doc, grouped by their effective LIVE anchor (a moved
-  // section carries `remappedTo`); results whose section is gone are orphaned.
-  const runByAnchor = new Map<string, GuardScenarioResult[]>()
-  const orphanRun = new Map<string, GuardScenarioResult[]>()
-  for (const s of latest?.scenarios ?? []) {
-    if (s.binds.doc !== doc) continue
-    const effective = s.remappedTo ?? s.binds.section
-    push(liveAnchors.has(effective) ? runByAnchor : orphanRun, effective, s)
-  }
-
-  // The flow-keyed manifest projected onto its sections — still the pivot the
-  // orphaned-coverage join (a bound section that no longer exists) reads.
-  const manifestByAnchor = new Map<string, GuardManifestSectionView>()
-  for (const m of guardManifestSections(manifest)) {
-    if (m.doc === doc) manifestByAnchor.set(m.anchor, m)
-  }
-
-  const join = buildFlowJoin(sources)
-
-  // Gaps recorded for this doc, kept per anchor: a gap naming a flow rides that
-  // flow's surface row; the rest are claim-level and paint the section directly.
-  const gapsByAnchor = new Map<string, GuardCoverageGap[]>()
-  for (const g of result?.coverageGaps ?? []) {
-    if (g.doc === doc) push(gapsByAnchor, g.anchor, g)
-  }
-
-  // Claims this doc states that reached no flow, kept per anchor — the coverage
-  // honesty record the flow corpus writes, and the half a section's RANK cannot
-  // carry (`guarded` outranks every gap status).
-  const noFlowByAnchor = new Map<string, GuardNoFlowClaim[]>()
-  for (const c of sources.flows?.noFlowClaims ?? []) {
-    if (c.doc === doc) push(noFlowByAnchor, c.anchor, c)
-  }
-  const claimByIdentity = new Map((sources.claims?.claims ?? []).map((c) => [guardClaimKey(c), c]))
-
-  // The statements extraction refused, per anchor — the OTHER half of claim-keyed
-  // accounting. A section made entirely of prose nobody can falsify has no claim,
-  // no flow and no gap; without this it would fall through to `unguarded` and read
-  // as a mute bucket, when the honest answer is that there is nothing to test.
-  const untestableByAnchor = new Map<string, GuardUntestableStatement[]>()
-  for (const s of sources.claims?.untestable ?? []) {
-    if (s.doc === doc) push(untestableByAnchor, s.anchor, s)
-  }
-
-  const totals = emptyTotals()
-  const sections = index.sections.map((sec) => {
-    const cov = resolveSectionCoverage(sec, {
-      doc,
-      join,
-      run: runByAnchor.get(sec.anchor) ?? [],
-      gaps: gapsByAnchor.get(sec.anchor) ?? [],
-      noFlow: noFlowByAnchor.get(sec.anchor) ?? [],
-      untestable: untestableByAnchor.get(sec.anchor) ?? [],
-      claimByIdentity,
-    })
-    totals[cov.status]++
-    return cov
-  })
-
+/** The flow view the pure compositions read, built from already-read sources. */
+function viewFromSources(sources: GuardCoverageSources, commit?: string): FlowViewSources {
   return {
-    doc,
-    markdown: index.markdown,
-    sections,
-    orphanedSections: buildOrphanedCoverage(orphanRun, manifestByAnchor, liveAnchors),
-    totals,
-    runId: latest?.run.runId ?? null,
-    ranAt: latest?.run.ranAt ?? null,
-    generatedAt: result?.generatedAt ?? null,
+    ...(commit !== undefined ? { commit } : {}),
+    join: buildFlowJoin(sources),
+    flowsFile: sources.flows ?? null,
+    latest: sources.latest,
+    result: sources.result,
+    scenarios: [...(sources.scenarios ?? [])],
+    tests: new Map(sources.tests ?? []),
+    dismissals: new Map((sources.decisions?.dismissedFlows ?? []).map((d) => [d.flowId, d])),
+    claimDismissals: new Map((sources.decisions?.dismissedClaims ?? []).map((d) => [d.claimId, d])),
+    claims: sources.claims ?? null,
   }
 }
 
 /**
- * Everything the coverage join reads for ONE repository, in one place: seven
- * store reads that do not depend on which document is being joined. A caller
- * that joins MANY documents of the same repository (the Documents view of the
- * workspace's Context) reads this once and composes each document against it,
- * rather than re-reading the repository's whole guard state per document.
+ * Join the claim corpus to its coverage: every claim with the FLOWS that carry
+ * it (a flow names a claim through its milestones), each flow as the Flows page
+ * lists it, so a claim and the flow it opens can never disagree about the
+ * flow's word. The claim's status is the worst over those flows; a claim no flow
+ * carries wears the kind the corpus's `noFlowClaims` reason states, else
+ * `unguarded`; a dismissed claim wears `dismissed` whatever its flows say, the
+ * next generate drops them. Pure: everything is in `sources`.
  */
-export async function readGuardCoverageSources(
-  repoKey: string,
-  ref?: string,
-  opts: {
-    /**
-     * Read the externals index too. It is the one input that materializes a
-     * scratch tree, and it only ever moves a section between `blocked-on` and
-     * `needs-setup` — two statuses of the SAME word. A caller that wants the
-     * five-word reading and nothing finer (the Documents view) passes false and
-     * pays no tree per repository; anything rendering a section's reason keeps
-     * the default.
-     */
-    externals?: boolean
-  } = {},
-): Promise<GuardCoverageSources> {
+export function composeClaimCoverage(sources: GuardCoverageSources): GuardClaimsView {
+  return composeClaimsView(viewFromSources(sources))
+}
+
+/** {@link composeClaimCoverage} over a loaded flow view. */
+function composeClaimsView(view: FlowViewSources): GuardClaimsView {
+  const file = view.claims
+  if (!file) return EMPTY_CLAIMS_VIEW
+  const outcomeByScenarioId = new Map((view.latest?.scenarios ?? []).map((s) => [s.id, s.outcome]))
+
+  // Scenario steps, indexed by the claim ID their milestone tag names —
+  // teardown steps included (they carry milestones like any other step).
+  const proofsByClaim = new Map<string, Map<string, GuardClaimScenarioRef>>()
+  for (const s of view.scenarios) {
+    for (const [i, step] of guardExecutionSteps(s).entries()) {
+      for (const id of milestoneClaims(step.milestone)) {
+        let byScenario = proofsByClaim.get(id)
+        if (!byScenario) proofsByClaim.set(id, (byScenario = new Map()))
+        const row = byScenario.get(s.id) ?? { scenarioId: s.id, title: s.title, steps: [] }
+        row.steps.push(i + 1)
+        byScenario.set(s.id, row)
+      }
+    }
+  }
+  const noFlowByIdentity = new Map(
+    (view.flowsFile?.noFlowClaims ?? []).map((c) => [claimIdentityKey(c.doc, c.anchor, c.claimTitle), c]),
+  )
+
+  const claims = file.claims.map((c) =>
+    resolveClaimCoverage(c, view, {
+      dismissal: view.claimDismissals.get(c.id),
+      noFlow: noFlowByIdentity.get(guardClaimKey(c)),
+      proofs: [...(proofsByClaim.get(c.id)?.values() ?? [])].map((p) => {
+        const outcome = outcomeByScenarioId.get(p.scenarioId)
+        return outcome ? { ...p, outcome } : p
+      }),
+    }),
+  )
+  const byStatus = Object.fromEntries(GUARD_COVERAGE_PLAIN_ORDER.map((w) => [w, 0])) as Record<GuardCoveragePlainStatus, number>
+  for (const c of claims) byStatus[guardCoveragePlainStatus(c.status)]++
   return {
-    scenarios: await readGuardScenariosForView(repoKey, ref),
-    manifest: await readManifestForView(repoKey, ref),
-    latest: await readGuardRunForView(repoKey, ref),
-    result: await readGuardReport(repoKey, ref),
-    flows: await readGuardFlowsForView(repoKey, ref),
-    claims: await readGuardClaimsForView(repoKey, ref),
-    externals: opts.externals === false ? null : await guardExternalSetupIndexForView(repoKey, ref),
+    extracted: true,
+    generatedAt: file.generatedAt,
+    claims,
+    untestable: file.untestable.map((u) => ({ doc: u.doc, text: u.text, reason: u.reason })),
+    totals: {
+      claims: claims.length,
+      byStatus,
+      dismissed: claims.filter((c) => c.dismissed).length,
+      untestable: file.untestable.length,
+    },
   }
 }
 
-/**
- * One document's coverage as ONE of the five words: the worst of its sections,
- * by {@link GUARD_COVERAGE_PLAIN_ORDER}. Null when the document has no section
- * at all — nothing was joined, which is not the same as nothing being proven,
- * and the caller decides what to say about it. Pure: `content` is the live doc
- * text and `sources` the repository's guard state.
- */
-export function docCoveragePlainStatus(
-  doc: string,
-  content: string,
-  sources: GuardCoverageSources,
-): GuardCoveragePlainStatus | null {
-  return docCoverageWords(doc, content, sources).doc
-}
-
-/** One document's coverage in the five words, whole: the document's and its sections'. */
-export interface DocCoverageWords {
-  /** The worst of the sections, by {@link GUARD_COVERAGE_PLAIN_ORDER}. */
+/** One document's claims in the five words: the document's own word is the worst of them. */
+export interface DocClaimWords {
+  /** The worst of the claims, by {@link GUARD_COVERAGE_PLAIN_ORDER}; null for a document with no claim. */
   doc: GuardCoveragePlainStatus | null
-  /** Every section, keyed by {@link guardSectionRef}. */
-  sections: Map<string, GuardCoveragePlainStatus>
-  /** What the BLOCKED sections give as their reason, in document order. */
+  /** Every claim, keyed by {@link guardClaimRef}. */
+  claims: Map<string, GuardCoveragePlainStatus>
+  /** What the BLOCKED claims give as their reason, in corpus order. */
   blockedReasons: string[]
 }
 
 /**
- * One document read through {@link composeDocCoverage} ONCE, in the five words:
- * the per-section map every section-counting surface reads (Home's tally, a
- * run's stored section summary), the document's own word (the worst of them),
- * and the blocked sections' reasons. Pure: `content` is the live doc text and
- * `sources` the repository's guard state.
+ * A claims view folded per document: the per-claim map every claim-counting
+ * surface reads (Home's tally, a run's stored claim summary), each document's
+ * own word (the worst of its claims), and the blocked claims' reasons.
  */
-export function docCoverageWords(
-  doc: string,
-  content: string,
-  sources: GuardCoverageSources,
-): DocCoverageWords {
-  const sections = new Map<string, GuardCoveragePlainStatus>()
-  const blockedReasons: string[] = []
-  for (const sec of composeDocCoverage(doc, content, sources).sections) {
-    const word = guardCoveragePlainStatus(sec.status)
-    sections.set(guardSectionRef(doc, sec.anchor), word)
-    if (word === 'blocked' && sec.reason) blockedReasons.push(sec.reason)
+export function claimWordsByDoc(view: GuardClaimsView): Map<string, DocClaimWords> {
+  const out = new Map<string, DocClaimWords>()
+  for (const c of view.claims) {
+    let words = out.get(c.doc)
+    if (!words) out.set(c.doc, (words = { doc: null, claims: new Map(), blockedReasons: [] }))
+    const word = guardCoveragePlainStatus(c.status)
+    words.claims.set(guardClaimRef(c.doc, c.id), word)
+    if (word === 'blocked' && c.reason) words.blockedReasons.push(c.reason)
   }
-  const words = new Set(sections.values())
-  return {
-    doc: GUARD_COVERAGE_PLAIN_ORDER.find((word) => words.has(word)) ?? null,
-    sections,
-    blockedReasons,
+  for (const words of out.values()) {
+    const said = new Set(words.claims.values())
+    words.doc = GUARD_COVERAGE_PLAIN_ORDER.find((word) => said.has(word)) ?? null
   }
+  return out
 }
 
 /**
- * The SECTION SUMMARY of one run: every section of every document the run's
- * scenario set covers, as the word it wore then. Written when the run is
- * persisted and read back as history, so a point of Home's trend costs no
- * re-derivation.
+ * The CLAIM SUMMARY of one run: every claim of the repository as the word it
+ * wore then. Written when the run is persisted and read back as history, so a
+ * point of Home's trend costs no re-derivation.
  *
- * The scenario set and the report are read at the commit the STORE holds them
- * under: the run's own when it has one there, else the baseline set, the set a
- * hosted run materializes into its clone before running. The documents are the
- * ones that set names; a document whose body cannot be read contributes
- * nothing, and a run that yields no section at all answers null rather than an
- * empty summary, which the caller records as "not derivable".
+ * The claim corpus, the flows and the scenario set are read at the commit the
+ * STORE holds them under: the run's own when it has one there, else the
+ * baseline set, the set a hosted run materializes into its clone before
+ * running, with the OUTCOMES from this run. A repository with no claim corpus
+ * answers null, which the caller records as "not derivable".
  */
-export async function readGuardRunSectionSummary(
+export async function readGuardRunClaimSummary(
   repoKey: string,
   latest: GuardLatest,
-): Promise<GuardRunSectionSummary | null> {
-  const commit = await runSummaryCommit(repoKey, latest)
-
-  const sources: GuardCoverageSources = {
-    scenarios: (await getGuardStore().loadScenarios({ repoKey, commitSha: commit ?? '' })).scenarios,
-    manifest: await readManifestStore(repoKey, at(commit)),
-    latest,
-    result: await readGuardResultStore(repoKey, at(commit)),
-    flows: await readGuardFlowsFile(repoKey, commit),
-    claims: await readGuardClaimsFile(repoKey, commit),
-    // The externals index only ever moves a section between two statuses that
-    // wear the SAME word, and it is the one input that materializes a tree.
-    externals: null,
-  }
-
-  const docs = new Set([
-    ...latest.scenarios.map((s) => s.binds.doc),
-    ...(sources.claims?.claims.map((c) => c.doc) ?? []),
-    ...(sources.claims?.untestable.map((u) => u.doc) ?? []),
-    ...(sources.flows?.flows.flatMap((f) => f.milestones.map((m) => m.doc)) ?? []),
-    ...guardManifestSections(sources.manifest).map((m) => m.doc),
-  ])
-
-  const summary: GuardRunSectionSummary = {}
-  for (const doc of docs) {
-    const content = await readRepoDoc(repoKey, doc, commit ? { commit } : undefined)
-    if (content == null) continue
-    for (const [ref, status] of docCoverageWords(doc, content, sources).sections) {
-      summary[ref] = status
-    }
-  }
+): Promise<GuardRunClaimSummary | null> {
+  const view = await loadFlowView(repoKey, await runSummaryCommit(repoKey, latest), latest, { externals: false })
+  if (!view) return null
+  const composed = composeClaimsView(view)
+  if (!composed.extracted) return null
+  const summary: GuardRunClaimSummary = {}
+  for (const c of composed.claims) summary[guardClaimRef(c.doc, c.id)] = guardCoveragePlainStatus(c.status)
   return Object.keys(summary).length > 0 ? summary : null
 }
 
@@ -552,6 +451,7 @@ export function readGuardRunFlowSummaryFromTree(treeDir: string, latest: GuardLa
   const scenarios = loadTreeScenarios(treeDir).scenarios
   if (!manifest && !flowsFile && scenarios.length === 0) return null
   const result = readTreeGuardResult(treeDir)
+  const decisions = readTreeGuardDecisions(treeDir)
   const view: FlowViewSources = {
     join: buildFlowJoin({
       manifest,
@@ -567,7 +467,9 @@ export function readGuardRunFlowSummaryFromTree(treeDir: string, latest: GuardLa
     scenarios,
     // A run's summary counts what the run executed, which is scenarios.
     tests: new Map(),
-    dismissals: new Map(readTreeGuardDecisions(treeDir).dismissedFlows.map((d) => [d.flowId, d])),
+    dismissals: new Map(decisions.dismissedFlows.map((d) => [d.flowId, d])),
+    claimDismissals: new Map(decisions.dismissedClaims.map((d) => [d.claimId, d])),
+    claims: readTreeClaimsCorpus(treeDir),
   }
   const summary: GuardRunFlowSummary = {}
   for (const flowId of allFlowIds(view)) {
@@ -618,39 +520,20 @@ export async function readGuardCoverageHistory(repoKey: string): Promise<GuardRu
 }
 
 /**
- * Every kept doc's sections counted under the five coverage words, through the
- * same per-section derivation the doc view renders ({@link composeDocCoverage})
- * — the constraint: no summary may classify a section differently than the doc
- * view does. The doc universe is the docs the guard stores name, and null means
- * nothing to count.
+ * Every claim of the repository counted under the five coverage words, through
+ * the same per-claim derivation the Claims view renders — no summary may
+ * classify a claim differently than the list does. Null when there is no claim
+ * corpus to count.
  */
-export async function readGuardSectionTotals(
+export async function readGuardClaimTotals(
   repoKey: string,
   ref?: string,
-): Promise<GuardSectionTotals | null> {
-  const sources = await readGuardCoverageSources(repoKey, ref)
-
-  const docs = [
-    ...(sources.claims?.claims.map((c) => c.doc) ?? []),
-    ...(sources.claims?.untestable.map((u) => u.doc) ?? []),
-    ...(sources.flows?.flows.flatMap((f) => f.milestones.map((m) => m.doc)) ?? []),
-    ...guardManifestSections(sources.manifest).map((m) => m.doc),
-  ]
-  if (docs.length === 0) return null
-
-  const byStatus = Object.fromEntries(
-    GUARD_COVERAGE_PLAIN_ORDER.map((s) => [s, 0]),
-  ) as Record<GuardCoveragePlainStatus, number>
-  let total = 0
-  for (const doc of new Set(docs)) {
-    const content = await readRepoDoc(repoKey, doc, ref ? { commit: ref } : undefined)
-    if (content == null) continue
-    for (const sec of composeDocCoverage(doc, content, sources).sections) {
-      total++
-      byStatus[guardCoveragePlainStatus(sec.status)]++
-    }
-  }
-  return total === 0 ? null : { total, byStatus }
+): Promise<GuardClaimTotals | null> {
+  const view = await readGuardClaims(repoKey, ref)
+  // The wire record is partial by type only: the composition fills every word.
+  return view.extracted
+    ? { total: view.totals.claims, byStatus: view.totals.byStatus as Record<GuardCoveragePlainStatus, number> }
+    : null
 }
 
 /** Everything the flow join reads: the coverage sources plus (where the caller
@@ -691,8 +574,8 @@ interface FlowJoin {
    * elsewhere and neither means "no test could be written".
    */
   authoringErrorsByFlow: Map<string, GuardGenerateError[]>
-  /** Flow ids bound to `doc\0anchor`, corpus first then manifest, deduped. */
-  flowIdsBySection: Map<string, string[]>
+  /** Flow ids whose milestones name a claim, by {@link claimIdentityKey}, corpus order, deduped. */
+  flowIdsByClaim: Map<string, string[]>
   /** Providable-external index; null ⇒ every `blocked-on` stays plain. */
   externals: GuardExternalSetupIndex | null
 }
@@ -762,25 +645,14 @@ function buildFlowJoin(sources: FlowJoinSources): FlowJoin {
     if (e.flowId && (e.kind === undefined || e.kind === 'authoring')) push(authoringErrorsByFlow, e.flowId, e)
   }
 
-  const flowIdsBySection = new Map<string, string[]>()
-  const bind = (doc: string, anchor: string, flowId: string): void => {
-    const key = `${doc}\0${anchor}`
-    const list = flowIdsBySection.get(key)
-    if (!list) flowIdsBySection.set(key, [flowId])
-    else if (!list.includes(flowId)) list.push(flowId)
-  }
+  const flowIdsByClaim = new Map<string, string[]>()
   for (const flow of corpus.values()) {
-    for (const b of flow.bindings) bind(b.doc, b.anchor, flow.id)
-    for (const m of flow.milestones) bind(m.doc, m.anchor, flow.id)
-  }
-  for (const flow of manifestFlows.values()) {
-    for (const b of flow.bindings) bind(b.doc, b.anchor, flow.flowId)
-  }
-  // A flow whose authoring failed may have no manifest entry at all (nothing was
-  // written for it), so the error's own section binding is what keeps it reachable
-  // from the coverage view instead of vanishing into `unguarded`.
-  for (const [flowId, errors] of authoringErrorsByFlow) {
-    for (const e of errors) bind(e.doc, e.anchor, flowId)
+    for (const m of flow.milestones) {
+      const key = claimIdentityKey(m.doc, m.anchor, m.claimTitle)
+      const list = flowIdsByClaim.get(key)
+      if (!list) flowIdsByClaim.set(key, [flow.id])
+      else if (!list.includes(flow.id)) list.push(flow.id)
+    }
   }
 
   return {
@@ -794,7 +666,7 @@ function buildFlowJoin(sources: FlowJoinSources): FlowJoin {
     birthStatusByScenario,
     reportGapsByFlow,
     authoringErrorsByFlow,
-    flowIdsBySection,
+    flowIdsByClaim,
     externals: sources.externals ?? null,
   }
 }
@@ -813,7 +685,7 @@ function flowIdOfResult(result: GuardScenarioResult, join: FlowJoin): string {
 function gapStatus(
   gap: { kind: GuardCoverageGapKind; driver?: GuardDriverId },
   needsSetup?: GuardNeedsSetup,
-): GuardSectionCoverageStatus {
+): GuardCoverageStatus {
   if (needsSetup) return 'needs-setup'
   if (gap.kind !== 'awaiting-driver') return gap.kind
   return gap.driver && isAwaitingDriver(gap.driver) ? gap.driver : 'unguarded'
@@ -968,7 +840,7 @@ function erroredSurfaces(flowId: string, join: FlowJoin): (GuardDriverId | undef
 
 /** A flow's status + the reason behind it (the gap text, when a gap won). */
 function rollUpFlow(surfaces: readonly GuardFlowSurface[]): {
-  status: GuardSectionCoverageStatus
+  status: GuardCoverageStatus
   reason?: string
   needsSetup?: GuardNeedsSetup
 } {
@@ -985,266 +857,92 @@ function rollUpFlow(surfaces: readonly GuardFlowSurface[]): {
   }
 }
 
-/** The flows one live section carries, worst-first. */
-function sectionFlows(
-  doc: string,
-  anchor: string,
-  join: FlowJoin,
-  run: readonly GuardScenarioResult[],
-): GuardSectionFlow[] {
-  const ids = [...(join.flowIdsBySection.get(`${doc}\0${anchor}`) ?? [])]
-  // A run result bound here whose flow nothing else declares (a hand-written
-  // scenario → its Manual pseudo-flow; a run that outlived its manifest entry)
-  // still has to be reachable, so it joins the section's flow list.
-  for (const result of run) {
-    const flowId = flowIdOfResult(result, join)
-    if (!ids.includes(flowId)) ids.push(flowId)
-  }
-
-  const flows = ids.map((flowId) => {
-    const flow = join.corpus.get(flowId)
-    const surfaces = flowSurfaces(flowId, join)
-    const manual = isManualFlowId(flowId)
+/**
+ * The flows that carry one claim, worst-first, each as the Flows page lists it
+ * (its test's verdict when a test proves it, else its scenarios' surfaces),
+ * with the orders of the milestones that prove THIS claim.
+ */
+function claimFlows(identity: string, view: FlowViewSources): GuardClaimFlow[] {
+  const flows = (view.join.flowIdsByClaim.get(identity) ?? []).map((flowId) => {
+    const item = flowListItem(flowId, view)
+    const roll = rollUpFlow(item.surfaces)
+    const test = view.tests.get(flowId)
+    const reason = roll.status === item.status ? roll.reason : test?.blockedOn
     return {
       flowId,
-      // One title source for every surface (the list, the detail, and this row),
-      // so a flow the corpus no longer names reads the same wherever it appears.
-      title: flowTitle(flowId, join),
-      ...rollUpFlow(surfaces),
-      epic: (flow?.composedOf.length ?? 0) > 0,
-      manual,
-      milestonesInSection: (flow?.milestones ?? [])
-        .filter((m) => m.doc === doc && m.anchor === anchor)
+      title: item.title,
+      status: item.status,
+      ...(reason ? { reason } : {}),
+      ...(roll.status === item.status && roll.needsSetup ? { needsSetup: roll.needsSetup } : {}),
+      epic: item.epic,
+      manual: item.manual,
+      milestoneOrders: (view.join.corpus.get(flowId)?.milestones ?? [])
+        .filter((m) => claimIdentityKey(m.doc, m.anchor, m.claimTitle) === identity)
         .map((m) => m.order)
         .sort((a, b) => a - b),
-      milestoneCount: flow?.milestones.length ?? 0,
-      surfaces,
+      milestoneCount: item.milestoneCount,
+      surfaces: item.surfaces,
     }
   })
-
-  return flows.sort(
-    (a, b) => statusRank(a.status) - statusRank(b.status) || a.title.localeCompare(b.title),
-  )
+  return flows.sort((a, b) => statusRank(a.status) - statusRank(b.status) || a.title.localeCompare(b.title))
 }
 
-function statusRank(status: GuardSectionCoverageStatus): number {
+function statusRank(status: GuardCoverageStatus): number {
   const i = GUARD_COVERAGE_STATUS_PRECEDENCE.indexOf(status)
   return i === -1 ? GUARD_COVERAGE_STATUS_PRECEDENCE.length : i
 }
 
 /**
- * The status a section shows, over EVERY claim state it carries — the claim-keyed
- * accounting rule. Four candidate sources, and the worst of them wins by the ONE
- * precedence (`GUARD_COVERAGE_STATUS_PRECEDENCE`, whose tiers ARE the five-word
- * vocabulary: Failed → Blocked → Never run → Succeeded → Not testable):
- *
- *  - the section's FLOWS, rolled up over their surfaces — the proven half;
- *  - the last generate's claim-level GAPS, under the status their kind paints;
- *  - the flow corpus's NO-FLOW CLAIMS, under the kind their reason states
- *    ({@link guardNoFlowClaimGapKind}). This is the half that used to be missing:
- *    a section whose claims ALL landed here has no flow and often no gap row
- *    either, and without it fell through to `unguarded` — a mute bucket where the
- *    reasons plainly say Blocked or Not testable;
- *  - the statements extraction REFUSED, as `no-claim`. It ranks last of all, so it
- *    decides only a section that has nothing else — which is exactly the section
- *    made of prose nobody can falsify.
- *
- * A section with a mix keeps every state visible in its detail (`flows` and
- * `claimGaps`); only the headline is worst-first.
+ * The status one claim shows. Three sources, and the worst of them wins by the
+ * ONE precedence (`GUARD_COVERAGE_STATUS_PRECEDENCE`, whose tiers ARE the
+ * five-word vocabulary): the claim's FLOWS, each as the Flows page words it;
+ * failing any flow, the corpus's NO-FLOW record for it, under the kind its
+ * reason states ({@link guardNoFlowClaimGapKind}); failing that, `unguarded`,
+ * the honest hole. A DISMISSED claim wears `dismissed` whatever its flows say:
+ * the ruling stands until the next generate drops them.
  */
-function resolveSectionCoverage(
-  sec: DocSection,
+function resolveClaimCoverage(
+  claim: GuardClaim,
+  view: FlowViewSources,
   joins: {
-    doc: string
-    join: FlowJoin
-    run: readonly GuardScenarioResult[]
-    gaps: readonly GuardCoverageGap[]
-    noFlow: readonly GuardNoFlowClaim[]
-    untestable: readonly GuardUntestableStatement[]
-    claimByIdentity: ReadonlyMap<string, GuardClaim>
+    dismissal: GuardDismissedClaim | undefined
+    noFlow: GuardNoFlowClaim | undefined
+    proofs: GuardClaimScenarioRef[]
   },
-): GuardSectionCoverage {
-  const { doc, join, run, gaps, noFlow, untestable, claimByIdentity } = joins
-  const flows = sectionFlows(doc, sec.anchor, join, run)
-  const flowIds = new Set(flows.map((f) => f.flowId))
-
-  // Claim-level gaps only: a gap naming one of the section's flows already rides
-  // that flow's surface row, so counting it again would double-paint the section.
-  const claimGaps = gaps.filter((g) => !(g.flowId && flowIds.has(g.flowId)))
-
-  const candidates: Array<{
-    status: GuardSectionCoverageStatus
-    reason?: string
-    needsSetup?: GuardNeedsSetup
-  }> = [
-    ...flows.map((f) => rollUpFlow(f.surfaces)),
-    ...claimGaps.map((g) => {
-      const needsSetup = gapNeedsSetup(g, join.externals)
-      return {
-        status: gapStatus(g, needsSetup),
-        reason: g.reason,
-        ...(needsSetup ? { needsSetup } : {}),
-      }
-    }),
-    ...noFlow.map((c) => ({
-      status: guardNoFlowClaimGapKind(c.reason) as GuardSectionCoverageStatus,
-      reason: c.reason,
-    })),
-    ...untestable.map((s) => ({ status: 'no-claim' as GuardSectionCoverageStatus, reason: s.reason })),
-  ]
-  const status = worstCoverageStatus(candidates.map((c) => c.status))
-  const winner = candidates.find((c) => c.status === status && c.reason)
-
-  const scenarioIds = [
-    ...new Set(flows.flatMap((f) => f.surfaces.flatMap((s) => (s.scenarioId ? [s.scenarioId] : [])))),
-  ].sort()
-
+): GuardClaimRow {
+  const flows = claimFlows(guardClaimKey(claim), view)
+  const candidates: Array<{ status: GuardCoverageStatus; reason?: string; needsSetup?: GuardNeedsSetup }> = flows.map((f) => ({
+    status: f.status,
+    ...(f.reason ? { reason: f.reason } : {}),
+    ...(f.needsSetup ? { needsSetup: f.needsSetup } : {}),
+  }))
+  if (candidates.length === 0 && joins.noFlow) {
+    candidates.push({ status: guardNoFlowClaimGapKind(joins.noFlow.reason) as GuardCoverageStatus, reason: joins.noFlow.reason })
+  }
+  const dismissed = joins.dismissal !== undefined
+  const status: GuardCoverageStatus = dismissed
+    ? 'dismissed'
+    : candidates.length === 0
+      ? 'unguarded'
+      : worstCoverageStatus(candidates.map((c) => c.status))
+  const winner = dismissed ? undefined : candidates.find((c) => c.status === status && c.reason)
+  const reason = dismissed ? joins.dismissal?.note ?? joins.dismissal?.reason : winner?.reason
   return {
-    anchor: sec.anchor,
-    headingText: sec.headingText,
-    level: sec.level,
-    fingerprint: sec.fingerprint,
+    id: claim.id,
+    doc: claim.doc,
+    title: claim.title,
+    claim: claim.claim,
+    contentHash: claim.contentHash,
+    ...(claim.verifyVia ? { verifyVia: claim.verifyVia } : {}),
     status,
-    ...(winner?.reason ? { reason: winner.reason } : {}),
-    ...(status === 'blocked-on' && winner?.reason
-      ? { blockedOnCapabilities: parseBlockedOnCapabilities(winner.reason) }
-      : {}),
-    // The needs-setup promotion of the SAME winner — the section's CTA.
+    ...(reason ? { reason } : {}),
     ...(status === 'needs-setup'
-      ? {
-          needsSetup:
-            candidates.find((c) => c.status === status && c.needsSetup)?.needsSetup ??
-            { services: [], provided: [] },
-        }
+      ? { needsSetup: candidates.find((c) => c.status === status && c.needsSetup)?.needsSetup ?? { services: [], provided: [] } }
       : {}),
+    dismissed,
     flows,
-    claimGaps: sectionClaimGaps(doc, sec.anchor, noFlow, claimGaps, claimByIdentity),
-    scenarioIds,
-    // Deprecated flat projection — the section detail renders `flows`.
-    scenarios: run.map(toSectionScenario),
+    scenarios: joins.proofs,
   }
-}
-
-/**
- * The section's gapped claims, as the coverage view must show them REGARDLESS of
- * the section's rank. Two records say the same thing from different sides, so
- * they are merged, never concatenated:
- *
- *  - the flow corpus's `noFlowClaims` — the claim IDENTITY plus the reason. It
- *    is the better record (it names the claim), so it wins every merge;
- *  - the last generate's claim-level coverage gaps — the reason, with no claim
- *    named. Kept only where no `noFlowClaim` already states it. A gap restating a
- *    no-flow claim reads `<claim title> — <reason>`, so the test is that the gap's
- *    reason ENDS WITH the claim's: tight enough that a short unrelated reason can
- *    never swallow a distinct gap, and showing a row twice is a far cheaper
- *    mistake than hiding one.
- *
- * The claim id is resolved through the claims store by identity, so a row can
- * link to the claim it is about; without a claims store the rows still render,
- * just without the link.
- */
-function sectionClaimGaps(
-  doc: string,
-  anchor: string,
-  noFlow: readonly GuardNoFlowClaim[],
-  gaps: readonly GuardCoverageGap[],
-  claimByIdentity: ReadonlyMap<string, GuardClaim>,
-): GuardSectionClaimGap[] {
-  const fold = (text: string): string => text.replace(/\s+/g, ' ').trim()
-  const out: GuardSectionClaimGap[] = noFlow.map((c) => {
-    const claim = claimByIdentity.get(claimIdentityKey(doc, anchor, c.claimTitle))
-    return {
-      ...(claim ? { claimId: claim.id } : {}),
-      title: c.caseIds && claim?.verification?.cases ? claim.verification.cases.filter(v => c.caseIds!.includes(v.id)).map(v => v.claim).join('; ') : c.claimTitle,
-      reason: c.reason,
-    }
-  })
-  const stated = noFlow.map((c) => fold(c.reason))
-  for (const g of gaps) {
-    const reason = fold(g.reason)
-    if (stated.some((s) => reason.endsWith(s))) continue
-    out.push({ reason: g.reason, kind: g.kind })
-  }
-  return out
-}
-
-function buildOrphanedCoverage(
-  orphanRun: Map<string, GuardScenarioResult[]>,
-  manifestByAnchor: Map<string, GuardManifestSectionView>,
-  liveAnchors: Set<string>,
-): GuardOrphanedCoverage[] {
-  const byAnchor = new Map<string, { ids: Set<string>; scenarios: GuardSectionScenario[] }>()
-  const ensure = (anchor: string) => {
-    let e = byAnchor.get(anchor)
-    if (!e) byAnchor.set(anchor, (e = { ids: new Set(), scenarios: [] }))
-    return e
-  }
-  for (const [anchor, results] of orphanRun) {
-    const e = ensure(anchor)
-    for (const r of results) {
-      e.ids.add(r.id)
-      e.scenarios.push(toSectionScenario(r))
-    }
-  }
-  // Manifest-declared guards whose section is gone and that the run never touched.
-  for (const [anchor, m] of manifestByAnchor) {
-    if (liveAnchors.has(anchor) || m.scenarioIds.length === 0) continue
-    const e = ensure(anchor)
-    for (const id of m.scenarioIds) e.ids.add(id)
-  }
-  return [...byAnchor.entries()]
-    .map(([anchor, e]) => ({ anchor, scenarioIds: [...e.ids].sort(), scenarios: e.scenarios }))
-    .sort((a, b) => a.anchor.localeCompare(b.anchor))
-}
-
-function toSectionScenario(s: GuardScenarioResult): GuardSectionScenario {
-  return {
-    id: s.id,
-    title: s.title,
-    outcome: s.outcome,
-    durationMs: s.durationMs,
-    ...(s.failure ? { failure: s.failure } : {}),
-    ...(s.evidencePath ? { evidencePath: s.evidencePath } : {}),
-    ...(s.remappedTo ? { remappedTo: s.remappedTo } : {}),
-    ...(s.currentFingerprint ? { currentFingerprint: s.currentFingerprint } : {}),
-  }
-}
-
-// The non-driver gap kinds (`untestable | no-claim | blocked-on`) — the gap kinds
-// that paint under themselves, derived from the kind schema minus `awaiting-driver`.
-const RESIDUAL_GAP_KINDS = GuardCoverageGapKindSchema.options.filter(
-  (k): k is Exclude<GuardCoverageGapKind, 'awaiting-driver'> => k !== 'awaiting-driver',
-)
-
-// Every coverage status, DERIVED from its component sources (run outcomes ∪ the
-// awaiting driver ids ∪ the residual gap kinds ∪ guarded/unguarded) so a new
-// outcome, driver, or gap kind joins the totals buckets automatically — the
-// NaN-from-a-missing-bucket class dies at the source.
-const COVERAGE_STATUSES = [
-  ...GuardOutcomeSchema.options,
-  ...awaitingDriverIds,
-  ...RESIDUAL_GAP_KINDS,
-  'guarded',
-  // Derived from the manifest's inventory status: a test written with no birth
-  // execution behind it.
-  'never-run',
-  // A derived status, so it has no source enum to come from — it is the
-  // one bucket this list names by hand, and the backstop below keeps it honest.
-  'needs-setup',
-  // Also derived (from the report's authoring errors), for the same reason.
-  'authoring-error',
-  'unguarded',
-] as const satisfies readonly GuardSectionCoverageStatus[]
-
-// Compile-time backstop: if a new `GuardSectionCoverageStatus` is ever added
-// without a bucket above, `_MissingStatus` becomes non-`never` and this fails to
-// build — a missing totals bucket can never ship silently.
-type _MissingStatus = Exclude<GuardSectionCoverageStatus, (typeof COVERAGE_STATUSES)[number]>
-const _allStatusesBucketed: _MissingStatus extends never ? true : never = true
-void _allStatusesBucketed
-
-function emptyTotals(): Record<GuardSectionCoverageStatus, number> {
-  return Object.fromEntries(COVERAGE_STATUSES.map((k) => [k, 0])) as Record<GuardSectionCoverageStatus, number>
 }
 
 function push<T>(map: Map<string, T[]>, key: string, value: T): void {
@@ -1284,11 +982,9 @@ export async function listGuardScenarios(repoKey: string, ref?: string): Promise
   // The row shows the FIRST bound section (a flow binds several) and names the
   // flow it realizes — hand-written work under its Manual pseudo-flow, so the
   // Flows page's drill-down covers every stored scenario.
-  const headingByDocAnchor = await headingTextIndex(repoKey, scenarios.map((s) => s.binds[0].doc), commit)
   const fileById = await scenarioFilesById(repoKey, commit)
   const items: GuardScenarioListItem[] = scenarios
     .map((s) => {
-      const headingText = headingByDocAnchor.get(`${s.binds[0].doc}\0${s.binds[0].section}`)
       const flowId = s.flow?.id ?? ownerByScenario.get(s.id) ?? manualFlowId(s.id)
       const status = birthStatusByScenario.get(s.id)
       return {
@@ -1296,7 +992,6 @@ export async function listGuardScenarios(repoKey: string, ref?: string): Promise
         title: s.title,
         doc: s.binds[0].doc,
         anchor: s.binds[0].section,
-        ...(headingText ? { headingText } : {}),
         file: fileById.get(s.id) ?? '',
         handWritten: !ownerByScenario.has(s.id),
         flowId,
@@ -1439,7 +1134,7 @@ function flowTestMark(test: FlowTestRecord): GuardFlowTestMark {
  * The status and bucket a flow wears when a Playwright test proves it: the
  * test's own verdict, in the wire ids every flow surface already reads.
  */
-function flowTestStanding(test: FlowTestRecord): { status: GuardSectionCoverageStatus; bucket: GuardFlowBucket } {
+function flowTestStanding(test: FlowTestRecord): { status: GuardCoverageStatus; bucket: GuardFlowBucket } {
   return { status: flowTestCoverageStatus(test.status), bucket: test.status === 'blocked' ? 'blocked' : 'guarded' }
 }
 
@@ -1460,6 +1155,10 @@ interface FlowViewSources {
   tests: Map<string, FlowTestRecord>
   /** The decisions ledger's flow dismissals, by flow id. */
   dismissals: Map<string, GuardDismissedFlow>
+  /** The decisions ledger's claim dismissals, by claim id. */
+  claimDismissals: Map<string, GuardDismissedClaim>
+  /** The claim corpus at the view's commit; null when none was written. */
+  claims: GuardClaimsFile | null
 }
 
 /** A flow's dismissal as the flow views carry it. */
@@ -1488,31 +1187,28 @@ async function loadFlowView(
 ): Promise<FlowViewSources | null> {
   const corpus = await loadGuardCorpusForView(repoKey, ref)
   if (!corpus) return null
-  const [flowsFile, tests, storedRun, result, decisions] = await Promise.all([
+  const [flowsFile, claims, tests, storedRun, result, decisions] = await Promise.all([
     readGuardFlowsFile(repoKey, corpus.commit),
+    readGuardClaimsFile(repoKey, corpus.commit),
     readFlowTestRecords(repoKey, corpus.commit),
     runOverride ? Promise.resolve(runOverride) : readGuardRunForView(repoKey, ref),
     readGuardResultForView(repoKey, ref),
     readGuardDecisionsStore(repoKey),
   ])
-  const latest = storedRun
-  return {
-    ...(corpus.commit !== undefined ? { commit: corpus.commit } : {}),
-    join: buildFlowJoin({
+  return viewFromSources(
+    {
       manifest: corpus.manifest,
-      latest,
+      latest: storedRun,
       result,
       flows: flowsFile,
+      claims,
       scenarios: corpus.scenarios,
+      tests,
+      decisions,
       externals: opts.externals === false ? null : await guardExternalSetupIndexForView(repoKey, ref),
-    }),
-    flowsFile,
-    latest,
-    result,
-    scenarios: corpus.scenarios,
-    tests,
-    dismissals: new Map(decisions.dismissedFlows.map((d) => [d.flowId, d])),
-  }
+    },
+    corpus.commit,
+  )
 }
 
 /** Every flow id the view knows, corpus order first, then manifest, then Manual. */
@@ -1890,17 +1586,13 @@ export async function readGuardFlowDetail(
   const flow = join.corpus.get(flowId)
   const surfaces = flowSurfaces(flowId, join)
   const sections = flowSections(flowId, join)
-  const indexes = await docSectionIndexes(repoKey, sections.map((s) => s.doc), view.commit)
-  const boundFingerprints = new Map(
-    (flow?.bindings ?? []).map((b) => [`${b.doc}\0${b.anchor}`, b.fingerprint]),
-  )
 
+  const claimByIdentity = claimsByIdentity(view.claims?.claims ?? [])
   const milestones: GuardFlowMilestoneView[] = (flow?.milestones ?? [])
     .slice()
     .sort((a, b) => a.order - b.order)
     .map((m) => {
-      const live = indexes.get(m.doc)?.sections.find((s) => s.anchor === m.anchor)
-      const bound = boundFingerprints.get(`${m.doc}\0${m.anchor}`)
+      const claim = claimByIdentity.get(claimIdentityKey(m.doc, m.anchor, m.claimTitle))
       // The cases ride as cases. They used to be folded into the claim sentence
       // as one semicolon-joined run-on, which a milestone with a dozen of them
       // turned into an unreadable paragraph and named none of them.
@@ -1910,13 +1602,9 @@ export async function readGuardFlowDetail(
         doc: m.doc,
         anchor: m.anchor,
         claimTitle: m.claimTitle,
+        ...(claim ? { claimId: claim.id } : {}),
         ...(cases.length > 0 ? { cases } : {}),
         ...(m.note ? { note: m.note } : {}),
-        ...(live ? { headingText: live.headingText } : {}),
-        live: live != null,
-        ...(bound ? { boundFingerprint: bound } : {}),
-        ...(live ? { currentFingerprint: live.fingerprint } : {}),
-        drifted: bound != null && live != null && bound !== live.fingerprint,
       }
     })
 
@@ -2221,160 +1909,20 @@ const EMPTY_CLAIMS_VIEW: GuardClaimsView = {
   untestable: [],
   totals: {
     claims: 0,
-    proven: 0,
-    failing: 0,
-    planned: 0,
-    gapped: 0,
-    unplanned: 0,
+    byStatus: Object.fromEntries(GUARD_COVERAGE_PLAIN_ORDER.map((w) => [w, 0])) as Record<GuardCoveragePlainStatus, number>,
     dismissed: 0,
     untestable: 0,
-    orphanedAnchors: 0,
   },
 }
 
 /**
- * The claims payload: every extracted claim with its full trace — scenario →
- * milestone → claim → doc sentence — read in both directions.
- *
- * A claim is addressed two different ways by the two layers that reference it,
- * and the join honours both: a FLOW milestone addresses it by IDENTITY
- * (doc + anchor + title, the same key a dismissal uses), a SCENARIO step's
- * milestone tag addresses it by ID. The section's live heading text and whether
- * its anchor still resolves come from the live doc, so a claim whose section was
- * removed says so instead of pointing at nothing.
- *
- * Coverage is claim-keyed and therefore always defined, and RUN-AWARE: a claim
- * is `proven` only when a proof step PASSED in the latest run, `failing` when
- * its proof steps ran and only failed, `planned` when it is carried or has a
- * proof with no verdict yet, `gapped` when the corpus accounts for it as a
- * `noFlowClaim` (with its reason), and `unplanned` when nothing mentions it —
- * the honest hole, never a mute blank.
+ * The Claims payload: every claim of the repository's documents with its status
+ * and its trace — flow → milestone → claim, and scenario step → claim — read
+ * from the stores at the view's commit. See {@link composeClaimCoverage}.
  */
 export async function readGuardClaims(repoKey: string, ref?: string): Promise<GuardClaimsView> {
-  const corpus = await loadGuardCorpusForView(repoKey, ref)
-  const commit = corpus?.commit
-  const [claimsFile, flowsFile, decisions, latest] = await Promise.all([
-    readGuardClaimsFile(repoKey, commit),
-    readGuardFlowsFile(repoKey, commit),
-    readGuardDecisionsStore(repoKey),
-    readGuardRunForView(repoKey, ref),
-  ])
-  if (!claimsFile) return EMPTY_CLAIMS_VIEW
-
-  const outcomeByScenarioId = new Map((latest?.scenarios ?? []).map((s) => [s.id, s.outcome]))
-
-  const scenarios = corpus?.scenarios ?? []
-  const sections = await headingTextIndex(
-    repoKey,
-    [...claimsFile.claims.map((c) => c.doc), ...claimsFile.untestable.map((u) => u.doc)],
-    commit,
-  )
-
-  // Flow milestones, indexed by the claim IDENTITY they address.
-  const flowsByIdentity = new Map<string, GuardClaimFlowRef[]>()
-  for (const flow of flowsFile?.flows ?? []) {
-    for (const m of flow.milestones) {
-      push(flowsByIdentity, claimIdentityKey(m.doc, m.anchor, m.claimTitle), {
-        flowId: flow.id,
-        title: flow.title,
-        milestoneOrder: m.order,
-        ...(m.note ? { note: m.note } : {}),
-      })
-    }
-  }
-
-  // Scenario steps, indexed by the claim ID their milestone tag names —
-  // teardown steps included (they carry milestones like any other step).
-  const scenariosById = new Map<string, Map<string, GuardClaimScenarioRef>>()
-  for (const s of scenarios) {
-    for (const [i, step] of guardExecutionSteps(s).entries()) {
-      for (const id of milestoneClaims(step.milestone)) {
-        let byScenario = scenariosById.get(id)
-        if (!byScenario) scenariosById.set(id, (byScenario = new Map()))
-        const row = byScenario.get(s.id) ?? { scenarioId: s.id, title: s.title, steps: [] }
-        row.steps.push(i + 1)
-        byScenario.set(s.id, row)
-      }
-    }
-  }
-
-  const gapByIdentity = new Map(
-    (flowsFile?.noFlowClaims ?? []).map((c) => [claimIdentityKey(c.doc, c.anchor, c.claimTitle), c.reason]),
-  )
-  const dismissed = new Set(
-    decisions.dismissedClaims.map((d) => dismissedClaimKey(d.doc, d.anchor, d.title)),
-  )
-
-  const claims: GuardClaimRow[] = claimsFile.claims.map((c) => {
-    const identity = guardClaimKey(c)
-    const flows = flowsByIdentity.get(identity) ?? []
-    const proofs = [...(scenariosById.get(c.id)?.values() ?? [])].map((p) => {
-      const outcome = outcomeByScenarioId.get(p.scenarioId)
-      return outcome ? { ...p, outcome } : p
-    })
-    const gapReason = gapByIdentity.get(identity)
-    const anyPass = proofs.some((p) => p.outcome === 'pass')
-    const anyFail = proofs.some((p) => p.outcome !== undefined && isGuardFailure(p.outcome))
-    const coverage: GuardClaimCoverage = anyPass
-      ? 'proven'
-      : anyFail
-        ? 'failing'
-        : proofs.length > 0 || flows.length > 0
-          ? 'planned'
-          : gapReason
-            ? 'gapped'
-            : 'unplanned'
-    const headingText = sections.get(`${c.doc}\0${c.anchor}`)
-    return {
-      id: c.id,
-      doc: c.doc,
-      anchor: c.anchor,
-      title: c.title,
-      claim: c.claim,
-      contentHash: c.contentHash,
-      ...(c.verifyVia ? { verifyVia: c.verifyVia } : {}),
-      ...(headingText !== undefined ? { headingText } : {}),
-      anchorLive: headingText !== undefined,
-      coverage,
-      ...(gapReason ? { gapReason } : {}),
-      dismissed: dismissed.has(identity),
-      flows,
-      scenarios: proofs,
-    }
-  })
-
-  const untestable: GuardUntestableRow[] = claimsFile.untestable.map((u) => {
-    const headingText = sections.get(`${u.doc}\0${u.anchor}`)
-    return {
-      doc: u.doc,
-      anchor: u.anchor,
-      text: u.text,
-      reason: u.reason,
-      ...(headingText !== undefined ? { headingText } : {}),
-      anchorLive: headingText !== undefined,
-    }
-  })
-
-  // Dismissed claims count under `dismissed` alone, so the totals sum to `claims`.
-  const count = (state: GuardClaimCoverage): number =>
-    claims.filter((c) => !c.dismissed && c.coverage === state).length
-  return {
-    extracted: true,
-    generatedAt: claimsFile.generatedAt,
-    claims,
-    untestable,
-    totals: {
-      claims: claims.length,
-      proven: count('proven'),
-      failing: count('failing'),
-      planned: count('planned'),
-      gapped: count('gapped'),
-      unplanned: count('unplanned'),
-      dismissed: claims.filter((c) => c.dismissed).length,
-      untestable: untestable.length,
-      orphanedAnchors: claims.filter((c) => !c.anchorLive).length,
-    },
-  }
+  const view = await loadFlowView(repoKey, ref)
+  return view ? composeClaimsView(view) : EMPTY_CLAIMS_VIEW
 }
 
 /**
@@ -2570,53 +2118,8 @@ function emptyInterfacesView(): GuardInterfacesView {
 }
 
 /**
- * `doc\0anchor` → the section's human heading text, from each live doc's section
- * index (the same index `composeDocCoverage` joins heading texts from) — slugs
- * are engine identifiers, not UI copy. A doc that no longer exists, escapes the
- * repo, or lost the section contributes nothing (the row carries no headingText).
- */
-async function headingTextIndex(
-  repoKey: string,
-  docs: readonly string[],
-  commit?: string,
-): Promise<Map<string, string>> {
-  const map = new Map<string, string>()
-  for (const [doc, index] of await docSectionIndexes(repoKey, docs, commit)) {
-    for (const sec of index.sections) map.set(`${doc}\0${sec.anchor}`, sec.headingText)
-  }
-  return map
-}
-
-/**
- * `doc` → its LIVE section index, for the joins that need more than the heading
- * (a milestone's live/gone state and the current section fingerprint). Reads go
- * through the `readRepoDoc` seam (the workspace's stored documents) at `commit` —
- * never `fs`, so a hosted repo joins with no working tree. A doc that escapes
- * the repo or no longer exists contributes no entry (tolerant by design).
- */
-async function docSectionIndexes(
-  repoKey: string,
-  docs: readonly string[],
-  commit?: string,
-): Promise<Map<string, DocSectionIndex>> {
-  const map = new Map<string, DocSectionIndex>()
-  for (const doc of new Set(docs)) {
-    // Confine to the repo tree — no traversal (mirrors the coverage route's guard).
-    if (path.isAbsolute(doc) || doc.split(/[\\/]/).includes('..')) continue
-    const content = await readRepoDoc(repoKey, doc, commit ? { commit } : undefined)
-    if (content == null) continue
-    map.set(doc, buildDocSectionIndex(doc, content))
-  }
-  return map
-}
-
-/**
- * The last-generate report for the DASHBOARD, with each birth-stage failure result
- * enriched with its section's human `headingText` — joined at read time from the
- * live doc's section index (the same `headingTextIndex` join `listGuardScenarios`
- * uses). Without this server join every group header degrades to a slug — and slugs
- * are never UI copy. `result.json` on disk carries no `headingText`; the enrichment
- * is read-side only. A doc/section that is gone contributes no key (tolerant).
+ * The last-generate report for the DASHBOARD: the stored report at the view's
+ * commit, falling back to the baseline's for a pinned commit that never generated.
  */
 export async function readGuardReport(repoKey: string, ref?: string): Promise<GuardGenerateReport | null> {
   const scope = await resolveGuardScope(repoKey, ref)
@@ -2636,30 +2139,7 @@ export async function readGuardReport(repoKey: string, ref?: string): Promise<Gu
       }
     }
   }
-  if (!report) return report
-  const held = report.heldSections ?? []
-  // A held section is unsettled by definition, so — like a finding — no stored
-  // scenario donates its heading client-side; join it server-side the same way.
-  if (report.birthFindings.length === 0 && held.length === 0) return report
-  const headingByDocAnchor = await headingTextIndex(repoKey, [
-    ...report.birthFindings.map((f) => f.doc),
-    ...held.map((h) => h.doc),
-  ], commit)
-  return {
-    ...report,
-    birthFindings: report.birthFindings.map((f) => {
-      const headingText = headingByDocAnchor.get(`${f.doc}\0${f.anchor}`)
-      return { ...f, ...(headingText ? { headingText } : {}) }
-    }),
-    ...(held.length > 0
-      ? {
-          heldSections: held.map((h) => {
-            const headingText = headingByDocAnchor.get(`${h.doc}\0${h.anchor}`)
-            return { ...h, ...(headingText ? { headingText } : {}) }
-          }),
-        }
-      : {}),
-  }
+  return report
 }
 
 /**
@@ -3135,10 +2615,7 @@ export async function dismissGuardClaim(
   claim: GuardDismissedClaim,
 ): Promise<GuardDecisions> {
   const decisions = await readGuardDecisionsStore(repoRoot)
-  const key = dismissedClaimKey(claim.doc, claim.anchor, claim.title)
-  const dismissedClaims = decisions.dismissedClaims.filter(
-    (d) => dismissedClaimKey(d.doc, d.anchor, d.title) !== key,
-  )
+  const dismissedClaims = decisions.dismissedClaims.filter((d) => d.claimId !== claim.claimId)
   dismissedClaims.push(claim)
   const next: GuardDecisions = { ...decisions, dismissedClaims }
   await writeGuardDecisionsStore(repoRoot, next)
@@ -3151,12 +2628,9 @@ export async function undismissGuardClaim(
   identity: GuardClaimIdentity,
 ): Promise<GuardDecisions> {
   const decisions = await readGuardDecisionsStore(repoRoot)
-  const key = dismissedClaimKey(identity.doc, identity.anchor, identity.title)
   const next: GuardDecisions = {
     ...decisions,
-    dismissedClaims: decisions.dismissedClaims.filter(
-      (d) => dismissedClaimKey(d.doc, d.anchor, d.title) !== key,
-    ),
+    dismissedClaims: decisions.dismissedClaims.filter((d) => d.claimId !== identity.claimId),
   }
   await writeGuardDecisionsStore(repoRoot, next)
   return next

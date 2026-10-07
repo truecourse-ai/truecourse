@@ -5,7 +5,6 @@ import type {
   GuardClaimIdentity,
   GuardClaimsView,
   GuardDecisions,
-  GuardDocCoverage,
   GuardFlowDetail,
   GuardFlowsView,
   GuardGenerateReport,
@@ -555,18 +554,6 @@ export async function getGuardReport(repoId: string, ref?: string): Promise<Guar
   }
 }
 
-/** Per-section coverage over a live spec doc; null on 404 (doc gone / no store). `ref` pins the read at a commit. */
-export async function getGuardCoverage(repoId: string, doc: string, ref?: string): Promise<GuardDocCoverage | null> {
-  try {
-    return await fetchApi<GuardDocCoverage>(
-      withRef(`/api/repos/${repoId}/guard/coverage?doc=${encodeURIComponent(doc)}`, ref),
-    );
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return null;
-    throw e;
-  }
-}
-
 /** The stored scenario inventory + recipe card, read by the flow page. `ref` pins the read at a commit. */
 export function getGuardScenarios(repoId: string, ref?: string): Promise<GuardScenarioInventory> {
   return fetchApi<GuardScenarioInventory>(withRef(`/api/repos/${repoId}/guard/scenarios`, ref));
@@ -683,11 +670,10 @@ export function getGuardDecisions(repoId: string): Promise<GuardDecisions> {
   return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/decisions`);
 }
 
-/** The identity a dismissal keys on: doc + section anchor + the extracted claim's
- *  stable text (a finding's `claim`). Re-exported for the guard components. */
+/** The identity a dismissal keys on: the claim's id. Re-exported for the guard components. */
 export type { GuardClaimIdentity };
 
-/** Dismiss a finding's claim — writes `scenarios/decisions.json`; returns the
+/** Dismiss a claim — writes `scenarios/decisions.json`; returns the
  *  updated decisions so the caller re-derives dismissed state without a GET. */
 export function dismissGuardClaim(
   repoId: string,
@@ -699,7 +685,7 @@ export function dismissGuardClaim(
   });
 }
 
-/** Reverse a dismissal by its identity; returns the updated decisions. */
+/** Reverse a dismissal by the claim's id; returns the updated decisions. */
 export function undismissGuardClaim(
   repoId: string,
   claim: GuardClaimIdentity,

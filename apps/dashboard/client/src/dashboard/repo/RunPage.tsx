@@ -23,7 +23,7 @@ import { useGuardRun } from './use-guard-run';
 
 export function RunPage({ repo, runId }: { repo: Repo; runId: string }) {
   useGuardTabJump();
-  const { openSpecSection, openGuardFlow } = useGuardView();
+  const { openSpecDoc, openGuardFlow } = useGuardView();
   const { run: shown, loading, error } = useGuardRun(repo.id, runId);
 
   const { activeId, open } = useGuardTabs('result', repo.id);
@@ -95,7 +95,7 @@ export function RunPage({ repo, runId }: { repo: Repo; runId: string }) {
                   scenario={active}
                   runId={shown.run.runId}
                   runFlow={(shown.runFlows ?? []).find((f) => f.flowId === active.flowId) ?? null}
-                  onOpenSpec={openSpecSection}
+                  onOpenSpec={openSpecDoc}
                   onOpenFlow={openGuardFlow}
                 />
               ) : (

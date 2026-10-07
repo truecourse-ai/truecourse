@@ -60,22 +60,22 @@ export const guardRuns = pgTable(
     branch: text('branch'),
     /** The run's id (`<iso>_<short>`), also the evidence-dir key. */
     runId: text('run_id').notNull(),
-    /** Full `GuardLatest`: run envelope, summary, per-scenario results, section rollups. */
+    /** Full `GuardLatest`: run envelope, summary, per-scenario results. */
     snapshot: jsonb('snapshot').$type<unknown>().notNull(),
     /** Denormalized `GuardSummary` counts for the run trend (avoids parsing `snapshot`). */
     summary: jsonb('summary').$type<unknown>().notNull(),
     /** Per-run evidence manifest: content hashes, tagged `json-v1:` for serialized text. */
     evidence: jsonb('evidence').$type<unknown>().notNull().default({}),
     /**
-     * The run's SECTION SUMMARY `{ "<docRef>#<anchor>": status }`, what every
-     * section the run's scenario set covered was worth at that moment, written
+     * The run's CLAIM SUMMARY `{ "<docRef>#<claimId>": status }`, what every
+     * claim of the repository's documents was worth at that moment, written
      * beside the snapshot when the run is persisted. Null for a run whose
      * summary could not be derived, which Home's trend leaves out.
      */
-    sections: jsonb('sections').$type<unknown>(),
+    claims: jsonb('claims').$type<unknown>(),
     /**
      * The run's FLOW SUMMARY `{ "<flowId>": status }`, what every flow of the
-     * repository was worth at that moment, written beside `sections`. It is
+     * repository was worth at that moment, written beside `claims`. It is
      * what Home's trend counts. Null for a run stored before flows were
      * recorded, and for one whose flow corpus could not be read.
      */

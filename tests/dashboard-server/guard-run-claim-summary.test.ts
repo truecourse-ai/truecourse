@@ -1,10 +1,10 @@
 /**
  * A stored run's COVERAGE SUMMARIES, the history Home is drawn from: its
- * SECTIONS, which the changes widget follows, and its FLOWS, which the trend
+ * CLAIMS, which the changes widget follows, and its FLOWS, which the trend
  * counts.
  *
  * Three things are pinned here: both summaries are written when a run is
- * persisted, and the two rules that keep history honest. A run whose section
+ * persisted, and the two rules that keep history honest. A run whose claim
  * summary cannot be derived is logged and left out of history entirely; one
  * whose FLOW summary cannot be derived is still recorded, and is simply not a
  * point of the flow trend. Neither is ever guessed.
@@ -13,8 +13,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { manifestPath } from '@truecourse/guard-runner';
-import type { GuardLatest } from '@truecourse/shared';
+import { guardFlowsPath, manifestPath, writeGuardClaims } from '@truecourse/guard-runner';
+import { claimContentHash, type GuardLatest } from '@truecourse/shared';
 import { readGuardRunCoverage } from '@truecourse/core/lib/guard-store';
 import { readGuardRunFlowSummaryFromTree } from '@truecourse/core/commands/guard-read';
 import { log } from '@truecourse/core/lib/logger';
@@ -26,13 +26,45 @@ import { persistGuardRun } from '../../apps/dashboard/server/src/jobs/materializ
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
 
 const DOC = 'context/site-docs-acme/refunds.md';
-const BODY = '# Refunds\n\nA refund settles within two business days.\n\n# Timing\n\nWithin two days.\n';
+const REFUNDS_CLAIM = `claim::${DOC}::refunds`;
+const TIMING_CLAIM = `claim::${DOC}::timing`;
 
 let repo: TestFixture;
 
-/** The scenario set: one flow bound to the Refunds section, plus any extra entries. */
+/** The claim corpus: two claims, one the flow carries and one nothing does. */
+function writeClaims(repoPath: string): void {
+  const refunds = { doc: DOC, anchor: 'refunds', title: 'a refund settles', claim: 'A refund settles within two business days.' };
+  const timing = { doc: DOC, anchor: 'timing', title: 'within two days', claim: 'Within two days.' };
+  writeGuardClaims(repoPath, {
+    version: 1,
+    generatedAt: '2026-09-01T00:00:00.000Z',
+    claims: [
+      { id: REFUNDS_CLAIM, ...refunds, contentHash: claimContentHash(refunds) },
+      { id: TIMING_CLAIM, ...timing, contentHash: claimContentHash(timing) },
+    ],
+    untestable: [],
+  });
+}
+
+/** The scenario set: one flow carrying the refunds claim, plus any extra manifest entries. */
 function writeManifest(repoPath: string, extraFlows: object[] = []): void {
   fs.mkdirSync(path.dirname(manifestPath(repoPath)), { recursive: true });
+  fs.writeFileSync(
+    guardFlowsPath(repoPath),
+    JSON.stringify({
+      version: 1,
+      generatedAt: '2026-09-01T00:00:00.000Z',
+      flows: [
+        {
+          id: 'f1', title: 'a refund settles', goal: 'settle a refund', fingerprint: 'sha256:f',
+          milestones: [{ order: 1, doc: DOC, anchor: 'refunds', claimTitle: 'a refund settles', sentences: ['refunds'] }],
+          bindings: [{ doc: DOC, anchor: 'refunds', fingerprint: 'sha256:x', sentences: ['refunds'] }],
+          composedOf: [], synthesisInputsHash: 'sha256:i',
+        },
+      ],
+      noFlowClaims: [],
+    }),
+  );
   fs.writeFileSync(
     manifestPath(repoPath),
     JSON.stringify({
@@ -82,8 +114,6 @@ beforeEach(async () => {
   installWorkTreeDocReader();
   clearTestRegistry();
   repo = await setupTestFixture();
-  fs.mkdirSync(path.join(repo.repoPath, path.dirname(DOC)), { recursive: true });
-  fs.writeFileSync(path.join(repo.repoPath, DOC), BODY);
 });
 
 afterEach(async () => {
@@ -97,6 +127,7 @@ afterEach(async () => {
 
 describe('a run’s coverage summaries', () => {
   it('are written when the run is persisted', async () => {
+    writeClaims(repo.repoPath);
     writeManifest(repo.repoPath);
 
     await persistGuardRun(
@@ -108,11 +139,11 @@ describe('a run’s coverage summaries', () => {
     const [stored, ...rest] = await readGuardRunCoverage(repo.repoPath);
     expect(rest).toHaveLength(0);
     expect(stored).toMatchObject({ runId: 'run-1', ranAt: '2026-09-01T10:00:00.000Z' });
-    // Both sections of the document the scenario set covers, in the five words:
-    // the one the run failed, and the one nothing accounts for.
-    expect(stored!.sections).toEqual({
-      [`${DOC}#refunds`]: 'failed',
-      [`${DOC}#timing`]: 'blocked',
+    // Both claims of the corpus, in the five words: the one the run failed,
+    // and the one nothing carries.
+    expect(stored!.claims).toEqual({
+      [`${DOC}#${REFUNDS_CLAIM}`]: 'failed',
+      [`${DOC}#${TIMING_CLAIM}`]: 'blocked',
     });
     // The flow the failing scenario belongs to, in the Flows page's words.
     expect(stored!.flows).toEqual({ f1: 'failed' });
@@ -122,6 +153,7 @@ describe('a run’s coverage summaries', () => {
     // An entry the last generate marked orphaned: its scenario still runs and
     // shows on the Flows page under "not in specs", but it is no flow of the
     // repository any more, so the trend must not count it.
+    writeClaims(repo.repoPath);
     writeManifest(repo.repoPath, [
       {
         flowId: 'retired-flow',
@@ -148,6 +180,7 @@ describe('a run’s coverage summaries', () => {
   });
 
   it('derives the same flow summary from the working tree as from the store, retired flow included', async () => {
+    writeClaims(repo.repoPath);
     writeManifest(repo.repoPath, [
       {
         flowId: 'retired-flow',
@@ -171,20 +204,22 @@ describe('a run’s coverage summaries', () => {
   });
 
   it('records the coverage handed to it instead of deriving one', async () => {
+    writeClaims(repo.repoPath);
     writeManifest(repo.repoPath);
     await persistGuardRun(
       { repoKey: repo.repoPath, commitSha: 'abcdef1234567890' },
       repo.repoPath,
       run('run-5', '2026-09-05T10:00:00.000Z'),
-      { coverage: { sections: {}, flows: { f1: 'succeeded' } } },
+      { coverage: { claims: {}, flows: { f1: 'succeeded' } } },
     );
     const [stored] = await readGuardRunCoverage(repo.repoPath);
-    expect(stored).toMatchObject({ runId: 'run-5', sections: {}, flows: { f1: 'succeeded' } });
+    expect(stored).toMatchObject({ runId: 'run-5', claims: {}, flows: { f1: 'succeeded' } });
   });
 
   it('gives a scenario that belongs to no flow its Manual pseudo-flow, as the Flows page does', async () => {
     // No manifest: the run's scenario belongs to no synthesized flow, and the
     // flow list shows it under a Manual pseudo-flow rather than not at all.
+    writeClaims(repo.repoPath);
     await persistGuardRun(
       { repoKey: repo.repoPath, commitSha: 'abcdef1234567890' },
       repo.repoPath,
@@ -195,19 +230,18 @@ describe('a run’s coverage summaries', () => {
     expect(stored!.flows).toEqual({ 'manual:s1': 'failed' });
   });
 
-  it('leaves a run whose sections cannot be derived without either, and says so', async () => {
-    // No scenario set, and the document the run names is not readable: there is
-    // nothing to derive a section from.
-    fs.rmSync(path.join(repo.repoPath, DOC));
+  it('leaves a run whose claims cannot be derived without either, and says so', async () => {
+    // No claim corpus: there is nothing to derive a claim's word from.
     const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    writeManifest(repo.repoPath);
 
     await persistGuardRun(
       { repoKey: repo.repoPath, commitSha: 'abcdef1234567890' },
       repo.repoPath,
-      run('run-2', '2026-09-02T10:00:00.000Z'),
+      run('run-6', '2026-09-06T10:00:00.000Z'),
     );
 
     expect(await readGuardRunCoverage(repo.repoPath)).toEqual([]);
-    expect(warn.mock.calls.map((call) => String(call[0])).join('\n')).toContain('run-2');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('no claim summary could be derived'));
   });
 });

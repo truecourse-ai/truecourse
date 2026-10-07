@@ -80,3 +80,10 @@ export function claimId(doc: string, sentences: readonly string[], repeat = 0): 
 export function isClaimId(id: string): boolean {
   return id.startsWith(CLAIM_ID_PREFIX)
 }
+
+/** The document a claim id names, or null for an id not of this form. */
+export function claimIdDoc(id: string): string | null {
+  if (!isClaimId(id)) return null
+  const cut = id.lastIndexOf('::')
+  return cut <= CLAIM_ID_PREFIX.length ? null : id.slice(CLAIM_ID_PREFIX.length, cut)
+}

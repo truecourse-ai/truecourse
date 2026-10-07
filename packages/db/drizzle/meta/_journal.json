@@ -288,6 +288,13 @@
       "when": 1790850000000,
       "tag": "0040_workspace_display",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1790936400000,
+      "tag": "0041_guard_runs_claims",
+      "breakpoints": true
     }
   ]
 }

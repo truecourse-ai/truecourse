@@ -34,7 +34,7 @@ describe('guard decisions store', () => {
 
   it('dismiss adds a claim; a corrupt file reads as empty (never blocks a run)', () => {
     const r = repo();
-    const claim = { doc: 'docs/cli.md', anchor: 'version', title: 'the --version claim', dismissedAt: '2026-07-08T00:00:00.000Z' };
+    const claim = { claimId: 'claim::docs/cli.md::version', dismissedAt: '2026-07-08T00:00:00.000Z' };
     const after = dismissGuardClaim(r, claim);
     expect(after.dismissedClaims).toEqual([claim]);
     expect(readGuardDecisions(r).dismissedClaims).toEqual([claim]);
@@ -45,7 +45,7 @@ describe('guard decisions store', () => {
 
   it('re-dismissing the same identity refreshes in place (no duplicate)', () => {
     const r = repo();
-    const id = { doc: 'docs/cli.md', anchor: 'version', title: 'the --version claim' };
+    const id = { claimId: 'claim::docs/cli.md::version' };
     dismissGuardClaim(r, { ...id, dismissedAt: 't1' });
     const after = dismissGuardClaim(r, { ...id, dismissedAt: 't2', note: 'flaky' });
     expect(after.dismissedClaims).toHaveLength(1);
@@ -54,7 +54,7 @@ describe('guard decisions store', () => {
 
   it('undismiss removes by identity (no-op when absent)', () => {
     const r = repo();
-    const id = { doc: 'docs/cli.md', anchor: 'version', title: 'the --version claim' };
+    const id = { claimId: 'claim::docs/cli.md::version' };
     dismissGuardClaim(r, { ...id, dismissedAt: 't1' });
     expect(undismissGuardClaim(r, id).dismissedClaims).toEqual([]);
     // A second undismiss (already gone) is a clean no-op.

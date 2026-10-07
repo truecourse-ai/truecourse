@@ -50,7 +50,7 @@ import type {
   GuardNeedsSetup,
   GuardOutcome,
   GuardResultStage,
-  GuardSectionCoverageStatus,
+  GuardCoverageStatus,
   GuardTestStatus,
 } from '@truecourse/shared';
 
@@ -182,12 +182,12 @@ const VOCAB = {
   // the coverage record rather than a verdict about the repo, which is why its word
   // is Blocked and its sentence says what closes it.
   unguarded: { sentence: 'nothing accounts for this yet' },
-} satisfies Record<GuardSectionCoverageStatus, GuardStatusVocab>;
+} satisfies Record<GuardCoverageStatus, GuardStatusVocab>;
 
-// Compile-time backstop: a new `GuardSectionCoverageStatus` (a new outcome,
+// Compile-time backstop: a new `GuardCoverageStatus` (a new outcome,
 // driver, or gap kind) with no entry above makes `_UnmappedStatus` non-`never`
 // and fails the build, a state the UI can't name never ships.
-type _UnmappedStatus = Exclude<GuardSectionCoverageStatus, keyof typeof VOCAB>;
+type _UnmappedStatus = Exclude<GuardCoverageStatus, keyof typeof VOCAB>;
 const _allStatusesNamed: _UnmappedStatus extends never ? true : never = true;
 void _allStatusesNamed;
 
@@ -197,7 +197,7 @@ void _allStatusesNamed;
  * of its own, its five-word status still speaks for it, and throws under test so
  * the mapping is fixed rather than papered over.
  */
-function vocab(status: GuardSectionCoverageStatus): GuardStatusVocab {
+function vocab(status: GuardCoverageStatus): GuardStatusVocab {
   const entry: GuardStatusVocab | undefined = VOCAB[status];
   if (entry) return entry;
   if (import.meta.env.MODE === 'test') throw new Error(`Guard status with no plain status: ${status}`);
@@ -208,18 +208,18 @@ function vocab(status: GuardSectionCoverageStatus): GuardStatusVocab {
 export const guardPlainStatus = guardCoveragePlainStatus;
 
 /** The one WORD a status wears on a coverage surface, wherever it appears. */
-export function guardStatusWord(status: GuardSectionCoverageStatus): string {
+export function guardStatusWord(status: GuardCoverageStatus): string {
   return GUARD_FLOW_STATUS_WORD[guardPlainStatus(status)];
 }
 
 /** The state's own name, for a surface that must tell siblings apart, the
  *  five-word status unless this state needs naming apart from them. */
-export function guardStatusLabel(status: GuardSectionCoverageStatus): string {
+export function guardStatusLabel(status: GuardCoverageStatus): string {
   return vocab(status).label ?? guardStatusWord(status);
 }
 
 /** The longer explainer, for the states whose name doesn't say what happened. */
-export function guardStatusHint(status: GuardSectionCoverageStatus): string | undefined {
+export function guardStatusHint(status: GuardCoverageStatus): string | undefined {
   return vocab(status).hint;
 }
 
@@ -250,7 +250,7 @@ export const GUARD_TEST_VERDICT_WORD: Record<GuardFlowPlainStatus, string> = {
 
 /** A stored test's status and which execution decided it. */
 export interface GuardTestStatusView {
-  status: GuardSectionCoverageStatus;
+  status: GuardCoverageStatus;
   plain: GuardFlowPlainStatus;
   /** True when no run covers the test and its BIRTH execution decided the status. */
   birth: boolean;
@@ -270,11 +270,11 @@ export function guardTestStatusView(test: {
   /** The status the generate stored it with (absent on hand-written work). */
   committed?: GuardTestStatus;
   /** Overrides the derivation when the server already resolved both (flow rows). */
-  status?: GuardSectionCoverageStatus;
+  status?: GuardCoverageStatus;
   stage?: GuardResultStage;
 }): GuardTestStatusView {
   const neverRun = test.outcome == null && test.committed === 'never-run';
-  const status: GuardSectionCoverageStatus =
+  const status: GuardCoverageStatus =
     test.status ??
     test.outcome ??
     (test.committed === 'failing' ? 'fail' : neverRun ? 'never-run' : 'guarded');
@@ -532,10 +532,6 @@ export function guardNeedsSetupCta(needsSetup: GuardNeedsSetup): string {
  * who has no banner in front of them.
  */
 export const GUARD_NEEDS_SETUP_NEXT = `A real or sandbox account both work, provide one, then re-run ${GUARD_REGENERATE_ACTION} to author these tests.`;
-
-/** The work that DRAFTS a seed, the one action a missing-data gap with no
- *  `api.seed` has, named once for every surface that offers it. */
-export const GUARD_SEED_INIT_ACTION = 'Flow setup';
 
 /**
  * What this gap concretely NEEDS, in plain words, the sentence half of the pair.

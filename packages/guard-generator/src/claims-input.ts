@@ -11,7 +11,6 @@
 import fs from 'node:fs'
 import {
   ClaimsFileSchema,
-  dismissedClaimKey,
   parseDocTree,
   sentenceKey,
   type Claim,
@@ -117,7 +116,7 @@ export interface ClaimAreaInputsOptions {
   placed: readonly PlacedClaim[]
   /** Each document's canonical area ids. */
   areaTagsByDoc: ReadonlyMap<string, readonly string[]>
-  /** The user's dismissals, by {@link dismissedClaimKey}; a dismissed claim enters no flow. */
+  /** The user's dismissals, by claim id; a dismissed claim enters no flow. */
   dismissals: ReadonlyMap<string, GuardDismissedClaim>
   /** `doc\0sentenceKey` of every sentence a conflict verdict rejected; a claim read from one enters no flow. */
   suppressed: ReadonlySet<string>
@@ -130,8 +129,8 @@ export interface ClaimAreaInputs {
   gaps: GuardCoverageGap[]
   /** One line per document for the run's facts, plus one per claim left out. */
   lines: string[]
-  /** The {@link dismissedClaimKey} of every placed claim, for orphaned-dismissal accounting. */
-  claimKeys: Set<string>
+  /** The id of every placed claim, for orphaned-dismissal accounting. */
+  claimIds: Set<string>
 }
 
 /**
@@ -151,7 +150,7 @@ export function claimAreaInputs(opts: ClaimAreaInputsOptions): ClaimAreaInputs {
   const inputs: FlowAreaDocInput[] = []
   const gaps: GuardCoverageGap[] = []
   const lines: string[] = []
-  const claimKeys = new Set<string>()
+  const claimIds = new Set<string>()
   for (const doc of opts.docs) {
     const placed = placedByDoc.get(doc.doc) ?? []
     const live: FlowClaimInput[] = []
@@ -161,13 +160,12 @@ export function claimAreaInputs(opts: ClaimAreaInputsOptions): ClaimAreaInputs {
       const reasons: string[] = []
       let kept = 0
       for (const { claim, anchor } of here) {
-        const key = dismissedClaimKey(doc.doc, anchor, claim.statement)
-        claimKeys.add(key)
+        claimIds.add(claim.id)
         if (claim.sentences.some((sentence) => opts.suppressed.has(`${doc.doc}\0${sentence}`))) {
           lines.push(`${doc.doc}: "${oneLine(claim.statement)}" left out, a resolved conflict rejected its sentence`)
           continue
         }
-        const dismissal = opts.dismissals.get(key)
+        const dismissal = opts.dismissals.get(claim.id)
         if (dismissal) {
           gaps.push({ doc: doc.doc, anchor, kind: 'dismissed', reason: dismissedReason(claim.statement, dismissal.note) })
           continue
@@ -196,5 +194,5 @@ export function claimAreaInputs(opts: ClaimAreaInputsOptions): ClaimAreaInputs {
       claims: live,
     })
   }
-  return { inputs, gaps, lines, claimKeys }
+  return { inputs, gaps, lines, claimIds }
 }

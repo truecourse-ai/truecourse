@@ -60,7 +60,7 @@ export function GuardFlowsPane({
    * reader could not have seen never gets made.
    */
   decisions?: GuardDecisionsState;
-  onOpenSpec: (doc: string, section: string) => void;
+  onOpenSpec: (doc: string) => void;
   onOpenInterface: (interfaceId: string) => void;
   /**
    * Jump to the Dependencies tab, on the named service's card, the needs-setup

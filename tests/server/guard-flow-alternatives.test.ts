@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { composeDocCoverage, type GuardCoverageSources } from '../../packages/core/src/commands/guard-read.js'
+import { composeClaimCoverage, type GuardCoverageSources } from '../../packages/core/src/commands/guard-read.js'
+import { claimContentHash } from '../../packages/shared/src/guard/claims.js'
 import {
   GuardManifestSchema, GuardFlowsFileSchema, GuardGenerateReportSchema, GuardScenarioSchema, GuardLatestSchema,
   coversFlowMilestones, scenarioMilestoneProof, flowFingerprint,
@@ -7,15 +8,19 @@ import {
 } from '@truecourse/shared'
 
 const doc = 'docs/spec.md'
-const content = '# Expenses\nAdd and edit expenses.'
 const milestones: GuardFlowMilestone[] = [1, 2].map((order) => ({
   order, doc, anchor: 'expenses', claimTitle: `Expense milestone ${order}`, sentences: ['sentence:expenses'], proofDrivers: ['web', 'api'],
 }))
 function sources(ms = milestones): GuardCoverageSources {
   const fingerprint = flowFingerprint(ms)
   const bindings = [{ doc, anchor: 'expenses', fingerprint: 'sha256:section', sentences: ['sentence:expenses'] }]
+  const claims = ms.map((m) => {
+    const body = { doc, anchor: m.anchor, title: m.claimTitle, claim: `${m.claimTitle}.` }
+    return { id: `claim-${m.order}`, ...body, contentHash: claimContentHash(body) }
+  })
   return {
     latest: null, result: null,
+    claims: { version: 1, generatedAt: '2026-09-08T00:00:00Z', claims, untestable: [] },
     flows: GuardFlowsFileSchema.parse({ version: 1, generatedAt: '2026-09-08T00:00:00Z', flows: [{
       id: 'expenses', title: 'Expenses', goal: 'Manage expenses', fingerprint, milestones: ms, bindings, composedOf: [], synthesisInputsHash: 'sha256:inputs',
     }], noFlowClaims: [] }),
@@ -26,9 +31,10 @@ function sources(ms = milestones): GuardCoverageSources {
     }] }),
   }
 }
+/** The first claim's reading: its own word, and the flow that carries it. */
 function read(s: GuardCoverageSources) {
-  const section = composeDocCoverage(doc, content, s).sections[0]
-  return { section, flow: section.flows[0] }
+  const claim = composeClaimCoverage(s).claims[0]
+  return { claim, flow: claim.flows[0] }
 }
 
 describe('coverage across alternative flow proofs', () => {
@@ -47,9 +53,9 @@ describe('coverage across alternative flow proofs', () => {
   })
 
   it('a successful full web proof settles the flow while keeping the unavailable API alternative visible', () => {
-    const { section, flow } = read(sources())
+    const { claim, flow } = read(sources())
     expect(flow.status).toBe('guarded')
-    expect(section.status).toBe('guarded')
+    expect(claim.status).toBe('guarded')
     expect(flow.surfaces.find((s) => s.gap)).toMatchObject({ status: 'no-interface', coveredByAlternative: true })
   })
 
@@ -93,13 +99,9 @@ describe('coverage across alternative flow proofs', () => {
     expect(read(s).flow.status).toBe('no-interface')
   })
 
-  it('uses manifest requirements without flows.json, and keeps legacy manifests conservative', () => {
+  it('joins a claim to its flows through the flow corpus alone: without flows.json nothing carries it', () => {
     const s = sources(); s.flows = null
-    expect(read(s).flow.status).toBe('guarded')
-    delete s.manifest!.flows[0].milestones
-    delete s.manifest!.flows[0].scenarios[0].milestoneCoverage
-    expect(read(s).flow.status).toBe('no-interface')
-    expect(GuardManifestSchema.safeParse(s.manifest).success).toBe(true)
+    expect(read(s).claim).toMatchObject({ status: 'unguarded', flows: [] })
   })
 
   it('does not reuse proof of an older flow composition', () => {

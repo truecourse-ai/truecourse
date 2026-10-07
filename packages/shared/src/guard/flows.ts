@@ -25,7 +25,7 @@ import { GuardDriverIdSchema } from './drivers.js'
 /**
  * One step of a flow's path: an extracted claim, addressed by the section it was
  * extracted under. `order` is the position in the path (1-based); `claimTitle` is
- * the extracted claim's stable text — the same identity `dismissedClaimKey` uses.
+ * the extracted claim's stable text — the identity a flow milestone resolves its claim through.
  */
 export const GuardFlowMilestoneSchema = z
   .object({

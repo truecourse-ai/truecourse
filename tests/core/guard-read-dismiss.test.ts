@@ -3,9 +3,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  composeDocCoverage,
+  composeClaimCoverage,
   readGuardEvidenceAt,
 } from '../../packages/core/src/commands/guard-read';
+import { claimContentHash } from '../../packages/shared/src/guard/claims';
 import type { GuardGenerateReport } from '../../packages/shared/src/index';
 import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
 
@@ -24,7 +25,6 @@ function repo(): string {
 }
 
 const DOC = 'docs/cli.md';
-const CONTENT = ['# Version', 'the --version flag prints the semver'].join('\n');
 
 function report(over: Partial<GuardGenerateReport>): GuardGenerateReport {
   return {
@@ -44,19 +44,28 @@ function report(over: Partial<GuardGenerateReport>): GuardGenerateReport {
   };
 }
 
-describe('composeDocCoverage — dismissed status', () => {
-  it('paints a section with a dismissed gap as status "dismissed" and totals it', () => {
-    const cov = composeDocCoverage(DOC, CONTENT, {
+describe('composeClaimCoverage — dismissed status', () => {
+  it('paints a dismissed claim as "dismissed" with the note, and totals it under Not testable', () => {
+    const body = { doc: DOC, anchor: 'version', title: 'the --version flag prints the semver', claim: 'the --version flag prints the semver.' };
+    const view = composeClaimCoverage({
       manifest: null,
       latest: null,
-      result: report({
-        coverageGaps: [{ doc: DOC, anchor: 'version', kind: 'dismissed', reason: 'dismissed: the --version claim' }],
-      }),
+      result: report({}),
+      claims: {
+        version: 1,
+        generatedAt: '2026-07-08T00:00:00.000Z',
+        claims: [{ id: 'claim::version', ...body, contentHash: claimContentHash(body) }],
+        untestable: [],
+      },
+      decisions: {
+        version: 1,
+        dismissedClaims: [{ claimId: 'claim::version', dismissedAt: '2026-07-08T00:00:00.000Z', note: 'not a product promise' }],
+        dismissedFlows: [],
+      },
     });
-    const section = cov.sections.find((s) => s.anchor === 'version')!;
-    expect(section.status).toBe('dismissed');
-    expect(section.reason).toContain('dismissed');
-    expect(cov.totals.dismissed).toBe(1);
+    expect(view.claims[0]).toMatchObject({ status: 'dismissed', dismissed: true, reason: 'not a product promise' });
+    expect(view.totals.dismissed).toBe(1);
+    expect(view.totals.byStatus['not-testable']).toBe(1);
   });
 });
 

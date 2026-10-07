@@ -272,7 +272,7 @@ afterEach(() => {
 });
 
 describe('one document of Context', () => {
-  it('opens the coverage page through the repository with the most to say', async () => {
+  it('opens the document through the repository with the most to say', async () => {
     const calls = serve();
     renderAt(docAt(REFUNDS_REF));
 
@@ -287,7 +287,7 @@ describe('one document of Context', () => {
 
     // The worst reading is the one it opened on: acme/api, which failed.
     await waitFor(() =>
-      expect(calls.some((c) => c.startsWith(`/api/repos/${REPO_B.id}/guard/coverage`))).toBe(true),
+      expect(calls.some((c) => c.startsWith(`/api/repos/${REPO_B.id}/spec/doc`))).toBe(true),
     );
   });
 

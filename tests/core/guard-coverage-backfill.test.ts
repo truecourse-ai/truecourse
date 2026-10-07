@@ -35,7 +35,7 @@ async function storeRun(runId: string, day: number): Promise<void> {
     runId,
     ranAt: at(day),
     commit: null,
-    sections: { 'docs/a.md#a': 'succeeded' },
+    claims: { 'docs/a.md#claim::docs/a.md::a': 'succeeded' },
     flows: null,
   });
 }

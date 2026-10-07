@@ -19,7 +19,7 @@ import {
   worstCoverageStatus,
   worstCoveragePlainStatus,
   type GuardCoveragePlainStatus,
-  type GuardSectionCoverageStatus,
+  type GuardCoverageStatus,
 } from './dashboard.js'
 import {
   emptyGapDisplayTotals,
@@ -172,16 +172,16 @@ export interface GuardLastGenerateSummary {
 }
 
 /**
- * The ALL-sections tally: every section of every kept spec doc, counted under
- * the five coverage words through the SAME per-section derivation the doc view
- * renders (`composeDocCoverage`) — so the overview bar and the doc detail can
- * never disagree, and it always sums to the real section count. This is the
- * whole-corpus truth the manifest-scoped `GuardCoverageSummary.byStatus` is not:
- * that one counts only flow-bound sections, so Blocked/Not-testable sections
- * (no flows to bind them) are invisible to it by construction.
+ * The ALL-claims tally: every claim of every kept spec doc, counted under the
+ * five coverage words through the SAME per-claim derivation the Claims view
+ * renders — so the overview bar and the claim list can never disagree, and it
+ * always sums to the real claim count. This is the whole-corpus truth the
+ * manifest-scoped `GuardCoverageSummary.byStatus` is not: that one counts only
+ * flow-bound sections, so a Blocked or Not testable claim no flow carries is
+ * invisible to it by construction.
  */
-export interface GuardSectionTotals {
-  /** Every section across the kept docs — the bar's denominator. */
+export interface GuardClaimTotals {
+  /** Every claim across the kept docs — the bar's denominator. */
   total: number
   byStatus: Record<GuardCoveragePlainStatus, number>
 }
@@ -189,7 +189,7 @@ export interface GuardSectionTotals {
 export interface GuardStatusSummary {
   coverage: GuardCoverageSummary | null
   /** Null when the caller could not derive it (no corpus / doc reads unavailable). */
-  sections: GuardSectionTotals | null
+  claims: GuardClaimTotals | null
   lastRun: GuardLastRunSummary | null
   lastGenerate: GuardLastGenerateSummary | null
 }
@@ -199,11 +199,11 @@ export function composeGuardStatus(
   manifest: GuardManifest | null,
   latest: GuardLatest | null,
   result: GuardGenerateReport | null,
-  sections: GuardSectionTotals | null = null,
+  claims: GuardClaimTotals | null = null,
 ): GuardStatusSummary {
   return {
     coverage: manifest ? summarizeCoverage(manifest, latest) : null,
-    sections,
+    claims,
     lastRun: latest
       ? { ranAt: latest.run.ranAt, branch: latest.run.branch, commit: latest.run.commit, summary: latest.summary }
       : null,
@@ -356,14 +356,14 @@ function runOutcomeLookup(latest: GuardLatest | null): (id: string) => GuardOutc
 function manifestFlowCoverageStatus(
   flow: GuardManifestFlow,
   outcomeOf: (id: string) => GuardOutcome | undefined,
-): GuardSectionCoverageStatus {
-  const statuses: GuardSectionCoverageStatus[] = [
-    ...flow.scenarios.map((s): GuardSectionCoverageStatus => {
+): GuardCoverageStatus {
+  const statuses: GuardCoverageStatus[] = [
+    ...flow.scenarios.map((s): GuardCoverageStatus => {
       const outcome = outcomeOf(s.id)
       if (outcome) return outcome
       return s.status === 'never-run' ? 'never-run' : s.status === 'failing' ? 'fail' : 'guarded'
     }),
-    ...flow.gaps.flatMap((g): GuardSectionCoverageStatus[] => {
+    ...flow.gaps.flatMap((g): GuardCoverageStatus[] => {
       const kind = gapDisplayKind(g)
       return kind ? [kind] : []
     }),

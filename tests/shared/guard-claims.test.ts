@@ -6,7 +6,6 @@ import {
   claimIdentityKey,
   claimsById,
   claimsByIdentity,
-  dismissedClaimKey,
   guardClaimKey,
   isClaimContentCurrent,
   type GuardClaim,
@@ -115,11 +114,8 @@ describe('GuardClaimsFileSchema', () => {
 })
 
 describe('claim identity', () => {
-  it('is doc + anchor + title, and IS the dismissal key', () => {
+  it('is doc + anchor + title', () => {
     expect(guardClaimKey(claim())).toBe(claimIdentityKey(base.doc, base.anchor, base.title))
-    expect(claimIdentityKey(base.doc, base.anchor, base.title)).toBe(
-      dismissedClaimKey(base.doc, base.anchor, base.title),
-    )
   })
 
   it('separates its parts so no two triples can collide', () => {

@@ -49,6 +49,7 @@ import {
   readGuardDecisions,
   readGuardInterfaces,
   readGuardResultForView,
+  readGuardClaimsForView,
 } from '@truecourse/core/commands/guard-read';
 import { getGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import type { GuardDependencyPatch } from '@truecourse/core/commands/guard-dependencies';
@@ -58,7 +59,7 @@ import { registerRepoDependency } from '../services/guard-dependencies.service.j
 import { refusalStatus } from '../services/refusals.service.js';
 import { estimateStepPhase } from '@truecourse/core/progress';
 import { runFailureMessage } from '@truecourse/guard-runner';
-import { dismissedClaimKey, openConflicts, type GuardDecisions } from '@truecourse/shared';
+import { claimIdentityKey, claimsByIdentity, openConflicts, type GuardClaimsFile, type GuardDecisions } from '@truecourse/shared';
 import { requireJobs } from '../jobs/current.js';
 import { refusedWithoutCredits } from './credits.js';
 import {
@@ -117,9 +118,9 @@ async function mutateGuardDecisions(
 // Enqueue a hosted guard generate through the core seam ONLY when the
 // write leaves ZERO active (non-dismissed) findings — while any finding is still
 // active the dismissals batch, and the last one fires exactly one generate. The
-// same shared derivation the coverage view uses decides "active": a finding is
-// dismissed when its `dismissedClaimKey(doc, anchor, claim)` is recorded; a finding
-// with no extracted claim can never be dismissed, so it keeps the set non-empty.
+// same corpus the coverage view reads decides "active": a finding is dismissed
+// when the claim its (doc, anchor, claim) names in the corpus is recorded; a
+// finding naming no claim can never be dismissed, so it keeps the set non-empty.
 // Boot installs the seam; a test that leaves it unset gets a no-op. Best-effort:
 // a failed enqueue never fails the decision save. The report is the REPO-level
 // view read (the baseline commit's row), never the store's newest row.
@@ -128,7 +129,8 @@ async function regenerateIfLastFindingDismissed(repoPath: string): Promise<void>
   if (!enqueue) return;
   try {
     const report = await readGuardResultForView(repoPath);
-    if (!allFindingsDismissed(report, await readGuardDecisions(repoPath))) return;
+    const [claims, decisions] = await Promise.all([readGuardClaimsForView(repoPath), readGuardDecisions(repoPath)]);
+    if (!allFindingsDismissed(report, claims, decisions)) return;
     await enqueue(repoPath);
   } catch {
     /* best-effort — the decision is already saved */
@@ -141,15 +143,16 @@ async function regenerateIfLastFindingDismissed(repoPath: string): Promise<void>
 // extracted claim can never be dismissed, so it keeps the result false.
 function allFindingsDismissed(
   report: Awaited<ReturnType<typeof readGuardResultForView>>,
+  claims: GuardClaimsFile | null,
   decisions: GuardDecisions,
 ): boolean {
   if (!report || report.birthFindings.length === 0) return false;
-  const dismissed = new Set(
-    decisions.dismissedClaims.map((d) => dismissedClaimKey(d.doc, d.anchor, d.title)),
-  );
-  return report.birthFindings.every(
-    (f) => f.claim != null && dismissed.has(dismissedClaimKey(f.doc, f.anchor, f.claim)),
-  );
+  const byIdentity = claimsByIdentity(claims?.claims ?? []);
+  const dismissed = new Set(decisions.dismissedClaims.map((d) => d.claimId));
+  return report.birthFindings.every((f) => {
+    const claim = f.claim != null ? byIdentity.get(claimIdentityKey(f.doc, f.anchor, f.claim)) : undefined;
+    return claim !== undefined && dismissed.has(claim.id);
+  });
 }
 
 
@@ -318,19 +321,17 @@ router.post('/:id/guard/run', async (req: Request, res: Response, next: NextFunc
 router.post('/:id/guard/dismiss', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const repo = await resolveProjectForRequest(orgOf(req), req.params.id as string);
-    const body = (req.body ?? {}) as { doc?: string; anchor?: string; title?: string; note?: string };
-    const { doc, anchor, title, note } = body;
-    if (!doc || !anchor || !title) {
-      res.status(400).json({ error: 'dismiss requires { doc, anchor, title }.' });
+    const body = (req.body ?? {}) as { claimId?: string; note?: string };
+    const { claimId, note } = body;
+    if (!claimId) {
+      res.status(400).json({ error: 'dismiss requires { claimId }.' });
       return;
     }
     await mutateGuardDecisions(
       res,
       () =>
         dismissGuardClaim(repo.path, {
-          doc,
-          anchor,
-          title,
+          claimId,
           dismissedAt: new Date().toISOString(),
           ...(note ? { note } : {}),
         }),
@@ -342,7 +343,7 @@ router.post('/:id/guard/dismiss', async (req: Request, res: Response, next: Next
   }
 });
 
-// POST — reverse a dismissal by its identity `{ doc, anchor, title }`. No-op when
+// POST — reverse a dismissal by the claim's id `{ claimId }`. No-op when
 // absent; returns the updated decisions file.
 router.post('/:id/guard/undismiss', async (req: Request, res: Response, next: NextFunction) => {
   try {

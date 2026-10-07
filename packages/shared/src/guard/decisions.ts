@@ -8,8 +8,8 @@
  * clone, so a claim one person judged noise stays dismissed for everyone.
  *
  * It holds two lists. `dismissedClaims`: findings the user judged a generation
- * defect / won't-fix / noise. A dismissed claim (identity = its section anchor +
- * the extracted claim's stable text) is skipped by generate — never re-authored,
+ * defect / won't-fix / noise. A dismissed claim (identity = the claim's id, the
+ * one the scan gave it) is skipped by generate — never re-authored,
  * never re-findinged — and settles as an explicit `dismissed` coverage gap. It is
  * excluded from flow synthesis too, so it never becomes a milestone.
  * `dismissedFlows`: whole flows (identity = the flow id) the user judged not worth
@@ -18,21 +18,14 @@
  */
 
 import { z } from 'zod'
-import { claimIdentityKey } from './claims.js'
 
 /**
- * One dismissed claim. Identity is `anchor` + `title` (the extracted claim's
- * stable text); `doc` scopes the anchor to its document and drives display. Not
- * `.strict()` so a future field never breaks an old reader (mirrors the spec
- * decisions file).
+ * One dismissed claim. Identity is the claim's id. Not `.strict()` so a future
+ * field never breaks an old reader (mirrors the spec decisions file).
  */
 export const GuardDismissedClaimSchema = z.object({
-  /** Repo-relative doc path the claim's section lives in. */
-  doc: z.string().min(1),
-  /** The section anchor (slug) the claim was extracted under. */
-  anchor: z.string().min(1),
-  /** The extracted claim's stable text — the identity, with `anchor`. */
-  title: z.string().min(1),
+  /** The claim's id — the identity. */
+  claimId: z.string().min(1),
   /** ISO timestamp the dismissal was recorded. */
   dismissedAt: z.string(),
   /** Optional free-text rationale ("flaky", "won't fix", …). */
@@ -48,9 +41,8 @@ export const GuardDismissedClaimSchema = z.object({
 })
 export type GuardDismissedClaim = z.infer<typeof GuardDismissedClaimSchema>
 
-/** Just the identity fields a dismissal keys on (doc + anchor + title) — what the
- *  dismiss/undismiss surfaces pass around; `dismissedClaimKey` hashes the same trio. */
-export type GuardClaimIdentity = Pick<GuardDismissedClaim, 'doc' | 'anchor' | 'title'>
+/** Just the identity a dismissal keys on — what the dismiss/undismiss surfaces pass around. */
+export type GuardClaimIdentity = Pick<GuardDismissedClaim, 'claimId'>
 
 /**
  * One dismissed FLOW. Identity is `flowId` (the flow's stable handle in
@@ -83,14 +75,4 @@ export const EMPTY_GUARD_DECISIONS: GuardDecisions = {
   version: 1,
   dismissedClaims: [],
   dismissedFlows: [],
-}
-
-/**
- * The stable identity key a dismissal / claim matches on: doc + anchor + title.
- * Delegates to {@link claimIdentityKey} — the claims store keys its claims with
- * the same function, so a dismissal and the claim it dismisses can never disagree
- * about what makes them the same object.
- */
-export function dismissedClaimKey(doc: string, anchor: string, title: string): string {
-  return claimIdentityKey(doc, anchor, title)
 }

@@ -97,7 +97,7 @@ import {
   type GuardLatest,
   type GuardManifest,
   type GuardRunFlowSummary,
-  type GuardRunSectionSummary,
+  type GuardRunClaimSummary,
 } from '@truecourse/shared';
 import {
   loadScenarios as fileLoadScenarios,
@@ -315,18 +315,18 @@ export class PgGuardStore implements GuardStore {
   // History is derived from the run rows — nothing to append.
   async appendGuardHistory(): Promise<void> {}
 
-  /** Record a run's section and flow summaries on its own row, by run id. */
+  /** Record a run's claim and flow summaries on its own row, by run id. */
   async writeGuardRunCoverage(repoKey: string, run: GuardRunCoverage): Promise<void> {
     if (!SAFE_SEGMENT.test(run.runId)) {
       throw new Error(`[data-store] unsafe guard run id: ${run.runId}`);
     }
     await this.db
       .update(guardRuns)
-      .set({ sections: run.sections, flows: run.flows })
+      .set({ claims: run.claims, flows: run.flows })
       .where(and(eq(guardRuns.repoKey, repoKey), eq(guardRuns.runId, run.runId)));
   }
 
-  /** Every run of the scope carrying a section summary, oldest first. */
+  /** Every run of the scope carrying a claim summary, oldest first. */
   async readGuardRunCoverage(
     repoKey: string,
     scope: string = DEFAULT_VERSION_SCOPE,
@@ -336,7 +336,7 @@ export class PgGuardStore implements GuardStore {
         runId: guardRuns.runId,
         ranAt: guardRuns.ranAt,
         commitSha: guardRuns.commitSha,
-        sections: guardRuns.sections,
+        claims: guardRuns.claims,
         flows: guardRuns.flows,
       })
       .from(guardRuns)
@@ -344,7 +344,7 @@ export class PgGuardStore implements GuardStore {
         and(
           eq(guardRuns.repoKey, repoKey),
           eq(guardRuns.scope, scope),
-          isNotNull(guardRuns.sections),
+          isNotNull(guardRuns.claims),
         ),
       )
       .orderBy(asc(guardRuns.ranAt), asc(guardRuns.runId));
@@ -352,7 +352,7 @@ export class PgGuardStore implements GuardStore {
       runId: r.runId,
       ranAt: r.ranAt,
       commit: r.commitSha,
-      sections: r.sections as GuardRunSectionSummary,
+      claims: r.claims as GuardRunClaimSummary,
       flows: (r.flows as GuardRunFlowSummary | null) ?? null,
     }));
   }

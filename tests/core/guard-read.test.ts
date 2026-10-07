@@ -166,8 +166,6 @@ describe('listGuardScenarios — commit-scoped (hosted)', () => {
 
     const a = await listGuardScenarios(REPO, 'shaA1234567');
     expect(a.scenarios.map((s) => s.id)).toEqual(['a1']);
-    // Heading text joined via the injected reader (no FS).
-    expect(a.scenarios[0]?.headingText).toBe('Alpha');
 
     const b = await listGuardScenarios(REPO, 'shaB1234567');
     expect(b.scenarios.map((s) => s.id).sort()).toEqual(['b1', 'b2']);
@@ -485,12 +483,12 @@ describe('repo-level view reads (no ref) — baseline-anchored, never newest (ho
 });
 
 describe('readGuardReport — commit-scoped (hosted)', () => {
-  it('reads the generate report at the ref and joins live section headings', async () => {
+  it('reads the generate report at the ref', async () => {
     await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'shaA1234567' }, REPORT({
       birthFindings: [{ doc: DOC, anchor: 'alpha', title: 'alpha finding', step: 1, expected: 'x', actual: 'y' }],
     }));
     const report = await readGuardReport(REPO, 'shaA1234567');
-    expect(report?.birthFindings[0]).toMatchObject({ anchor: 'alpha', headingText: 'Alpha' });
+    expect(report?.birthFindings[0]).toMatchObject({ anchor: 'alpha', title: 'alpha finding' });
     // A different ref has no report of its own: it falls back to the current one.
     expect((await readGuardReport(REPO, 'othersha1234'))?.birthFindings).toHaveLength(1);
   });

@@ -5,7 +5,7 @@ import {
   GUARD_COVERAGE_STATUS_WORD,
   GuardFlowScenarioRowSchema,
   GuardFlowSurfaceSchema,
-  GuardSectionCoverageStatusSchema,
+  GuardCoverageStatusSchema,
   GuardCoverageGapKindSchema,
   GuardOutcomeSchema,
   GuardScenarioResultSchema,
@@ -24,7 +24,7 @@ import {
   worstCoveragePlainStatus,
   type GuardCoveragePlainStatus,
   type GuardFlowListItem,
-  type GuardSectionCoverageStatus,
+  type GuardCoverageStatus,
 } from '../../packages/shared/src/index';
 
 /**
@@ -46,7 +46,7 @@ describe('coverage status precedence', () => {
     expect(ranked.has('guarded')).toBe(true);
     expect(ranked.has('unguarded')).toBe(true);
     // The Zod enum is the same domain, so a payload can be validated either way.
-    expect(GuardSectionCoverageStatusSchema.options).toEqual([...GUARD_COVERAGE_STATUS_PRECEDENCE]);
+    expect(GuardCoverageStatusSchema.options).toEqual([...GUARD_COVERAGE_STATUS_PRECEDENCE]);
   });
 
   it('ranks worst-first by the five words, not by where a status came from', () => {
@@ -72,8 +72,8 @@ describe('coverage status precedence', () => {
 
   it('answers unguarded for an empty set and ignores an unknown value', () => {
     expect(worstCoverageStatus([])).toBe('unguarded');
-    expect(worstCoverageStatus(['nonsense' as GuardSectionCoverageStatus])).toBe('unguarded');
-    expect(worstCoverageStatus(['nonsense' as GuardSectionCoverageStatus, 'guarded'])).toBe('guarded');
+    expect(worstCoverageStatus(['nonsense' as GuardCoverageStatus])).toBe('unguarded');
+    expect(worstCoverageStatus(['nonsense' as GuardCoverageStatus, 'guarded'])).toBe('guarded');
   });
 });
 
@@ -179,7 +179,7 @@ describe('the coverage vocabulary', () => {
  */
 describe('no-flow claim reasons → their gap kind', () => {
   const word = (reason: string): string =>
-    guardCoverageWord(guardNoFlowClaimGapKind(reason) as GuardSectionCoverageStatus);
+    guardCoverageWord(guardNoFlowClaimGapKind(reason) as GuardCoverageStatus);
 
   it('reads a missing interface as Blocked, however the sentence leads', () => {
     expect(guardNoFlowClaimGapKind('blocked-on layer 2: no `cli/guard` interface has been derived.')).toBe(

@@ -207,11 +207,8 @@ describe('Guard routes', () => {
     expect(res.body.coverageGaps).toEqual(RESULT.coverageGaps);
   });
 
-  it('report enriches each birth finding with the live section heading; a gone section carries none', async () => {
+  it('report carries each birth finding as stored, with no section heading joined', async () => {
     seed();
-    // A finding bound to a live section (docs/spec.md § alpha, heading "Alpha") and
-    // one bound to a section that no longer exists — the join is tolerant, so the
-    // gone section contributes no headingText (never a slug in UI copy).
     writeJson('.truecourse/guard/result.json', {
       ...RESULT,
       birthFindings: [
@@ -220,19 +217,9 @@ describe('Guard routes', () => {
       ],
     });
     const res = await request(app).get(url('report')).expect(200);
-    expect(res.body.birthFindings[0]).toMatchObject({ anchor: 'alpha', headingText: 'Alpha' });
+    expect(res.body.birthFindings[0]).toMatchObject({ anchor: 'alpha', title: 'alpha finding' });
+    expect(res.body.birthFindings[0].headingText).toBeUndefined();
     expect(res.body.birthFindings[1].anchor).toBe('ghost');
-    expect(res.body.birthFindings[1].headingText).toBeUndefined();
-  });
-
-  it('coverage joins each live section to its status', async () => {
-    seed();
-    const res = await request(app).get(url(`coverage?doc=${encodeURIComponent(DOC)}`)).expect(200);
-    expect(res.body.sections.map((s: { anchor: string; status: string }) => [s.anchor, s.status])).toEqual([
-      ['alpha', 'fail'],
-      ['beta', 'no-claim'],
-    ]);
-    expect(res.body.runId).toBe(RUN_ID);
   });
 
   it('scenarios lists the corpus with hand-written flag + recipe card', async () => {
@@ -248,12 +235,8 @@ describe('Guard routes', () => {
       title: 'alpha claim',
       doc: DOC,
       anchor: 'alpha',
-      // The human heading text joined from the live doc's section index — the
-      // dashboard groups by this, never by the anchor slug.
-      headingText: 'Alpha',
       file: path.join('.truecourse', 'scenarios', 'core', 'a1.yaml'),
     });
-    expect(res.body.scenarios[1].headingText).toBe('Beta');
     // Recipe card: build/entry/env pass through on the surface that runs them.
     // `stale` is always null — there is no working tree to fingerprint against the
     // last run's recorded one, so the comparison is unknowable and is never
@@ -730,7 +713,7 @@ describe('Guard routes', () => {
 
   it('status is 200 with all-null on a fresh repo', async () => {
     const res = await request(app).get(url('status')).expect(200);
-    expect(res.body).toEqual({ coverage: null, sections: null, lastRun: null, lastGenerate: null });
+    expect(res.body).toEqual({ coverage: null, claims: null, lastRun: null, lastGenerate: null });
   });
 
   it('history is 200 with an empty list on a fresh repo', async () => {
@@ -762,14 +745,6 @@ describe('Guard routes', () => {
   });
 
   // --- Request validation --------------------------------------------------
-
-  it('coverage 400s on a missing or traversing doc, 404 on not-found', async () => {
-    seed();
-    await request(app).get(url('coverage')).expect(400);
-    await request(app).get(url('coverage?doc=../secrets.md')).expect(400);
-    await request(app).get(url('coverage?doc=/etc/passwd')).expect(400);
-    await request(app).get(url(`coverage?doc=${encodeURIComponent('docs/missing.md')}`)).expect(404);
-  });
 
   it('scenario / evidence 400 on missing params', async () => {
     await request(app).get(url('scenario')).expect(400);

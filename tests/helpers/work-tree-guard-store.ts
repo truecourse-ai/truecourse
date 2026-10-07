@@ -73,11 +73,11 @@ const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
  */
 export const WORK_TREE_COMMIT = 'worktree';
 
-/** Where this double keeps a run's section summary: `guard/sections/<runId>.json`. */
-const SECTIONS_DIR = 'sections';
+/** Where this double keeps a run's claim summary: `guard/claims/<runId>.json`. */
+const CLAIMS_DIR = 'claims';
 
 function guardSectionsPath(repoPath: string, runId: string): string {
-  return path.join(guardDir(repoPath), SECTIONS_DIR, `${runId}.json`);
+  return path.join(guardDir(repoPath), CLAIMS_DIR, `${runId}.json`);
 }
 
 /**
@@ -174,7 +174,7 @@ export class WorkTreeGuardStore implements GuardStore {
   }
 
   // The coverage summaries live beside the run snapshots, one derived file per
-  // run: `guard/sections/<runId>.json`, beside `guard/runs/`.
+  // run: `guard/claims/<runId>.json`, beside `guard/runs/`.
   async writeGuardRunCoverage(repoPath: string, run: GuardRunCoverage): Promise<void> {
     if (!SAFE_SEGMENT.test(run.runId)) return;
     const file = guardSectionsPath(repoPath, run.runId);
@@ -193,7 +193,7 @@ export class WorkTreeGuardStore implements GuardStore {
   }
 
   async readGuardRunCoverage(repoPath: string): Promise<GuardRunCoverage[]> {
-    const dir = path.join(guardDir(repoPath), SECTIONS_DIR);
+    const dir = path.join(guardDir(repoPath), CLAIMS_DIR);
     let names: string[];
     try {
       names = fs.readdirSync(dir);
@@ -205,7 +205,7 @@ export class WorkTreeGuardStore implements GuardStore {
       if (!name.endsWith('.json')) continue;
       try {
         const parsed = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf-8')) as GuardRunCoverage;
-        if (parsed && typeof parsed.runId === 'string' && parsed.sections) {
+        if (parsed && typeof parsed.runId === 'string' && parsed.claims) {
           runs.push({ ...parsed, flows: parsed.flows ?? null });
         }
       } catch {

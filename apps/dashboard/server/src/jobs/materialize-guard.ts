@@ -66,7 +66,7 @@ import {
 } from '@truecourse/core/lib/guard-store';
 import {
   readGuardRunFlowSummary,
-  readGuardRunSectionSummary,
+  readGuardRunClaimSummary,
 } from '@truecourse/core/commands/guard-read';
 import { storedScenarioSetFiles } from '@truecourse/core/lib/guard-read-tree';
 import { log } from '@truecourse/core/lib/logger';
@@ -199,13 +199,13 @@ async function persistBirthEvidence(
  * the evidence manifest lives on it, and the summaries are derived against the
  * run that is now stored — unless the caller hands them over (`coverage`), as
  * a pull request's check does: its flows are derived from the head's tree, and
- * its sections are nobody's trend.
+ * its claims are nobody's trend.
  */
 export async function persistGuardRun(
   ref: RepoRef,
   treeDir: string,
   run: GuardLatest,
-  opts: { provenance?: VersionProvenance; coverage?: Pick<GuardRunCoverage, 'sections' | 'flows'> } = {},
+  opts: { provenance?: VersionProvenance; coverage?: Pick<GuardRunCoverage, 'claims' | 'flows'> } = {},
 ): Promise<void> {
   // The stored record says where it ran: this is the hosted runner's run.
   const latest: GuardLatest = { ...run, run: { ...run.run, origin: 'hosted' } };
@@ -263,12 +263,12 @@ export async function persistFlowTestRun(
 
 /**
  * Derive and store ONE run's coverage summaries, which is what Home reads a run
- * as: its SECTIONS, which the changes widget follows, and its FLOWS, which the
+ * as: its CLAIMS, which the changes widget follows, and its FLOWS, which the
  * trend counts.
  *
- * The section summary is what puts the run in history at all — a run without one
- * (no document body to join, nothing the scenario set names) is left out and said
- * so, and nothing is guessed in its place. The flow summary is allowed to be
+ * The claim summary is what puts the run in history at all — a run without one
+ * (no claim corpus to join) is left out and said so, and nothing is guessed in
+ * its place. The flow summary is allowed to be
  * absent on its own: a repository whose flow corpus cannot be read still has a
  * run worth recording, and it is simply not a point of the flow trend. Never
  * fails the run that produced it.
@@ -278,10 +278,10 @@ export async function recordGuardRunCoverage(
   latest: GuardLatest,
 ): Promise<boolean> {
   try {
-    const sections = await readGuardRunSectionSummary(repoKey, latest);
-    if (!sections) {
+    const claims = await readGuardRunClaimSummary(repoKey, latest);
+    if (!claims) {
       log.warn(
-        `[Guard] no section summary could be derived for ${repoKey} run ${latest.run.runId}; it stays out of the trend`,
+        `[Guard] no claim summary could be derived for ${repoKey} run ${latest.run.runId}; it stays out of the trend`,
       );
       return false;
     }
@@ -297,7 +297,7 @@ export async function recordGuardRunCoverage(
       runId: latest.run.runId,
       ranAt: latest.run.ranAt,
       commit: latest.run.commit,
-      sections,
+      claims,
       flows: flows ?? {},
     });
     return true;
