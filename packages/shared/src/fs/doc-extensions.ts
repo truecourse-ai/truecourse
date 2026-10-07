@@ -1,8 +1,8 @@
 /**
  * The file extensions TrueCourse treats as markdown documentation — the single
  * source of truth shared by document discovery (`discoverDocs` in
- * @truecourse/spec-consolidator), the heading-aware chunker (`isMarkdownDoc` in
- * ../guard/doc-chunks.ts) and the route-manifest walk, so all three agree on
+ * @truecourse/spec-consolidator), the document tree (`isMarkdownDoc` in
+ * ../doc/headings.ts) and the route-manifest walk, so all three agree on
  * what counts as a spec document.
  *
  * These three checks were written independently and had drifted to three
@@ -16,7 +16,7 @@
  * meaningful content (component attributes carry API field names and types),
  * not noise to strip.
  *
- * Node-free on purpose: ../guard/doc-chunks.ts reaches the dashboard client
+ * Node-free on purpose: ../doc reaches the dashboard client
  * through the root export, so this module uses string ops rather than
  * `node:path`.
  */

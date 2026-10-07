@@ -1,7 +1,7 @@
 /**
  * THE FACT RECORD — `spec-scan.record-facts`, one session per WINDOW of one
- * kept prose doc: consecutive sections of its sentences (`splitDocSentences`,
- * `planSentenceWindows`). It is the first half of finding conflicts by comparing
+ * kept prose doc: consecutive sections of its sentences (the doc tree's
+ * sentences, packed by `planWindows`). It is the first half of finding conflicts by comparing
  * facts: each session writes the LEDGER of one window, the concrete facts its
  * sentences state and the sentences it skips with a reason.
  *
@@ -38,21 +38,23 @@ import {
 } from '@truecourse/agent-loop'
 import {
   FactSkipReasonSchema,
-  SENTENCE_SPLITTER_VERSION,
   docBody,
-  headingOutline,
   normalizeArea,
-  planSentenceWindows,
-  presentSentence,
-  splitDocSentences,
   type AreaTag,
   type DocCandidate,
   type DocLedgerCounts,
-  type DocSentence,
   type FactSkipReason,
-  type SentenceWindow,
   type VocabMap,
 } from '@truecourse/spec-consolidator'
+import {
+  SENTENCE_SPLITTER_VERSION,
+  docOutline,
+  parseDocTree,
+  planWindows,
+  presentSentence,
+  type DocSentence,
+  type DocWindow,
+} from '@truecourse/shared'
 import { canonicalDocTags, reconcileDocTagsWithPrior } from './settle-areas.js'
 import {
   buildScanUniverse,
@@ -151,7 +153,7 @@ export interface RecordFactsItem {
   doc: DocCandidate
   /** Every sentence of the doc, numbered. */
   sentences: readonly DocSentence[]
-  window: SentenceWindow
+  window: DocWindow
   /** How many windows the doc has. */
   windows: number
   /** The doc's area tags as curation wrote them, `product/concern`, sorted. */
@@ -200,9 +202,10 @@ export function factAreaIds(ctx: FactAreaContext, ref: string, raw: string): str
 }
 
 /** A doc's sentences, and the windows the record step cuts them into. */
-export function recordWindows(doc: DocCandidate): { sentences: DocSentence[]; windows: SentenceWindow[] } {
-  const sentences = splitDocSentences(docBody(doc))
-  return { sentences, windows: planSentenceWindows(sentences, { maxSentences: RECORD_WINDOW_SENTENCES, maxChars: RECORD_WINDOW_CHARS }) }
+export function recordWindows(doc: DocCandidate): { sentences: readonly DocSentence[]; windows: DocWindow[] } {
+  const tree = parseDocTree(doc.path, docBody(doc))
+  if (tree.sentences.length === 0) return { sentences: [], windows: [] }
+  return { sentences: tree.sentences, windows: planWindows(tree, { maxSentences: RECORD_WINDOW_SENTENCES, maxChars: RECORD_WINDOW_CHARS }) }
 }
 
 /** The record sessions one doc takes: one per window of its sentences. None for a doc with no area tag. */
@@ -246,7 +249,7 @@ export function recordFactsCacheKey(item: RecordFactsItem, extraParts: readonly 
 
 /** What a ledger is checked against. */
 export interface LedgerScope {
-  window: SentenceWindow
+  window: DocWindow
   /** The doc's raw area tags. */
   areas: readonly string[]
 }
@@ -454,7 +457,7 @@ export function recordFactsBriefing(item: RecordFactsItem, instructions: readonl
     `AREA TAGS (every fact names one or more, exactly as written): ${item.areas.join(', ')}`,
     '',
     'OUTLINE:',
-    headingOutline(docBody(doc)),
+    docOutline(parseDocTree(doc.path, docBody(doc))),
     '',
     item.windows > 1
       ? `YOUR WINDOW: sentences ${window.from} to ${window.to} of ${sentences.length} (window ${window.index} of ${item.windows}; other sessions record the rest).`
@@ -560,7 +563,7 @@ export interface DocFactLedger {
   /** Sentences the recording left unaccounted for, ascending. */
   unrecorded: number[]
   /** Windows whose session failed: their sentences are in none of the lists. */
-  failed: SentenceWindow[]
+  failed: DocWindow[]
 }
 
 export interface DocLedgerInput {
@@ -569,7 +572,7 @@ export interface DocLedgerInput {
   /** The doc's raw area tags. */
   areas: readonly string[]
   /** Each window's ledger, `null` for one whose session failed. */
-  windows: ReadonlyArray<{ window: SentenceWindow; ledger: FactLedgerWire | null }>
+  windows: ReadonlyArray<{ window: DocWindow; ledger: FactLedgerWire | null }>
   /** The canonical area ids one raw tag of this doc lands in. */
   canonicalAreas: (raw: string) => readonly string[]
 }
@@ -582,7 +585,7 @@ export function docFactLedger(input: DocLedgerInput): DocFactLedger {
   const facts: RecordedFact[] = []
   const skipped: Partial<Record<FactSkipReason, number>> = {}
   const unrecorded: number[] = []
-  const failed: SentenceWindow[] = []
+  const failed: DocWindow[] = []
   for (const { window, ledger } of [...input.windows].sort((a, b) => a.window.from - b.window.from)) {
     if (!ledger) {
       failed.push(window)

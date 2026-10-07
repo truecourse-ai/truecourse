@@ -39,9 +39,9 @@ import {
   type SessionDef,
   type SessionTool,
 } from '@truecourse/agent-loop'
+import { docOutline, parseDocTree } from '@truecourse/shared'
 import {
   docBody,
-  headingOutline,
   type DecisionsFile,
   type DocCandidate,
   type ScopeVerdict,
@@ -579,7 +579,7 @@ function docOutlineTool(scope: ScanScopeUniverse): SessionTool {
       if (!doc) {
         return { content: describeDocMiss(scope.universe, args.ref), isError: true }
       }
-      const outline = headingOutline(docBody(doc))
+      const outline = docOutline(parseDocTree(doc.path, docBody(doc)))
       return {
         content: outline.trim()
           ? [`--- ${doc.path}  ·  ${docTitle(doc)} ---`, outline, '--- end ---'].join('\n')

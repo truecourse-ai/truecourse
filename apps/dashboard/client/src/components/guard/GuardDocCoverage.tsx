@@ -11,9 +11,9 @@
  * dot, never a second band, that opens the conflict's resolution detail. When a
  * conflict is the active selection, its heading scrolls into view too.
  *
- * Rendering is per-section-chunk and memoized: each chunk parses its markdown
+ * Rendering is per section block and memoized: each block parses its markdown
  * once (keyed on its text) and only re-renders when its OWN status/selection
- * changes, so clicking a section repaints two chunks, not all ~310. Standalone
+ * changes, so clicking a section repaints two blocks, not all ~310. Standalone
  * `<a id>` anchor lines are stripped so they never show as literal text, and
  * in-document cross-reference links (`#anchor`) are intercepted to select+scroll
  * the target section rather than open a new tab. A status filter either blurs
@@ -22,7 +22,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { GitMerge } from 'lucide-react';
-import { guardCoveragePlainStatus } from '@truecourse/shared';
+import { guardCoveragePlainStatus, headingKey, parseDocTree } from '@truecourse/shared';
 import type {
   GuardCoveragePlainStatus,
   GuardDocCoverage as GuardDocCoverageData,
@@ -31,7 +31,7 @@ import type {
 import { DocFacts } from '@/components/spec/DocFacts';
 import { DocMarkdown } from '@/components/spec/DocMarkdown';
 import { HoverPopover } from '@/dashboard/ui/hover-popover';
-import { alignSections, buildAnchorTargets, splitDocBlocks, stripDocAnchors } from '@/lib/guard-doc-sections';
+import { buildAnchorTargets, docBlocks, stripDocAnchors } from '@/lib/guard-doc-sections';
 import { guardBandClasses, guardStatusMeta } from '@/lib/guard-status';
 import { guardStatusWord } from '@/lib/guard-flow-status';
 
@@ -83,8 +83,6 @@ function MixBar({ mix }: { mix: SectionMix }) {
   );
 }
 
-import { headingMatchKey as norm } from '@/lib/heading-match';
-
 /** A small "conflict" tag that opens the conflict resolution detail. */
 function ConflictTag({ onClick }: { onClick: () => void }) {
   return (
@@ -124,9 +122,9 @@ interface CoverageBlockProps {
 }
 
 /**
- * One rendered section chunk. Memoized so a selection/filter change elsewhere
+ * One rendered section block. Memoized so a selection/filter change elsewhere
  * doesn't re-render (and re-parse) it; the parsed markdown itself is memoized on
- * the chunk text, so even a chunk whose selection toggles reuses its parse.
+ * the block text, so even a block whose selection toggles reuses its parse.
  */
 const CoverageBlock = memo(function CoverageBlock({
   text,
@@ -141,12 +139,12 @@ const CoverageBlock = memo(function CoverageBlock({
   onSelectSection,
   onOpenConflict,
 }: CoverageBlockProps) {
-  // Parse once per chunk text, reused across selection/filter re-renders.
+  // Parse once per block text, reused across selection/filter re-renders.
   const md = useMemo(() => <DocMarkdown source={stripDocAnchors(text)} />, [text]);
   if (hidden) return null;
 
   // Every SECTION carries a status now (claim-keyed coverage always has an answer),
-  // so the only unstatused block is a preamble chunk that is no section at all.
+  // so the only unstatused block is a lead the server indexed no section for.
   const statused = status != null;
   // Preamble / unmarked-and-unconflicted sections render plain.
   if (!statused && !conflictKey) {
@@ -226,12 +224,14 @@ export function GuardDocCoverage({
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const blocks = useMemo(() => splitDocBlocks(content), [content]);
-  const aligned = useMemo(() => alignSections(blocks, coverage.sections), [blocks, coverage.sections]);
+  // The same tree the server indexed the coverage's sections from, so a block
+  // and its coverage meet on the anchor.
+  const blocks = useMemo(() => docBlocks(parseDocTree(coverage.doc, content)), [coverage.doc, content]);
+  const byAnchor = useMemo(() => new Map(coverage.sections.map((s) => [s.anchor, s] as const)), [coverage.sections]);
   // `#anchor` target → the section a click on it should select+scroll to.
-  const anchorTargets = useMemo(() => buildAnchorTargets(blocks, aligned), [blocks, aligned]);
+  const anchorTargets = useMemo(() => buildAnchorTargets(blocks, byAnchor), [blocks, byAnchor]);
   const conflictOf = (heading: string): string | undefined =>
-    heading ? conflictHeadings?.get(norm(heading)) : undefined;
+    heading ? conflictHeadings?.get(headingKey(heading)) : undefined;
 
   // Bring the selected section (or the active conflict's heading, or the first
   // filter match) into view.
@@ -297,7 +297,7 @@ export function GuardDocCoverage({
           frontmatter they come from; a doc that states none renders nothing. */}
       <DocFacts source={content} />
       {blocks.map((block, i) => {
-        const section = aligned[i];
+        const section = byAnchor.get(block.anchor);
         const status = section?.status;
         const conflictKey = conflictOf(block.headingText);
         const statused = section != null;

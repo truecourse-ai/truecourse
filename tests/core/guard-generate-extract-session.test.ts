@@ -42,13 +42,13 @@ import {
   EXTRACT_SESSION_KIND,
   EXTRACT_SESSION_SYSTEM_PROMPT,
   createGuardGenerateSessionSeams,
-  docChunkCount,
+  docWindowCount,
   extractSessionBriefing,
   extractSessionCacheKey,
   extractSessionCacheKeyForContentHash,
   extractDocContentHash,
   extractSessionDef,
-  renderDocChunk,
+  renderDocWindow,
   validateExtractDraft,
   buildGuardDocUniverse,
 } from '../../packages/core/src/services/guard-generate/index'
@@ -460,7 +460,7 @@ describe('EXTRACT_SESSION_SYSTEM_PROMPT', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 8 — paging. An OpenAPI doc pages per OPERATION, never as one giant chunk.
+// 8 — paging. An OpenAPI doc pages per OPERATION, never as one giant window.
 // ---------------------------------------------------------------------------
 
 const TODOS_OPENAPI = `openapi: 3.0.3
@@ -487,19 +487,19 @@ describe('doc paging', () => {
       'paths/get-listtodos',
       'paths/post-createtodo',
     ])
-    expect(docChunkCount(doc)).toBe(3)
-    const chunk = renderDocChunk(doc, 1)
-    expect(chunk.isError).toBeUndefined()
-    expect(chunk.content).toContain('chunk 1/3')
-    expect(renderDocChunk(doc, 4).isError).toBe(true)
+    expect(docWindowCount(doc)).toBe(3)
+    const window = renderDocWindow(doc, 1)
+    expect(window.isError).toBeUndefined()
+    expect(window.content).toContain('window 1/3')
+    expect(renderDocWindow(doc, 4).isError).toBe(true)
     // The briefing is honest about what it did not show.
-    expect(extractSessionBriefing(doc, TARGETS)).toContain('2 more chunk(s)')
+    expect(extractSessionBriefing(doc, TARGETS)).toContain('2 more window(s)')
   })
 
-  it('pages a short markdown doc as one chunk', () => {
+  it('pages a short markdown doc as one window', () => {
     const doc = docsOf(docRepo())[0]
-    expect(docChunkCount(doc)).toBe(1)
-    expect(extractSessionBriefing(doc, TARGETS)).not.toContain('more chunk(s)')
+    expect(docWindowCount(doc)).toBe(1)
+    expect(extractSessionBriefing(doc, TARGETS)).not.toContain('more window(s)')
   })
 })
 

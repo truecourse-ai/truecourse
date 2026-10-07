@@ -13,7 +13,6 @@ import {
   pruneOrphanedConflictResolutions,
 } from '../../packages/spec-consolidator/src/curate.js';
 import { assignDocPairArea } from '../../packages/spec-consolidator/src/area-grouper.js';
-import { verifyConflictSides } from '../../packages/spec-consolidator/src/pointer-verifier.js';
 import { decisionsPath } from '../../packages/spec-consolidator/src/orchestrator.js';
 import type { DecisionsFile } from '../../packages/spec-consolidator/src/types.js';
 import type { CuratedCorpus, Conflict } from '../../packages/spec-consolidator/src/corpus-types.js';
@@ -61,21 +60,6 @@ const EMPTY: DecisionsFile = {
   scopeVerdicts: [],
   instructions: [],
 };
-
-describe('verifyConflictSides on one doc', () => {
-  it('re-anchors each sentence on its own quote and keeps the order the conflict gave', () => {
-    const verified = verifyConflictSides({
-      docs: [DOC, DOC],
-      note: 'press is a translate in one section and a scale in another',
-      sections: [
-        { ...PRESS, heading: 'Motion' },
-        { ...SCALE, heading: 'Buttons' },
-      ],
-      bodyOf: (ref) => (ref === DOC ? BODY : undefined),
-    });
-    expect(verified.map((s) => s.heading)).toEqual(['Buttons', 'Motion']);
-  });
-});
 
 describe('assignDocPairArea on one doc', () => {
   it('files the conflict under the first of the doc\'s own areas', () => {

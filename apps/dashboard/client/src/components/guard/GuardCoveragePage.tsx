@@ -20,11 +20,10 @@
  * claim read inside it `?claim`.
  */
 
-import { headingMatchKey } from '@/lib/heading-match';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, PlayCircle } from 'lucide-react';
 import type { CorpusConflict, GuardClaimsView, GuardCoveragePlainStatus, GuardStaleness } from '@truecourse/shared';
-import { buildCorpusConflicts, isConflictId, resolveConflictId } from '@truecourse/shared';
+import { buildCorpusConflicts, headingKey, isConflictId, resolveConflictId } from '@truecourse/shared';
 import { parseSpecKey, type SpecCorpusState } from '@/components/spec/SpecCorpusView';
 import { SpecConflictDetail } from '@/components/spec/SpecConflictDetail';
 import { DocMarkdown } from '@/components/spec/DocMarkdown';
@@ -220,7 +219,7 @@ export function GuardCoveragePage({
       for (const s of cf.sections ?? []) {
         // A preamble pointer (null heading) has no heading row to tag, skip it.
         if (s.doc !== doc || s.heading === null) continue;
-        const key = headingMatchKey(s.heading);
+        const key = headingKey(s.heading);
         const list = onHeading.get(key) ?? [];
         if (!list.includes(cf)) list.push(cf);
         onHeading.set(key, list);

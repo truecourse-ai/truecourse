@@ -2,7 +2,7 @@
  * THE CLAIM-EXTRACTION SESSION — `guard-generate.extract`, one per spec doc.
  * It replaces the per-view extract ONE-SHOTS with one
  * session that pages its own document: the briefing carries the outline and
- * the first chunk, and the session opens the rest (`read_chunk` /
+ * the first window, and the session opens the rest (`read_window` /
  * `read_section`) instead of the engine fanning a call per slice.
  *
  * What stayed deterministic, and where:
@@ -44,12 +44,12 @@ import {
 } from '@truecourse/guard-generator'
 import { promptFingerprint } from '../agent/session-cache.js'
 import {
-  docChunkCount,
+  docWindowCount,
   docOutlineLines,
-  readOwnChunkTool,
+  readOwnWindowTool,
   readOwnSectionTool,
   readReferencedDocTool,
-  renderDocChunk,
+  renderDocWindow,
   type GuardDocUniverse,
 } from './tools.js'
 
@@ -65,7 +65,7 @@ export const EXTRACT_SESSION_KIND = 'guard-generate.extract'
 export const EXTRACT_SESSION_CACHE_NAME = 'guard/extract-session'
 
 /**
- * The three numbers. A doc is one briefed chunk plus a few pages or a
+ * The three numbers. A doc is one briefed window plus a few pages or a
  * reference lookup, a `check_claims` round, and the outcome — ten turns covers
  * a big doc with a correction loop. ONE resume grant: a huge doc legitimately
  * needs the tour, and re-buying its read costs more than granting it.
@@ -76,7 +76,7 @@ export const EXTRACT_SESSION_BUDGET: SessionBudget = {
   tokenCeiling: 120_000,
 }
 
-export const EXTRACT_SESSION_SYSTEM_PROMPT = `You read ONE specification document and extract the CLAIMS in it that an executable test could verify — each a single, externally-observable behavior the document guarantees — plus a note for every section that states no testable behavior. The briefing carries the document's OUTLINE (every section with its exact anchor) and the first chunk of its body; page the rest yourself with \`read_chunk\` / \`read_section\` before you judge sections you have not seen.
+export const EXTRACT_SESSION_SYSTEM_PROMPT = `You read ONE specification document and extract the CLAIMS in it that an executable test could verify — each a single, externally-observable behavior the document guarantees — plus a note for every section that states no testable behavior. The briefing carries the document's OUTLINE (every section with its exact anchor) and the first window of its body; page the rest yourself with \`read_window\` / \`read_section\` before you judge sections you have not seen.
 
 # What a claim is
 A claim is ONE concrete, observable behavior a program guarantees: an exit code, text written to stdout/stderr, a file created or changed, an HTTP response, a datastore change, a rendered UI element. Write each claim as a single declarative sentence, in the document's own terms.
@@ -204,7 +204,7 @@ For every section whose own text states NO externally-observable behavior any dr
 When the briefing carries a RESOLVED — STALE block, those verbatim sentences lost a conflict resolution (another document is authoritative). Extract NO claim that asserts what any of them says — treat them as absent.
 
 # Tools — when to use them
-- \`read_chunk\` — page through YOUR document (the briefing carried chunk 1). Read every chunk before settling sections you have not seen.
+- \`read_window\` — page through YOUR document (the briefing carried window 1). Read every window before settling sections you have not seen.
 - \`read_section\` — re-read one section of your document precisely, by its anchor.
 - \`read_referenced_doc\` — open ANOTHER doc ONLY to resolve an explicit reference your doc makes ("see docs/auth.md") — never to browse.
 - \`check_claims\` — REQUIRED before you finish: call it with your complete draft. It snaps every anchor against the live section index exactly as the engine will, so a wrong anchor costs one turn here instead of a dropped claim at the fold. Fix what it reports, then produce the outcome.
@@ -473,7 +473,7 @@ export function extractSessionDef(input: ExtractSessionInput): SessionDef<Extrac
     display: { title: 'Claim extraction' },
     systemPrompt: EXTRACT_SESSION_SYSTEM_PROMPT,
     tools: [
-      readOwnChunkTool(input.doc),
+      readOwnWindowTool(input.doc),
       readOwnSectionTool(input.doc),
       readReferencedDocTool(input.universe),
       checkClaimsTool(input.doc, input.prerequisiteTargets, input.prior),
@@ -498,8 +498,8 @@ export function extractSessionDef(input: ExtractSessionInput): SessionDef<Extrac
 /**
  * The opening message: the doc's coordinates, its corpus areas, the complete
  * outline (the closed anchor set — for an OpenAPI doc these are its operation
- * sections), the suppressed-quote block when any, and the body's first chunk
- * with an honest "N more chunks" note.
+ * sections), the suppressed-quote block when any, and the body's first window
+ * with an honest "N more windows" note.
  */
 export function extractSessionBriefing(
   doc: GuardDoc,
@@ -507,7 +507,7 @@ export function extractSessionBriefing(
   prior?: ExtractPrior,
 ): string {
   const areas = doc.sections[0]?.areaTags ?? []
-  const chunks = docChunkCount(doc)
+  const windows = docWindowCount(doc)
   const lines = [
     `Extract the testable claims of ONE spec document.`,
     ``,
@@ -548,9 +548,9 @@ export function extractSessionBriefing(
         ]),
   )
   if (prior) lines.push('', ...priorExtractionLines(doc, prior))
-  lines.push('', renderDocChunk(doc, 1).content)
-  if (chunks > 1) {
-    lines.push('', `${chunks - 1} more chunk(s) — use \`read_chunk\` to page through the rest before you finish.`)
+  lines.push('', renderDocWindow(doc, 1).content)
+  if (windows > 1) {
+    lines.push('', `${windows - 1} more window(s) — use \`read_window\` to page through the rest before you finish.`)
   }
   lines.push('', 'Read the whole document, check the draft with `check_claims`, then produce the outcome.')
   return lines.join('\n')

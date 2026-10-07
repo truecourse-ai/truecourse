@@ -1,0 +1,482 @@
+{
+ "tests/fixtures/doc-sentences/design-system.md": {
+  "markdown": true,
+  "sections": [
+   {
+    "anchor": "design-system-2",
+    "fingerprint": "sha256:9081e1f251b8af68bf090f8454323a4a609be554f06e455081fe9f6cefabe1fb",
+    "headingText": "design-system",
+    "level": 0,
+    "startLine": 1,
+    "endLine": 50,
+    "ownText": "---\nversion: alpha\nname: Reactive Resume\ndescription: A monochrome, content-first design system for a free and open-source resume builder. Dark-by-default with light mode support.\ncolors:\n  primary: \"#343434\"\n  primary-foreground: \"#FBFBFB\"\n  secondary: \"#F7F7F7\"\n  secondary-foreground: \"#343434\"\n  background: \"#FFFFFF\"\n  foreground: \"#252525\"\n  muted: \"#F7F7F7\"\n  muted-foreground: \"#8E8E8E\"\n  border: \"#EBEBEB\"\n  ring: \"#B5B5B5\"\n  destructive: \"#DC2626\"\n  on-destructive: \"#FFFFFF\"\nrounded:\n  sm: 0.18rem\n  md: 0.24rem\n  lg: 0.3rem\n  xl: 0.42rem\ncomponents:\n  button-default:\n    backgroundColor: \"{colors.primary}\"\n    textColor: \"{colors.primary-foreground}\"\n    rounded: \"{rounded.lg}\"\n    height: 36px\n  button-outline:\n    backgroundColor: \"{colors.background}\"\n    textColor: \"{colors.foreground}\"\n    rounded: \"{rounded.lg}\"\n    height: 36px\n  button-secondary:\n    backgroundColor: \"{colors.secondary}\"\n    textColor: \"{colors.secondary-foreground}\"\n    rounded: \"{rounded.lg}\"\n    height: 36px\n  button-ghost:\n    backgroundColor: \"{colors.background}\"\n    textColor: \"{colors.foreground}\"\n    rounded: \"{rounded.lg}\"\n    height: 36px\n  button-destructive:\n    backgroundColor: \"{colors.destructive}\"\n    textColor: \"{colors.on-destructive}\"\n    rounded: \"{rounded.lg}\"\n    height: 36px\n---\n",
+    "fullText": "---\nversion: alpha\nname: Reactive Resume\ndescription: A monochrome, content-first design system for a free and open-source resume builder. Dark-by-default with light mode support.\ncolors:\n  primary: \"#343434\"\n  primary-foreground: \"#FBFBFB\"\n  secondary: \"#F7F7F7\"\n  secondary-foreground: \"#343434\"\n  background: \"#FFFFFF\"\n  foreground: \"#252525\"\n  muted: \"#F7F7F7\"\n  muted-foreground: \"#8E8E8E\"\n  border: \"#EBEBEB\"\n  ring: \"#B5B5B5\"\n  destructive: \"#DC2626\"\n  on-destructive: \"#FFFFFF\"\nrounded:\n  sm: 0.18rem\n  md: 0.24rem\n  lg: 0.3rem\n  xl: 0.42rem\ncomponents:\n  button-default:\n    backgroundColor: \"{colors.primary}\"\n    textColor: \"{colors.primary-foreground}\"\n    rounded: \"{rounded.lg}\"\n    height: 36px\n  button-outline:\n    backgroundColor: \"{colors.background}\"\n    textColor: \"{colors.foreground}\"\n    rounded: \"{rounded.lg}\"\n    height: 36px\n  button-secondary:\n    backgroundColor: \"{colors.secondary}\"\n    textColor: \"{colors.secondary-foreground}\"\n    rounded: \"{rounded.lg}\"\n    height: 36px\n  button-ghost:\n    backgroundColor: \"{colors.background}\"\n    textColor: \"{colors.foreground}\"\n    rounded: \"{rounded.lg}\"\n    height: 36px\n  button-destructive:\n    backgroundColor: \"{colors.destructive}\"\n    textColor: \"{colors.on-destructive}\"\n    rounded: \"{rounded.lg}\"\n    height: 36px\n---\n"
+   },
+   {
+    "anchor": "design-system",
+    "fingerprint": "sha256:7f95396750add957ccc866ebeb021fbb7d429b875ed4a2a9a4ef31dfdf708660",
+    "headingText": "Design System",
+    "level": 1,
+    "startLine": 51,
+    "endLine": 74,
+    "ownText": "# Design System\n\nReactive Resume is monochrome by default. Color is reserved for state.\n",
+    "fullText": "# Design System\n\nReactive Resume is monochrome by default. Color is reserved for state.\n\n## Buttons\n\nSix variants, all sharing `rounded-lg` corners and a 1px `translate-y` on active press.\n\n| Variant | Use |\n| --- | --- |\n| `default` | The primary action of a view. |\n| `destructive` | Deleting a resume or an account. |\n\n## Dashboard\n\nThe sidebar contains: logo, resume list link, agent link, settings subnavigation, and a footer with user avatar.\n\n## Color\n\nThe destructive color is red. Every other color is a shade of gray.\n\n- Primary is near black.\n- Muted text is mid gray.\n- Borders are light gray.\n"
+   },
+   {
+    "anchor": "design-system/buttons",
+    "fingerprint": "sha256:b7099b22335dd5670c97bed7b9a0012e1b5aac5c9547b15da76089f74a417cf1",
+    "headingText": "Buttons",
+    "level": 2,
+    "startLine": 55,
+    "endLine": 63,
+    "ownText": "## Buttons\n\nSix variants, all sharing `rounded-lg` corners and a 1px `translate-y` on active press.\n\n| Variant | Use |\n| --- | --- |\n| `default` | The primary action of a view. |\n| `destructive` | Deleting a resume or an account. |\n",
+    "fullText": "## Buttons\n\nSix variants, all sharing `rounded-lg` corners and a 1px `translate-y` on active press.\n\n| Variant | Use |\n| --- | --- |\n| `default` | The primary action of a view. |\n| `destructive` | Deleting a resume or an account. |\n"
+   },
+   {
+    "anchor": "design-system/dashboard",
+    "fingerprint": "sha256:ef463258527be8da8ad50b4ed73445bae9fb441087594aa288dc8f4deffec237",
+    "headingText": "Dashboard",
+    "level": 2,
+    "startLine": 64,
+    "endLine": 67,
+    "ownText": "## Dashboard\n\nThe sidebar contains: logo, resume list link, agent link, settings subnavigation, and a footer with user avatar.\n",
+    "fullText": "## Dashboard\n\nThe sidebar contains: logo, resume list link, agent link, settings subnavigation, and a footer with user avatar.\n"
+   },
+   {
+    "anchor": "design-system/color",
+    "fingerprint": "sha256:d5f4c30955965a6730d3eb3139aa4167c1d3ed48deab43c269c571cda50ad61f",
+    "headingText": "Color",
+    "level": 2,
+    "startLine": 68,
+    "endLine": 74,
+    "ownText": "## Color\n\nThe destructive color is red. Every other color is a shade of gray.\n\n- Primary is near black.\n- Muted text is mid gray.\n- Borders are light gray.\n",
+    "fullText": "## Color\n\nThe destructive color is red. Every other color is a shade of gray.\n\n- Primary is near black.\n- Muted text is mid gray.\n- Borders are light gray.\n"
+   }
+  ]
+ },
+ "tests/fixtures/doc-sentences/getting-started.mdx": {
+  "markdown": true,
+  "sections": [
+   {
+    "anchor": "introduction-to-reactive-resume",
+    "fingerprint": "sha256:bf91d6e037402a511649c044bc782cf4dbef966770a509de6b5360f9e0b132d3",
+    "headingText": "Introduction to Reactive Resume",
+    "level": 0,
+    "startLine": 1,
+    "endLine": 9,
+    "ownText": "---\ntitle: \"Introduction to Reactive Resume\"\ndescription: \"Reactive Resume is a free, open-source resume builder that lets you create, update, export, and share professional resumes without accounts or paywalls.\"\n---\n\n<Frame>\n  <img src=\"/images/getting-started/banner.webp\" alt=\"Reactive Resume Banner\" />\n</Frame>\n",
+    "fullText": "---\ntitle: \"Introduction to Reactive Resume\"\ndescription: \"Reactive Resume is a free, open-source resume builder that lets you create, update, export, and share professional resumes without accounts or paywalls.\"\n---\n\n<Frame>\n  <img src=\"/images/getting-started/banner.webp\" alt=\"Reactive Resume Banner\" />\n</Frame>\n"
+   },
+   {
+    "anchor": "what-is-reactive-resume",
+    "fingerprint": "sha256:daafcd993f36dd068e9f5d6cc918e366a07b6210d45ce73bf479465713614860",
+    "headingText": "What is Reactive Resume?",
+    "level": 2,
+    "startLine": 10,
+    "endLine": 28,
+    "ownText": "## What is Reactive Resume?\n\nReactive Resume is a free and open-source resume builder that makes it easy to create, update, and share your resume. Built with privacy as a core principle, it gives you complete control over your data.\n\n<CardGroup cols={2}>\n  <Card title=\"Privacy First\" icon=\"shield-check\">\n    Your data stays yours. No tracking, no ads, and an open-source codebase you can read.\n  </Card>\n  <Card title=\"Beautiful Templates\" icon=\"palette\">\n    Choose from a set of professionally designed templates.\n  </Card>\n  <Card title=\"Real-time Preview\" icon=\"eye\">\n    See changes instantly as you type. What you see is exactly what you'll get when you export.\n  </Card>\n  <Card title=\"Export Anywhere\" icon=\"file-export\">\n    Download your resume as PDF, share it via a unique link, or print it directly from your browser.\n  </Card>\n</CardGroup>\n",
+    "fullText": "## What is Reactive Resume?\n\nReactive Resume is a free and open-source resume builder that makes it easy to create, update, and share your resume. Built with privacy as a core principle, it gives you complete control over your data.\n\n<CardGroup cols={2}>\n  <Card title=\"Privacy First\" icon=\"shield-check\">\n    Your data stays yours. No tracking, no ads, and an open-source codebase you can read.\n  </Card>\n  <Card title=\"Beautiful Templates\" icon=\"palette\">\n    Choose from a set of professionally designed templates.\n  </Card>\n  <Card title=\"Real-time Preview\" icon=\"eye\">\n    See changes instantly as you type. What you see is exactly what you'll get when you export.\n  </Card>\n  <Card title=\"Export Anywhere\" icon=\"file-export\">\n    Download your resume as PDF, share it via a unique link, or print it directly from your browser.\n  </Card>\n</CardGroup>\n"
+   },
+   {
+    "anchor": "key-features",
+    "fingerprint": "sha256:98592ff7c9c94c33b39a787f62f52b24370d5abafae7b3e161c6152e6f08cc13",
+    "headingText": "Key features",
+    "level": 2,
+    "startLine": 29,
+    "endLine": 63,
+    "ownText": "## Key features\n\n<Frame>\n  <img src=\"/images/getting-started/infographic.webp\" alt=\"An infographic of the major features of Reactive Resume\" />\n</Frame>\n\n<AccordionGroup>\n\t<Accordion title=\"Completely Free & Open Source\" icon=\"code-branch\">\n\t\tReactive Resume is licensed under MIT. You can use it for free, modify it, and even host your own instance. The\n\t\tentire codebase is available on [GitHub](https://github.com/reactive-resume/reactive-resume).\n\t</Accordion>\n\n    <Accordion title=\"Multiple Templates\" icon=\"grid-2\">\n    \tChoose from a variety of professionally designed templates including Azurill, Bronzor, Chikorita, Ditgar, Ditto,\n    \tGengar, Glalie, Kakuna, Lapras, Leafish, Meowth, Onyx, Pikachu, Rhyhorn, and Scizor, each with its own layout and style.\n    </Accordion>\n\n    <Accordion title=\"Rich Text Editor\" icon=\"text\">\n    \tFormat your content with bold, italic, links, lists, and more using the rich text editor, powered by Tiptap.\n    </Accordion>\n\n    <Accordion title=\"Multi-language Support\" icon=\"globe\">\n    \tReactive Resume is available in multiple languages. Contribute translations to help us reach more people.\n    </Accordion>\n\n    <Accordion title=\"Dark Mode\" icon=\"moon\">\n    \tBuilt-in dark mode support, so you can work comfortably in any lighting condition.\n    </Accordion>\n\n    <Accordion title=\"Self-hosting Ready\" icon=\"server\">\n    \tDeploy your own instance of Reactive Resume using Docker. Keep complete control over your data and infrastructure.\n    </Accordion>\n\n</AccordionGroup>\n",
+    "fullText": "## Key features\n\n<Frame>\n  <img src=\"/images/getting-started/infographic.webp\" alt=\"An infographic of the major features of Reactive Resume\" />\n</Frame>\n\n<AccordionGroup>\n\t<Accordion title=\"Completely Free & Open Source\" icon=\"code-branch\">\n\t\tReactive Resume is licensed under MIT. You can use it for free, modify it, and even host your own instance. The\n\t\tentire codebase is available on [GitHub](https://github.com/reactive-resume/reactive-resume).\n\t</Accordion>\n\n    <Accordion title=\"Multiple Templates\" icon=\"grid-2\">\n    \tChoose from a variety of professionally designed templates including Azurill, Bronzor, Chikorita, Ditgar, Ditto,\n    \tGengar, Glalie, Kakuna, Lapras, Leafish, Meowth, Onyx, Pikachu, Rhyhorn, and Scizor, each with its own layout and style.\n    </Accordion>\n\n    <Accordion title=\"Rich Text Editor\" icon=\"text\">\n    \tFormat your content with bold, italic, links, lists, and more using the rich text editor, powered by Tiptap.\n    </Accordion>\n\n    <Accordion title=\"Multi-language Support\" icon=\"globe\">\n    \tReactive Resume is available in multiple languages. Contribute translations to help us reach more people.\n    </Accordion>\n\n    <Accordion title=\"Dark Mode\" icon=\"moon\">\n    \tBuilt-in dark mode support, so you can work comfortably in any lighting condition.\n    </Accordion>\n\n    <Accordion title=\"Self-hosting Ready\" icon=\"server\">\n    \tDeploy your own instance of Reactive Resume using Docker. Keep complete control over your data and infrastructure.\n    </Accordion>\n\n</AccordionGroup>\n"
+   },
+   {
+    "anchor": "getting-started",
+    "fingerprint": "sha256:10f4b4adf74c9a493854227ac68fc9c59ec58a45fa8d1d929d43baf9abf0ce83",
+    "headingText": "Getting started",
+    "level": 2,
+    "startLine": 64,
+    "endLine": 76,
+    "ownText": "## Getting started\n\nUse the hosted version, or run your own instance.\n\n<CardGroup cols={2}>\n  <Card title=\"Quickstart\" icon=\"rocket\" href=\"/getting-started/quickstart\">\n    Start with the hosted version, or deploy your own instance.\n  </Card>\n  <Card title=\"Development Setup\" icon=\"code\" href=\"/contributing/development\">\n    Set up a local development environment to contribute or customize Reactive Resume.\n  </Card>\n</CardGroup>\n",
+    "fullText": "## Getting started\n\nUse the hosted version, or run your own instance.\n\n<CardGroup cols={2}>\n  <Card title=\"Quickstart\" icon=\"rocket\" href=\"/getting-started/quickstart\">\n    Start with the hosted version, or deploy your own instance.\n  </Card>\n  <Card title=\"Development Setup\" icon=\"code\" href=\"/contributing/development\">\n    Set up a local development environment to contribute or customize Reactive Resume.\n  </Card>\n</CardGroup>\n"
+   },
+   {
+    "anchor": "tech-stack",
+    "fingerprint": "sha256:85b04d442de1217eebf6fefee1dcfc341dde3f9a5c7190fdd0d240ae439a368b",
+    "headingText": "Tech stack",
+    "level": 2,
+    "startLine": 77,
+    "endLine": 90,
+    "ownText": "## Tech stack\n\n| Category         | Technology                      |\n| ---------------- | ------------------------------- |\n| Framework        | TanStack Start (React 19, Vite) |\n| Runtime          | Node.js                         |\n| Language         | TypeScript                      |\n| Database         | PostgreSQL with Drizzle ORM     |\n| API              | ORPC (Type-safe RPC)            |\n| Auth             | Better Auth                     |\n| Styling          | Tailwind CSS                    |\n| UI Components    | Base UI + shadcn-style package  |\n| State Management | Zustand + TanStack Query        |\n",
+    "fullText": "## Tech stack\n\n| Category         | Technology                      |\n| ---------------- | ------------------------------- |\n| Framework        | TanStack Start (React 19, Vite) |\n| Runtime          | Node.js                         |\n| Language         | TypeScript                      |\n| Database         | PostgreSQL with Drizzle ORM     |\n| API              | ORPC (Type-safe RPC)            |\n| Auth             | Better Auth                     |\n| Styling          | Tailwind CSS                    |\n| UI Components    | Base UI + shadcn-style package  |\n| State Management | Zustand + TanStack Query        |\n"
+   },
+   {
+    "anchor": "community-support",
+    "fingerprint": "sha256:cbe311079984e1a83df5b98e13795f39bf7f359ab35261c1bbf9c716e62ca1d1",
+    "headingText": "Community & support",
+    "level": 2,
+    "startLine": 91,
+    "endLine": 115,
+    "ownText": "## Community & support\n\n<CardGroup cols={2}>\n  <Card title=\"GitHub\" icon=\"github\" href=\"https://github.com/reactive-resume/reactive-resume\">\n    Star the repo, report reproducible bugs, propose features, and contribute to the project.\n  </Card>\n  <Card title=\"GitHub Discussions\" icon=\"comments\" href=\"https://github.com/reactive-resume/reactive-resume/discussions/categories/q-a\">\n    Ask questions about setup, configuration, and using Reactive Resume.\n  </Card>\n  <Card title=\"Reddit\" icon=\"reddit\" href=\"https://reddit.com/r/reactiveresume\">\n    Get help and talk to other users on our subreddit.\n  </Card>\n  <Card title=\"Discord\" icon=\"discord\" href=\"https://discord.gg/aSyA5ZSxpb\">\n    Get help and talk to other users on our Discord server.\n  </Card>\n  <Card title=\"Sponsor\" icon=\"heart\" href=\"https://opencollective.com/reactive-resume/donate\">\n    Help fund the continued development of Reactive Resume.\n  </Card>\n</CardGroup>\n\n<Note>\n  **Need help?** Start a [GitHub Discussion](https://github.com/reactive-resume/reactive-resume/discussions/categories/q-a).\n  GitHub Issues are reserved for reproducible bugs and actionable feature proposals.\n</Note>\n\n",
+    "fullText": "## Community & support\n\n<CardGroup cols={2}>\n  <Card title=\"GitHub\" icon=\"github\" href=\"https://github.com/reactive-resume/reactive-resume\">\n    Star the repo, report reproducible bugs, propose features, and contribute to the project.\n  </Card>\n  <Card title=\"GitHub Discussions\" icon=\"comments\" href=\"https://github.com/reactive-resume/reactive-resume/discussions/categories/q-a\">\n    Ask questions about setup, configuration, and using Reactive Resume.\n  </Card>\n  <Card title=\"Reddit\" icon=\"reddit\" href=\"https://reddit.com/r/reactiveresume\">\n    Get help and talk to other users on our subreddit.\n  </Card>\n  <Card title=\"Discord\" icon=\"discord\" href=\"https://discord.gg/aSyA5ZSxpb\">\n    Get help and talk to other users on our Discord server.\n  </Card>\n  <Card title=\"Sponsor\" icon=\"heart\" href=\"https://opencollective.com/reactive-resume/donate\">\n    Help fund the continued development of Reactive Resume.\n  </Card>\n</CardGroup>\n\n<Note>\n  **Need help?** Start a [GitHub Discussion](https://github.com/reactive-resume/reactive-resume/discussions/categories/q-a).\n  GitHub Issues are reserved for reproducible bugs and actionable feature proposals.\n</Note>\n\n"
+   }
+  ]
+ },
+ "tests/fixtures/doc-sentences/json-resume-schema.mdx": {
+  "markdown": true,
+  "sections": [
+   {
+    "anchor": "json-resume-schema",
+    "fingerprint": "sha256:e7faaaeb59e7861c1fa17ad3a7968c8bce20c681038f7f786909ff3719e8a5ed",
+    "headingText": "JSON Resume schema",
+    "level": 0,
+    "startLine": 1,
+    "endLine": 5,
+    "ownText": "---\ntitle: \"JSON Resume schema\"\ndescription: \"The Reactive Resume JSON Schema, published at /schema.json: what it covers, how to validate resume data against it, and how to build on it.\"\n---\n",
+    "fullText": "---\ntitle: \"JSON Resume schema\"\ndescription: \"The Reactive Resume JSON Schema, published at /schema.json: what it covers, how to validate resume data against it, and how to build on it.\"\n---\n"
+   },
+   {
+    "anchor": "the-vision",
+    "fingerprint": "sha256:7e09d2f9821f486a85ec0853508f0d2582e1d21099f3cf215944484d9f30af86",
+    "headingText": "The vision",
+    "level": 2,
+    "startLine": 6,
+    "endLine": 20,
+    "ownText": "## The vision\n\nI want applying for a job to be as simple as sending a JSON file from one service to a job listing portal, without parsing errors, format inconsistencies, or bias from how a resume happens to be laid out.\n\nReactive Resume aims to be the gold standard in JSON resume schemas: one documented, strictly typed schema that any service can adopt so resumes move between tools without loss.\n\nImagine:\n\n- Exporting your resume from Reactive Resume as a JSON file\n- Uploading it directly to a job portal that instantly understands every field\n- No more PDF parsing failures or ATS (Applicant Tracking System) misreads\n- Your qualifications evaluated purely on merit, not on formatting quirks\n\nThis is the future I'm hoping to build toward.\n",
+    "fullText": "## The vision\n\nI want applying for a job to be as simple as sending a JSON file from one service to a job listing portal, without parsing errors, format inconsistencies, or bias from how a resume happens to be laid out.\n\nReactive Resume aims to be the gold standard in JSON resume schemas: one documented, strictly typed schema that any service can adopt so resumes move between tools without loss.\n\nImagine:\n\n- Exporting your resume from Reactive Resume as a JSON file\n- Uploading it directly to a job portal that instantly understands every field\n- No more PDF parsing failures or ATS (Applicant Tracking System) misreads\n- Your qualifications evaluated purely on merit, not on formatting quirks\n\nThis is the future I'm hoping to build toward.\n"
+   },
+   {
+    "anchor": "the-schema-endpoint",
+    "fingerprint": "sha256:b83eba9d16eb8103395899f088e56bf3da3f6cc9de06b55007d6b225568efcf1",
+    "headingText": "The schema endpoint",
+    "level": 2,
+    "startLine": 21,
+    "endLine": 33,
+    "ownText": "## The schema endpoint\n\nThe Reactive Resume JSON Schema is publicly available at:\n\n<Info>[https://rxresu.me/schema.json](https://rxresu.me/schema.json)</Info>\n\nThe endpoint returns a complete JSON Schema in the draft 2020-12 dialect. It describes the structure of a Reactive Resume document and covers:\n\n- **All resume sections**: basics, summary, experience, education, projects, skills, languages, interests, awards, certifications, publications, volunteer work, and references\n- **Custom sections**: user-defined sections whose `type` selects one of the documented item shapes\n- **Metadata**: template, layout, typography, colors, page settings, and custom CSS\n- **Full descriptions**: every field is documented with its purpose and expected format\n",
+    "fullText": "## The schema endpoint\n\nThe Reactive Resume JSON Schema is publicly available at:\n\n<Info>[https://rxresu.me/schema.json](https://rxresu.me/schema.json)</Info>\n\nThe endpoint returns a complete JSON Schema in the draft 2020-12 dialect. It describes the structure of a Reactive Resume document and covers:\n\n- **All resume sections**: basics, summary, experience, education, projects, skills, languages, interests, awards, certifications, publications, volunteer work, and references\n- **Custom sections**: user-defined sections whose `type` selects one of the documented item shapes\n- **Metadata**: template, layout, typography, colors, page settings, and custom CSS\n- **Full descriptions**: every field is documented with its purpose and expected format\n"
+   },
+   {
+    "anchor": "schema-dialect-and-document-shape",
+    "fingerprint": "sha256:bdc755b2338177b25e6d0b0c651af26c1d014dc932fcd53ed149b834104f5179",
+    "headingText": "Schema dialect and document shape",
+    "level": 2,
+    "startLine": 34,
+    "endLine": 47,
+    "ownText": "## Schema dialect and document shape\n\nThe schema document declares its JSON Schema dialect in its own `$schema` field:\n\n```json\n{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"type\": \"object\"\n}\n```\n\nResume documents do not include a top-level `version` property. They also do not include the schema document's\n`$schema` field. Validate the exported resume object directly against the canonical schema endpoint.\n",
+    "fullText": "## Schema dialect and document shape\n\nThe schema document declares its JSON Schema dialect in its own `$schema` field:\n\n```json\n{\n  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n  \"type\": \"object\"\n}\n```\n\nResume documents do not include a top-level `version` property. They also do not include the schema document's\n`$schema` field. Validate the exported resume object directly against the canonical schema endpoint.\n"
+   },
+   {
+    "anchor": "using-the-schema",
+    "fingerprint": "sha256:ab811464550b8c1a2b3265d3f9723abd8574a0e36de6a0b520ca0b65d229bfbd",
+    "headingText": "Using the schema",
+    "level": 2,
+    "startLine": 48,
+    "endLine": 92,
+    "ownText": "## Using the schema\n",
+    "fullText": "## Using the schema\n\n### Validating resume data\n\nYou can use the schema to validate resume JSON files in any language that supports JSON Schema validation:\n\n```javascript\nimport Ajv2020 from \"ajv/dist/2020.js\";\n\nconst ajv = new Ajv2020();\nconst schema = await fetch(\"https://rxresu.me/schema.json\").then((r) => r.json());\nconst validate = ajv.compile(schema);\n\nconst isValid = validate(resumeData);\nif (!isValid) {\n  console.error(validate.errors);\n}\n```\n\n### IDE autocompletion\n\nAssociate exported resume files with the canonical schema in VS Code's `settings.json`:\n\n```json\n{\n  \"json.schemas\": [\n    {\n      \"fileMatch\": [\"reactive-resume*.json\"],\n      \"url\": \"https://rxresu.me/schema.json\"\n    }\n  ]\n}\n```\n\nThis keeps editor configuration outside the resume data and avoids adding unsupported top-level properties.\n\n### Building integrations\n\nThe schema enables third-party integrations:\n\n- **Job portals** can accept Reactive Resume JSON files directly\n- **HR systems** can parse candidate data without lossy PDF conversion\n- **Other resume builders** can import/export using a common format\n- **AI tools** can understand resume structure for analysis or enhancement\n"
+   },
+   {
+    "anchor": "using-the-schema/validating-resume-data",
+    "fingerprint": "sha256:5c470974b61820295acc6ac3bbe87235d32a6e4955b3456205b5a4721398d5d5",
+    "headingText": "Validating resume data",
+    "level": 3,
+    "startLine": 50,
+    "endLine": 66,
+    "ownText": "### Validating resume data\n\nYou can use the schema to validate resume JSON files in any language that supports JSON Schema validation:\n\n```javascript\nimport Ajv2020 from \"ajv/dist/2020.js\";\n\nconst ajv = new Ajv2020();\nconst schema = await fetch(\"https://rxresu.me/schema.json\").then((r) => r.json());\nconst validate = ajv.compile(schema);\n\nconst isValid = validate(resumeData);\nif (!isValid) {\n  console.error(validate.errors);\n}\n```\n",
+    "fullText": "### Validating resume data\n\nYou can use the schema to validate resume JSON files in any language that supports JSON Schema validation:\n\n```javascript\nimport Ajv2020 from \"ajv/dist/2020.js\";\n\nconst ajv = new Ajv2020();\nconst schema = await fetch(\"https://rxresu.me/schema.json\").then((r) => r.json());\nconst validate = ajv.compile(schema);\n\nconst isValid = validate(resumeData);\nif (!isValid) {\n  console.error(validate.errors);\n}\n```\n"
+   },
+   {
+    "anchor": "using-the-schema/ide-autocompletion",
+    "fingerprint": "sha256:d0f4734889155fd085205c331511e19d6d0a123bbae44c8e0d25e39ca4837f66",
+    "headingText": "IDE autocompletion",
+    "level": 3,
+    "startLine": 67,
+    "endLine": 83,
+    "ownText": "### IDE autocompletion\n\nAssociate exported resume files with the canonical schema in VS Code's `settings.json`:\n\n```json\n{\n  \"json.schemas\": [\n    {\n      \"fileMatch\": [\"reactive-resume*.json\"],\n      \"url\": \"https://rxresu.me/schema.json\"\n    }\n  ]\n}\n```\n\nThis keeps editor configuration outside the resume data and avoids adding unsupported top-level properties.\n",
+    "fullText": "### IDE autocompletion\n\nAssociate exported resume files with the canonical schema in VS Code's `settings.json`:\n\n```json\n{\n  \"json.schemas\": [\n    {\n      \"fileMatch\": [\"reactive-resume*.json\"],\n      \"url\": \"https://rxresu.me/schema.json\"\n    }\n  ]\n}\n```\n\nThis keeps editor configuration outside the resume data and avoids adding unsupported top-level properties.\n"
+   },
+   {
+    "anchor": "using-the-schema/building-integrations",
+    "fingerprint": "sha256:abeb124ac4c42a0f9492fb3c7498ac639100559b17422c644c3d08bee4ccfdb0",
+    "headingText": "Building integrations",
+    "level": 3,
+    "startLine": 84,
+    "endLine": 92,
+    "ownText": "### Building integrations\n\nThe schema enables third-party integrations:\n\n- **Job portals** can accept Reactive Resume JSON files directly\n- **HR systems** can parse candidate data without lossy PDF conversion\n- **Other resume builders** can import/export using a common format\n- **AI tools** can understand resume structure for analysis or enhancement\n",
+    "fullText": "### Building integrations\n\nThe schema enables third-party integrations:\n\n- **Job portals** can accept Reactive Resume JSON files directly\n- **HR systems** can parse candidate data without lossy PDF conversion\n- **Other resume builders** can import/export using a common format\n- **AI tools** can understand resume structure for analysis or enhancement\n"
+   },
+   {
+    "anchor": "schema-structure-overview",
+    "fingerprint": "sha256:883d6e4a0d39b64815ddd60ef2c033957b1726d55b86c2f1c7506fd28d796925",
+    "headingText": "Schema structure overview",
+    "level": 2,
+    "startLine": 93,
+    "endLine": 132,
+    "ownText": "## Schema structure overview\n\nThe resume data is organized into these top-level sections:\n\n| Section          | Description                                     |\n| ---------------- | ----------------------------------------------- |\n| `picture`        | Profile photo configuration                     |\n| `basics`         | Name, headline, contact info, custom fields     |\n| `summary`        | Professional summary or bio                     |\n| `sections`       | Standard sections (experience, education, etc.) |\n| `customSections` | User-defined additional sections                |\n| `metadata`       | Template, layout, design, typography settings   |\n\nEach section within `sections` follows a consistent structure:\n\n```json\n{\n  \"title\": \"Experience\",\n  \"columns\": 1,\n  \"hidden\": false,\n  \"items\": [\n    {\n      \"id\": \"229ad766-cb9a-4f16-aaf0-fdd8394a9b95\",\n      \"hidden\": false,\n      \"company\": \"Analytical Engines\",\n      \"position\": \"Engineer\",\n      \"location\": \"London\",\n      \"period\": \"1842\",\n      \"website\": {\n        \"url\": \"\",\n        \"label\": \"\",\n        \"inlineLink\": false\n      },\n      \"description\": \"<p>Built algorithms.</p>\",\n      \"roles\": []\n    }\n  ]\n}\n```\n",
+    "fullText": "## Schema structure overview\n\nThe resume data is organized into these top-level sections:\n\n| Section          | Description                                     |\n| ---------------- | ----------------------------------------------- |\n| `picture`        | Profile photo configuration                     |\n| `basics`         | Name, headline, contact info, custom fields     |\n| `summary`        | Professional summary or bio                     |\n| `sections`       | Standard sections (experience, education, etc.) |\n| `customSections` | User-defined additional sections                |\n| `metadata`       | Template, layout, design, typography settings   |\n\nEach section within `sections` follows a consistent structure:\n\n```json\n{\n  \"title\": \"Experience\",\n  \"columns\": 1,\n  \"hidden\": false,\n  \"items\": [\n    {\n      \"id\": \"229ad766-cb9a-4f16-aaf0-fdd8394a9b95\",\n      \"hidden\": false,\n      \"company\": \"Analytical Engines\",\n      \"position\": \"Engineer\",\n      \"location\": \"London\",\n      \"period\": \"1842\",\n      \"website\": {\n        \"url\": \"\",\n        \"label\": \"\",\n        \"inlineLink\": false\n      },\n      \"description\": \"<p>Built algorithms.</p>\",\n      \"roles\": []\n    }\n  ]\n}\n```\n"
+   },
+   {
+    "anchor": "for-developers-and-job-portals",
+    "fingerprint": "sha256:ed7487ec95b41af1a7bde3f25f79883472ea7cde183ec780207d93bb8c0807f8",
+    "headingText": "For developers and job portals",
+    "level": 2,
+    "startLine": 133,
+    "endLine": 143,
+    "ownText": "## For developers and job portals\n\nIf you're building a job portal, HR system, or any other service that handles resumes, I'd encourage you to adopt this schema:\n\n- **Zero parsing errors**: structured data means no OCR or PDF parsing mistakes\n- **Complete information**: all resume data is preserved, including links and metadata\n- **Easy integration**: JSON is universally supported across all platforms\n- **Canonical contract**: one public schema endpoint tracks the current Reactive Resume data model\n\nThe schema is open and free to use. Fetch it programmatically, or reference it by URL from your own systems.\n",
+    "fullText": "## For developers and job portals\n\nIf you're building a job portal, HR system, or any other service that handles resumes, I'd encourage you to adopt this schema:\n\n- **Zero parsing errors**: structured data means no OCR or PDF parsing mistakes\n- **Complete information**: all resume data is preserved, including links and metadata\n- **Easy integration**: JSON is universally supported across all platforms\n- **Canonical contract**: one public schema endpoint tracks the current Reactive Resume data model\n\nThe schema is open and free to use. Fetch it programmatically, or reference it by URL from your own systems.\n"
+   },
+   {
+    "anchor": "complete-json-schema",
+    "fingerprint": "sha256:786cd085e98d3a4aef98fb21bd79dc43c09e9f8f6232481ac369c923d288d549",
+    "headingText": "Complete JSON Schema",
+    "level": 2,
+    "startLine": 144,
+    "endLine": 242,
+    "ownText": "## Complete JSON Schema\n\nThe full JSON Schema for Reactive Resume follows. You can also fetch the latest version directly from [https://rxresu.me/schema.json](https://rxresu.me/schema.json).\n\n<Tip>Copy the schema from the live endpoint so you always have the latest version.</Tip>\n\n<!-- RESUME-JSON-SCHEMA:START -->\n```json /schema.json lines expandable\n{\n\t\"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n\t\"type\": \"object\",\n\t\"properties\": {\n\t\t\"picture\": {\n\t\t\t\"type\": \"object\",\n\t\t\t\"properties\": {\n\t\t\t\t\"hidden\": {\n\t\t\t\t\t\"type\": \"boolean\",\n\t\t\t\t\t\"description\": \"Whether to hide the picture from the resume.\"\n\t\t\t\t},\n\t\t\t\t\"fit\": {\n\t\t\t\t\t\"default\": \"cover\",\n\t\t\t\t\t\"description\": \"How the picture fits its frame: cover crops overflow, while contain preserves the whole image.\",\n\t\t\t\t\t\"type\": \"string\",\n\t\t\t\t\t\"enum\": [\n\t\t\t\t\t\t\"cover\",\n\t\t\t\t\t\t\"contain\"\n\t\t\t\t\t]\n\t\t\t\t},\n\t\t\t\t\"url\": {\n\t\t\t\t\t\"type\": \"string\",\n\t\t\t\t\t\"description\": \"The URL to the picture to display on the resume. Prefer local app-served paths (for example /uploads/...) populated via upload.\"\n\t\t\t\t},\n\t\t\t\t\"size\": {\n\t\t\t\t\t\"type\": \"number\",\n\t\t\t\t\t\"minimum\": 32,\n\t\t\t\t\t\"maximum\": 512,\n\t\t\t\t\t\"description\": \"The size of the picture to display on the resume, defined in points (pt).\"\n\t\t\t\t},\n\t\t\t\t\"rotation\": {\n\t\t\t\t\t\"type\": \"number\",\n\t\t\t\t\t\"minimum\": 0,\n\t\t\t\t\t\"maximum\": 360,\n\t\t\t\t\t\"description\": \"The rotation of the picture to display on the resume, defined in degrees (°).\"\n\t\t\t\t},\n\t\t\t\t\"aspectRatio\": {\n\t\t\t\t\t\"type\": \"number\",\n\t\t\t\t\t\"minimum\": 0.5,\n\t\t\t\t\t\"maximum\": 2.5,\n\t\t\t\t\t\"description\": \"The aspect ratio of the picture to display on the resume, defined as width / height (e.g. 1.5 for 1.5:1 or 0.5 for 1:2).\"\n\t\t\t\t},\n\t\t\t\t\"borderRadius\": {\n\t\t\t\t\t\"type\": \"number\",\n\t\t\t\t\t\"minimum\": 0,\n\t\t\t\t\t\"maximum\": 100,\n\t\t\t\t\t\"description\": \"The border radius of the picture to display on the resume, defined in points (pt).\"\n\t\t\t\t},\n\t\t\t\t\"borderColor\": {\n\t\t\t\t\t\"type\": \"string\",\n\t\t\t\t\t\"description\": \"The color of the border of the picture to display on the resume, defined as rgba(r, g, b, a).\"\n\t\t\t\t},\n\t\t\t\t\"borderWidth\": {\n\t\t\t\t\t\"type\": \"number\",\n\t\t\t\t\t\"minimum\": 0,\n\t\t\t\t\t\"description\": \"The width of the border of the picture to display on the resume, defined in points (pt).\"\n\t\t\t\t},\n\t\t\t\t\"shadowColor\": {\n\t\t\t\t\t\"type\": \"string\",\n\t\t\t\t\t\"description\": \"The color of the shadow of the picture to display on the resume, defined as rgba(r, g, b, a).\"\n\t\t\t\t},\n\t\t\t\t\"shadowWidth\": {\n\t\t\t\t\t\"type\": \"number\",\n\t\t\t\t\t\"minimum\": 0,\n\t\t\t\t\t\"description\": \"The width of the shadow of the picture to display on the resume, defined in points (pt).\"\n\t\t\t\t}\n\t\t\t},\n\t\t\t\"required\": [\n\t\t\t\t\"hidden\",\n\t\t\t\t\"url\",\n\t\t\t\t\"size\",\n\t\t\t\t\"rotation\",\n\t\t\t\t\"aspectRatio\",\n\t\t\t\t\"borderRadius\",\n\t\t\t\t\"borderColor\",\n\t\t\t\t\"borderWidth\",\n\t\t\t\t\"shadowColor\",\n\t\t\t\t\"shadowWidth\"\n\t\t\t],\n\t\t\t\"description\": \"Configuration for photograph displayed on the resume\"\n\t\t},\n\t\t\"basics\": {\n\t\t\t\"type\": \"object\",\n\t\t\t\"properties\": {\n\t\t\t\t\"name\": {\n\t\t\t\t\t\"type\": \"string\",\n\t\t\t\t\t\"description\": \"The full name of the author of the resume.\"\n\t\t\t\t},\n\t\t\t\t\"headline\": {\n```\n<!-- RESUME-JSON-SCHEMA:END -->\n",
+    "fullText": "## Complete JSON Schema\n\nThe full JSON Schema for Reactive Resume follows. You can also fetch the latest version directly from [https://rxresu.me/schema.json](https://rxresu.me/schema.json).\n\n<Tip>Copy the schema from the live endpoint so you always have the latest version.</Tip>\n\n<!-- RESUME-JSON-SCHEMA:START -->\n```json /schema.json lines expandable\n{\n\t\"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n\t\"type\": \"object\",\n\t\"properties\": {\n\t\t\"picture\": {\n\t\t\t\"type\": \"object\",\n\t\t\t\"properties\": {\n\t\t\t\t\"hidden\": {\n\t\t\t\t\t\"type\": \"boolean\",\n\t\t\t\t\t\"description\": \"Whether to hide the picture from the resume.\"\n\t\t\t\t},\n\t\t\t\t\"fit\": {\n\t\t\t\t\t\"default\": \"cover\",\n\t\t\t\t\t\"description\": \"How the picture fits its frame: cover crops overflow, while contain preserves the whole image.\",\n\t\t\t\t\t\"type\": \"string\",\n\t\t\t\t\t\"enum\": [\n\t\t\t\t\t\t\"cover\",\n\t\t\t\t\t\t\"contain\"\n\t\t\t\t\t]\n\t\t\t\t},\n\t\t\t\t\"url\": {\n\t\t\t\t\t\"type\": \"string\",\n\t\t\t\t\t\"description\": \"The URL to the picture to display on the resume. Prefer local app-served paths (for example /uploads/...) populated via upload.\"\n\t\t\t\t},\n\t\t\t\t\"size\": {\n\t\t\t\t\t\"type\": \"number\",\n\t\t\t\t\t\"minimum\": 32,\n\t\t\t\t\t\"maximum\": 512,\n\t\t\t\t\t\"description\": \"The size of the picture to display on the resume, defined in points (pt).\"\n\t\t\t\t},\n\t\t\t\t\"rotation\": {\n\t\t\t\t\t\"type\": \"number\",\n\t\t\t\t\t\"minimum\": 0,\n\t\t\t\t\t\"maximum\": 360,\n\t\t\t\t\t\"description\": \"The rotation of the picture to display on the resume, defined in degrees (°).\"\n\t\t\t\t},\n\t\t\t\t\"aspectRatio\": {\n\t\t\t\t\t\"type\": \"number\",\n\t\t\t\t\t\"minimum\": 0.5,\n\t\t\t\t\t\"maximum\": 2.5,\n\t\t\t\t\t\"description\": \"The aspect ratio of the picture to display on the resume, defined as width / height (e.g. 1.5 for 1.5:1 or 0.5 for 1:2).\"\n\t\t\t\t},\n\t\t\t\t\"borderRadius\": {\n\t\t\t\t\t\"type\": \"number\",\n\t\t\t\t\t\"minimum\": 0,\n\t\t\t\t\t\"maximum\": 100,\n\t\t\t\t\t\"description\": \"The border radius of the picture to display on the resume, defined in points (pt).\"\n\t\t\t\t},\n\t\t\t\t\"borderColor\": {\n\t\t\t\t\t\"type\": \"string\",\n\t\t\t\t\t\"description\": \"The color of the border of the picture to display on the resume, defined as rgba(r, g, b, a).\"\n\t\t\t\t},\n\t\t\t\t\"borderWidth\": {\n\t\t\t\t\t\"type\": \"number\",\n\t\t\t\t\t\"minimum\": 0,\n\t\t\t\t\t\"description\": \"The width of the border of the picture to display on the resume, defined in points (pt).\"\n\t\t\t\t},\n\t\t\t\t\"shadowColor\": {\n\t\t\t\t\t\"type\": \"string\",\n\t\t\t\t\t\"description\": \"The color of the shadow of the picture to display on the resume, defined as rgba(r, g, b, a).\"\n\t\t\t\t},\n\t\t\t\t\"shadowWidth\": {\n\t\t\t\t\t\"type\": \"number\",\n\t\t\t\t\t\"minimum\": 0,\n\t\t\t\t\t\"description\": \"The width of the shadow of the picture to display on the resume, defined in points (pt).\"\n\t\t\t\t}\n\t\t\t},\n\t\t\t\"required\": [\n\t\t\t\t\"hidden\",\n\t\t\t\t\"url\",\n\t\t\t\t\"size\",\n\t\t\t\t\"rotation\",\n\t\t\t\t\"aspectRatio\",\n\t\t\t\t\"borderRadius\",\n\t\t\t\t\"borderColor\",\n\t\t\t\t\"borderWidth\",\n\t\t\t\t\"shadowColor\",\n\t\t\t\t\"shadowWidth\"\n\t\t\t],\n\t\t\t\"description\": \"Configuration for photograph displayed on the resume\"\n\t\t},\n\t\t\"basics\": {\n\t\t\t\"type\": \"object\",\n\t\t\t\"properties\": {\n\t\t\t\t\"name\": {\n\t\t\t\t\t\"type\": \"string\",\n\t\t\t\t\t\"description\": \"The full name of the author of the resume.\"\n\t\t\t\t},\n\t\t\t\t\"headline\": {\n```\n<!-- RESUME-JSON-SCHEMA:END -->\n"
+   }
+  ]
+ },
+ "tests/fixtures/doc-sentences/quickstart.mdx": {
+  "markdown": true,
+  "sections": [
+   {
+    "anchor": "quickstart",
+    "fingerprint": "sha256:e58a37ba95f8bb0b4c39eeb65136a722838ca29b9c12f46e9277262a3732901c",
+    "headingText": "Quickstart",
+    "level": 0,
+    "startLine": 1,
+    "endLine": 5,
+    "ownText": "---\ntitle: \"Quickstart\"\ndescription: \"Sign in to the hosted version of Reactive Resume, or deploy your own self-hosted instance with Docker Compose.\"\n---\n",
+    "fullText": "---\ntitle: \"Quickstart\"\ndescription: \"Sign in to the hosted version of Reactive Resume, or deploy your own self-hosted instance with Docker Compose.\"\n---\n"
+   },
+   {
+    "anchor": "options",
+    "fingerprint": "sha256:697ac21b98ecaf90dafc9b695af31d1f4ccd474f325b836841a724be1254af42",
+    "headingText": "Options",
+    "level": 2,
+    "startLine": 6,
+    "endLine": 20,
+    "ownText": "## Options\n\nThere are two ways to use Reactive Resume:\n\n<CardGroup cols={2}>\n  <Card title=\"Use the Cloud Version\" icon=\"cloud\" href=\"#using-the-cloud-version\">\n    The fastest way to get started, and the right choice for most people.\n  </Card>\n  <Card title=\"Self-Host with Docker\" icon=\"docker\" href=\"#self-host-with-docker\">\n    Deploy your own instance and keep full control. Requires some technical knowledge.\n  </Card>\n</CardGroup>\n\n---\n",
+    "fullText": "## Options\n\nThere are two ways to use Reactive Resume:\n\n<CardGroup cols={2}>\n  <Card title=\"Use the Cloud Version\" icon=\"cloud\" href=\"#using-the-cloud-version\">\n    The fastest way to get started, and the right choice for most people.\n  </Card>\n  <Card title=\"Self-Host with Docker\" icon=\"docker\" href=\"#self-host-with-docker\">\n    Deploy your own instance and keep full control. Requires some technical knowledge.\n  </Card>\n</CardGroup>\n\n---\n"
+   },
+   {
+    "anchor": "using-the-cloud-version",
+    "fingerprint": "sha256:c8f1dbd25e8ca1fd81b6e03e98684c0e3527734eec7072ce63ee8d56507cc532",
+    "headingText": "Using the cloud version",
+    "level": 2,
+    "startLine": 21,
+    "endLine": 49,
+    "ownText": "## Using the cloud version\n\nThe easiest way to use Reactive Resume is our cloud version at [rxresu.me](https://rxresu.me). It is free, and it will stay free.\n\n<Steps>\n\t<Step title=\"Create an Account\">\n\t\tVisit [rxresu.me](https://rxresu.me) and sign up for free using your email, or sign in with your GitHub or Google\n\t\taccount.\n\t</Step>\n\n    <Step title=\"Create Your First Resume\">\n    \tClick the **Create Resume** button on your dashboard. Give your resume a name and select a template to get started.\n    </Step>\n\n    <Step title=\"Fill in Your Details\">\n    \tUse the builder to add your personal information, work experience, education, skills, projects, and\n    \tanything else the resume needs.\n    </Step>\n\n    <Step title=\"Export & Share\">\n    \tWhen you're ready, export your resume as a PDF or share it at its public URL.\n    </Step>\n\n</Steps>\n\n<Tip>Your resume updates in real-time as you type. The preview panel shows exactly how your final PDF will look.</Tip>\n\n---\n",
+    "fullText": "## Using the cloud version\n\nThe easiest way to use Reactive Resume is our cloud version at [rxresu.me](https://rxresu.me). It is free, and it will stay free.\n\n<Steps>\n\t<Step title=\"Create an Account\">\n\t\tVisit [rxresu.me](https://rxresu.me) and sign up for free using your email, or sign in with your GitHub or Google\n\t\taccount.\n\t</Step>\n\n    <Step title=\"Create Your First Resume\">\n    \tClick the **Create Resume** button on your dashboard. Give your resume a name and select a template to get started.\n    </Step>\n\n    <Step title=\"Fill in Your Details\">\n    \tUse the builder to add your personal information, work experience, education, skills, projects, and\n    \tanything else the resume needs.\n    </Step>\n\n    <Step title=\"Export & Share\">\n    \tWhen you're ready, export your resume as a PDF or share it at its public URL.\n    </Step>\n\n</Steps>\n\n<Tip>Your resume updates in real-time as you type. The preview panel shows exactly how your final PDF will look.</Tip>\n\n---\n"
+   },
+   {
+    "anchor": "self-host-with-docker",
+    "fingerprint": "sha256:a6098f3c78113be6b8065faad93229cfd1debb189e9e1a92bdf58b32af7908ef",
+    "headingText": "Self-host with Docker",
+    "level": 2,
+    "startLine": 50,
+    "endLine": 148,
+    "ownText": "## Self-host with Docker\n\nYou can deploy Reactive Resume on your own infrastructure using Docker.\n\n<Info>\n  **From v5.1.0 onwards** — PDF generation now runs entirely client-side via `@react-pdf/renderer`. Self-hosted deployments no longer require Browserless, Chromium, or any external print service as a dependency. The `PRINTER_*` and `BROWSERLESS_*` environment variables are no longer read and can be removed from your `.env`.\n</Info>\n",
+    "fullText": "## Self-host with Docker\n\nYou can deploy Reactive Resume on your own infrastructure using Docker.\n\n<Info>\n  **From v5.1.0 onwards** — PDF generation now runs entirely client-side via `@react-pdf/renderer`. Self-hosted deployments no longer require Browserless, Chromium, or any external print service as a dependency. The `PRINTER_*` and `BROWSERLESS_*` environment variables are no longer read and can be removed from your `.env`.\n</Info>\n\n### Prerequisites\n\nBefore you begin, ensure you have the following installed:\n\n- [Docker](https://docs.docker.com/get-docker/) (v20.10 or higher)\n- [Docker Compose](https://docs.docker.com/compose/install/) (v2.0 or higher)\n\n<Info>\n  There is <strong>no difference in features</strong> between the cloud-hosted version and the self-hosted option. Both\n  offer the same privacy and customization. Pick whichever deployment type suits you.\n</Info>\n\n### Quick deployment\n\n<Steps>\n\t<Step title=\"Clone the Repository\">\n\t\t```bash\n\t\tgit clone https://github.com/reactive-resume/reactive-resume.git reactive-resume\n\t\tcd reactive-resume\n\t\t```\n\t</Step>\n\n    <Step title=\"Configure Environment Variables\">\n    \tCreate a `.env` file in the root directory with the following variables:\n\n```bash .env\n# Application\nAPP_URL=http://localhost:3000\n\n# Database\nDATABASE_URL=postgresql://postgres:postgres@postgres:5432/postgres\n\n# Authentication (generate a secure secret)\nAUTH_SECRET=your-secure-secret-key-here\n\n# Storage (S3-compatible via SeaweedFS)\nS3_ACCESS_KEY_ID=seaweedfs\nS3_SECRET_ACCESS_KEY=seaweedfs\nS3_ENDPOINT=http://seaweedfs:8333\nS3_BUCKET=reactive-resume\nS3_FORCE_PATH_STYLE=true\n\n# AI features (optional; ENCRYPTION_SECRET for saved providers, plus REDIS_URL for the agent)\nREDIS_URL=redis://redis:6379\nENCRYPTION_SECRET=your-secure-encryption-secret-here\n```\n\n    \t<Warning>\n\t\tFor production deployments, always use strong, unique values for `AUTH_SECRET`, `ENCRYPTION_SECRET`, and\n\t\tdatabase credentials.\n    \t</Warning>\n    </Step>\n\n    <Step title=\"Start the Services\">\n    \t```bash\n    \tdocker compose up -d\n    \t```\n\n    \tThis starts:\n    \t- **PostgreSQL** — Database for storing user data and resumes\n\t- **Redis** — Required for the AI Agent workspace\n    \t- **SeaweedFS** — S3-compatible storage for file uploads\n    \t- **Reactive Resume** — The main application\n    </Step>\n\n    <Step title=\"Access Your Instance\">\n    \tOnce all services are running, access your Reactive Resume instance at:\n\n    \t```text\n    \thttp://localhost:3000\n    \t```\n    </Step>\n\n</Steps>\n\n### Docker Compose services\n\nHere's what each service in the stack does:\n\n| Service           | Port | Description                                          |\n| ----------------- | ---- | ---------------------------------------------------- |\n| `postgres`        | 5432 | PostgreSQL database for storing all application data |\n| `redis`           | 6379 | Redis instance required by the AI Agent workspace    |\n| `seaweedfs`       | 8333 | S3-compatible object storage for file uploads        |\n| `reactive_resume` | 3000 | The main Reactive Resume application                 |\n\n<Note>\n  Saved AI provider management requires `ENCRYPTION_SECRET`, and the AI Agent workspace requires both `REDIS_URL` and\n  `ENCRYPTION_SECRET`. Other Reactive Resume features can run without them. Agent attachments and other private objects\n  require S3-compatible storage; local storage rejects private objects.\n</Note>\n"
+   },
+   {
+    "anchor": "self-host-with-docker/prerequisites",
+    "fingerprint": "sha256:8b4384b009bd001987838b72935681f45b6c2c023a2b0dd01696eba76f97c34f",
+    "headingText": "Prerequisites",
+    "level": 3,
+    "startLine": 58,
+    "endLine": 69,
+    "ownText": "### Prerequisites\n\nBefore you begin, ensure you have the following installed:\n\n- [Docker](https://docs.docker.com/get-docker/) (v20.10 or higher)\n- [Docker Compose](https://docs.docker.com/compose/install/) (v2.0 or higher)\n\n<Info>\n  There is <strong>no difference in features</strong> between the cloud-hosted version and the self-hosted option. Both\n  offer the same privacy and customization. Pick whichever deployment type suits you.\n</Info>\n",
+    "fullText": "### Prerequisites\n\nBefore you begin, ensure you have the following installed:\n\n- [Docker](https://docs.docker.com/get-docker/) (v20.10 or higher)\n- [Docker Compose](https://docs.docker.com/compose/install/) (v2.0 or higher)\n\n<Info>\n  There is <strong>no difference in features</strong> between the cloud-hosted version and the self-hosted option. Both\n  offer the same privacy and customization. Pick whichever deployment type suits you.\n</Info>\n"
+   },
+   {
+    "anchor": "self-host-with-docker/quick-deployment",
+    "fingerprint": "sha256:47ff9600ced6c6f125c5664a5750e300e972dd44c56a74d8c9fdf6543efcf311",
+    "headingText": "Quick deployment",
+    "level": 3,
+    "startLine": 70,
+    "endLine": 132,
+    "ownText": "### Quick deployment\n\n<Steps>\n\t<Step title=\"Clone the Repository\">\n\t\t```bash\n\t\tgit clone https://github.com/reactive-resume/reactive-resume.git reactive-resume\n\t\tcd reactive-resume\n\t\t```\n\t</Step>\n\n    <Step title=\"Configure Environment Variables\">\n    \tCreate a `.env` file in the root directory with the following variables:\n\n```bash .env\n# Application\nAPP_URL=http://localhost:3000\n\n# Database\nDATABASE_URL=postgresql://postgres:postgres@postgres:5432/postgres\n\n# Authentication (generate a secure secret)\nAUTH_SECRET=your-secure-secret-key-here\n\n# Storage (S3-compatible via SeaweedFS)\nS3_ACCESS_KEY_ID=seaweedfs\nS3_SECRET_ACCESS_KEY=seaweedfs\nS3_ENDPOINT=http://seaweedfs:8333\nS3_BUCKET=reactive-resume\nS3_FORCE_PATH_STYLE=true\n\n# AI features (optional; ENCRYPTION_SECRET for saved providers, plus REDIS_URL for the agent)\nREDIS_URL=redis://redis:6379\nENCRYPTION_SECRET=your-secure-encryption-secret-here\n```\n\n    \t<Warning>\n\t\tFor production deployments, always use strong, unique values for `AUTH_SECRET`, `ENCRYPTION_SECRET`, and\n\t\tdatabase credentials.\n    \t</Warning>\n    </Step>\n\n    <Step title=\"Start the Services\">\n    \t```bash\n    \tdocker compose up -d\n    \t```\n\n    \tThis starts:\n    \t- **PostgreSQL** — Database for storing user data and resumes\n\t- **Redis** — Required for the AI Agent workspace\n    \t- **SeaweedFS** — S3-compatible storage for file uploads\n    \t- **Reactive Resume** — The main application\n    </Step>\n\n    <Step title=\"Access Your Instance\">\n    \tOnce all services are running, access your Reactive Resume instance at:\n\n    \t```text\n    \thttp://localhost:3000\n    \t```\n    </Step>\n\n</Steps>\n",
+    "fullText": "### Quick deployment\n\n<Steps>\n\t<Step title=\"Clone the Repository\">\n\t\t```bash\n\t\tgit clone https://github.com/reactive-resume/reactive-resume.git reactive-resume\n\t\tcd reactive-resume\n\t\t```\n\t</Step>\n\n    <Step title=\"Configure Environment Variables\">\n    \tCreate a `.env` file in the root directory with the following variables:\n\n```bash .env\n# Application\nAPP_URL=http://localhost:3000\n\n# Database\nDATABASE_URL=postgresql://postgres:postgres@postgres:5432/postgres\n\n# Authentication (generate a secure secret)\nAUTH_SECRET=your-secure-secret-key-here\n\n# Storage (S3-compatible via SeaweedFS)\nS3_ACCESS_KEY_ID=seaweedfs\nS3_SECRET_ACCESS_KEY=seaweedfs\nS3_ENDPOINT=http://seaweedfs:8333\nS3_BUCKET=reactive-resume\nS3_FORCE_PATH_STYLE=true\n\n# AI features (optional; ENCRYPTION_SECRET for saved providers, plus REDIS_URL for the agent)\nREDIS_URL=redis://redis:6379\nENCRYPTION_SECRET=your-secure-encryption-secret-here\n```\n\n    \t<Warning>\n\t\tFor production deployments, always use strong, unique values for `AUTH_SECRET`, `ENCRYPTION_SECRET`, and\n\t\tdatabase credentials.\n    \t</Warning>\n    </Step>\n\n    <Step title=\"Start the Services\">\n    \t```bash\n    \tdocker compose up -d\n    \t```\n\n    \tThis starts:\n    \t- **PostgreSQL** — Database for storing user data and resumes\n\t- **Redis** — Required for the AI Agent workspace\n    \t- **SeaweedFS** — S3-compatible storage for file uploads\n    \t- **Reactive Resume** — The main application\n    </Step>\n\n    <Step title=\"Access Your Instance\">\n    \tOnce all services are running, access your Reactive Resume instance at:\n\n    \t```text\n    \thttp://localhost:3000\n    \t```\n    </Step>\n\n</Steps>\n"
+   },
+   {
+    "anchor": "self-host-with-docker/docker-compose-services",
+    "fingerprint": "sha256:09d6752c9ab5098320d54cfd031b951321ed15837d104200c7181bd363b94367",
+    "headingText": "Docker Compose services",
+    "level": 3,
+    "startLine": 133,
+    "endLine": 148,
+    "ownText": "### Docker Compose services\n\nHere's what each service in the stack does:\n\n| Service           | Port | Description                                          |\n| ----------------- | ---- | ---------------------------------------------------- |\n| `postgres`        | 5432 | PostgreSQL database for storing all application data |\n| `redis`           | 6379 | Redis instance required by the AI Agent workspace    |\n| `seaweedfs`       | 8333 | S3-compatible object storage for file uploads        |\n| `reactive_resume` | 3000 | The main Reactive Resume application                 |\n\n<Note>\n  Saved AI provider management requires `ENCRYPTION_SECRET`, and the AI Agent workspace requires both `REDIS_URL` and\n  `ENCRYPTION_SECRET`. Other Reactive Resume features can run without them. Agent attachments and other private objects\n  require S3-compatible storage; local storage rejects private objects.\n</Note>\n",
+    "fullText": "### Docker Compose services\n\nHere's what each service in the stack does:\n\n| Service           | Port | Description                                          |\n| ----------------- | ---- | ---------------------------------------------------- |\n| `postgres`        | 5432 | PostgreSQL database for storing all application data |\n| `redis`           | 6379 | Redis instance required by the AI Agent workspace    |\n| `seaweedfs`       | 8333 | S3-compatible object storage for file uploads        |\n| `reactive_resume` | 3000 | The main Reactive Resume application                 |\n\n<Note>\n  Saved AI provider management requires `ENCRYPTION_SECRET`, and the AI Agent workspace requires both `REDIS_URL` and\n  `ENCRYPTION_SECRET`. Other Reactive Resume features can run without them. Agent attachments and other private objects\n  require S3-compatible storage; local storage rejects private objects.\n</Note>\n"
+   }
+  ]
+ },
+ "tests/fixtures/doc-sentences/readme.md": {
+  "markdown": true,
+  "sections": [
+   {
+    "anchor": "readme",
+    "fingerprint": "sha256:bd92db6caac5b17713f582f1f3b9eb2e86a4851311b2fab208ec3a80ebdda4a6",
+    "headingText": "readme",
+    "level": 0,
+    "startLine": 1,
+    "endLine": 44,
+    "ownText": "> [!IMPORTANT]\n> **Repository moved:** Reactive Resume now lives at **[`reactive-resume/reactive-resume`](https://github.com/reactive-resume/reactive-resume)** on GitHub.\n> **Docker Hub stays at `amruthpillai/reactive-resume`.** GHCR builds now publish to `ghcr.io/reactive-resume/reactive-resume`.\n> Verified image tags: `latest`, `v5`, `v5.3`, and `v5.3.0` (AMD64 and ARM64). The current version was rebuilt and production redeployed for this rename; no new GitHub release or version bump was made. See [migration details](https://github.com/reactive-resume/reactive-resume/issues/3503).\n> GitHub Sponsors and Open Collective funding links remain unchanged.\n\n<div align=\"center\">\n  <a href=\"https://rxresu.me\">\n    <img src=\"apps/web/public/opengraph/banner.jpg\" alt=\"Reactive Resume\" />\n  </a>\n\n  <h1>Reactive Resume</h1>\n\n  <p>Reactive Resume is a free and open-source resume builder that makes it easy to create, update, and share your resume.</p>\n\n  <p>\n    <a href=\"https://rxresu.me\"><strong>Get Started</strong></a>\n    ·\n    <a href=\"https://docs.rxresu.me\"><strong>Learn More</strong></a>\n  </p>\n\n  <p>\n    <img src=\"https://img.shields.io/github/package-json/v/reactive-resume/reactive-resume?style=flat-square\" alt=\"Reactive Resume Version\">\n    <img src=\"https://img.shields.io/github/stars/reactive-resume/reactive-resume?style=flat-square\" alt=\"GitHub Stars\">\n    <img src=\"https://img.shields.io/github/license/reactive-resume/reactive-resume?style=flat-square\" alt=\"License\" />\n    <img src=\"https://img.shields.io/docker/pulls/amruthpillai/reactive-resume?style=flat-square\" alt=\"Docker Pulls\" />\n    <a href=\"https://discord.gg/aSyA5ZSxpb\"><img src=\"https://img.shields.io/discord/1173518977851473940?style=flat-square&label=discord\" alt=\"Discord\" /></a>\n    <a href=\"https://crowdin.com/project/reactive-resume\"><img src=\"https://badges.crowdin.net/reactive-resume/localized.svg?style=flat-square\" alt=\"Crowdin\" /></a>\n    <a href=\"https://github.com/sponsors/AmruthPillai\"><img src=\"https://img.shields.io/github/sponsors/AmruthPillai?style=flat-square&label=sponsors\" alt=\"Sponsors\" /></a>\n    <a href=\"https://opencollective.com/reactive-resume/donate\"><img src=\"https://img.shields.io/opencollective/backers/reactive-resume?style=flat-square&label=donations\" alt=\"Donations\" /></a>\n  </p>\n\n  <br />\n  <a href=\"https://vercel.com/open-source-program\">\n    <img alt=\"Vercel OSS Program\" src=\"https://vercel.com/oss/program-badge-2026.svg\" />\n  </a>\n</div>\n\n---\n\nPick a template, fill in your details, and export to PDF. Basic use needs no account. If you want more control, you can run the whole application on your own infrastructure.\n\nYou own your data. The codebase is open source under the MIT license, with no tracking, no ads, and no hidden costs.\n",
+    "fullText": "> [!IMPORTANT]\n> **Repository moved:** Reactive Resume now lives at **[`reactive-resume/reactive-resume`](https://github.com/reactive-resume/reactive-resume)** on GitHub.\n> **Docker Hub stays at `amruthpillai/reactive-resume`.** GHCR builds now publish to `ghcr.io/reactive-resume/reactive-resume`.\n> Verified image tags: `latest`, `v5`, `v5.3`, and `v5.3.0` (AMD64 and ARM64). The current version was rebuilt and production redeployed for this rename; no new GitHub release or version bump was made. See [migration details](https://github.com/reactive-resume/reactive-resume/issues/3503).\n> GitHub Sponsors and Open Collective funding links remain unchanged.\n\n<div align=\"center\">\n  <a href=\"https://rxresu.me\">\n    <img src=\"apps/web/public/opengraph/banner.jpg\" alt=\"Reactive Resume\" />\n  </a>\n\n  <h1>Reactive Resume</h1>\n\n  <p>Reactive Resume is a free and open-source resume builder that makes it easy to create, update, and share your resume.</p>\n\n  <p>\n    <a href=\"https://rxresu.me\"><strong>Get Started</strong></a>\n    ·\n    <a href=\"https://docs.rxresu.me\"><strong>Learn More</strong></a>\n  </p>\n\n  <p>\n    <img src=\"https://img.shields.io/github/package-json/v/reactive-resume/reactive-resume?style=flat-square\" alt=\"Reactive Resume Version\">\n    <img src=\"https://img.shields.io/github/stars/reactive-resume/reactive-resume?style=flat-square\" alt=\"GitHub Stars\">\n    <img src=\"https://img.shields.io/github/license/reactive-resume/reactive-resume?style=flat-square\" alt=\"License\" />\n    <img src=\"https://img.shields.io/docker/pulls/amruthpillai/reactive-resume?style=flat-square\" alt=\"Docker Pulls\" />\n    <a href=\"https://discord.gg/aSyA5ZSxpb\"><img src=\"https://img.shields.io/discord/1173518977851473940?style=flat-square&label=discord\" alt=\"Discord\" /></a>\n    <a href=\"https://crowdin.com/project/reactive-resume\"><img src=\"https://badges.crowdin.net/reactive-resume/localized.svg?style=flat-square\" alt=\"Crowdin\" /></a>\n    <a href=\"https://github.com/sponsors/AmruthPillai\"><img src=\"https://img.shields.io/github/sponsors/AmruthPillai?style=flat-square&label=sponsors\" alt=\"Sponsors\" /></a>\n    <a href=\"https://opencollective.com/reactive-resume/donate\"><img src=\"https://img.shields.io/opencollective/backers/reactive-resume?style=flat-square&label=donations\" alt=\"Donations\" /></a>\n  </p>\n\n  <br />\n  <a href=\"https://vercel.com/open-source-program\">\n    <img alt=\"Vercel OSS Program\" src=\"https://vercel.com/oss/program-badge-2026.svg\" />\n  </a>\n</div>\n\n---\n\nPick a template, fill in your details, and export to PDF. Basic use needs no account. If you want more control, you can run the whole application on your own infrastructure.\n\nYou own your data. The codebase is open source under the MIT license, with no tracking, no ads, and no hidden costs.\n"
+   },
+   {
+    "anchor": "features",
+    "fingerprint": "sha256:d52497682c760240f411b40362e1ab56ca4422fafda1e2c914cea9c2c0f948f5",
+    "headingText": "Features",
+    "level": 2,
+    "startLine": 45,
+    "endLine": 77,
+    "ownText": "## Features\n\n**Resume Building**\n\n- Live preview as you type\n- Multiple export formats (PDF, JSON, DOCX)\n- Drag-and-drop section ordering\n- Custom sections for any content type\n- Rich text editor\n\n**Templates**\n\n- 15 templates to choose from\n- A4 and Letter page sizes\n- Customizable colors, fonts, and spacing\n- Structured Style Rules for section and text styling\n\n**Privacy & Control**\n\n- Self-host on your own infrastructure\n- No tracking or analytics by default\n- Full data export at any time\n- Delete your data permanently with one click\n\n**Extras**\n\n- AI integration (OpenAI, Google Gemini, Anthropic Claude)\n- Multi-language support\n- Share resumes via unique links\n- Import from JSON Resume format\n- Dark mode\n- Passkey and two-factor authentication\n",
+    "fullText": "## Features\n\n**Resume Building**\n\n- Live preview as you type\n- Multiple export formats (PDF, JSON, DOCX)\n- Drag-and-drop section ordering\n- Custom sections for any content type\n- Rich text editor\n\n**Templates**\n\n- 15 templates to choose from\n- A4 and Letter page sizes\n- Customizable colors, fonts, and spacing\n- Structured Style Rules for section and text styling\n\n**Privacy & Control**\n\n- Self-host on your own infrastructure\n- No tracking or analytics by default\n- Full data export at any time\n- Delete your data permanently with one click\n\n**Extras**\n\n- AI integration (OpenAI, Google Gemini, Anthropic Claude)\n- Multi-language support\n- Share resumes via unique links\n- Import from JSON Resume format\n- Dark mode\n- Passkey and two-factor authentication\n"
+   },
+   {
+    "anchor": "templates",
+    "fingerprint": "sha256:9477c2d1b57738383b029a1695cf73fb65dfbc72529168bac55539551a9f49da",
+    "headingText": "Templates",
+    "level": 2,
+    "startLine": 78,
+    "endLine": 80,
+    "ownText": "## Templates\n\n<table>\n",
+    "fullText": "## Templates\n\n<table>\n"
+   }
+  ]
+ },
+ "tests/fixtures/doc-sentences/schema-catalog.md": {
+  "markdown": true,
+  "sections": [
+   {
+    "anchor": "reactive-resume-schema-reference",
+    "fingerprint": "sha256:2b55f64fe3967e4244ec9341c62a0b9a719b49ff81cef48eb7f38ea738b52195",
+    "headingText": "Reactive Resume Schema Reference",
+    "level": 1,
+    "startLine": 1,
+    "endLine": 45,
+    "ownText": "# Reactive Resume Schema Reference\n\nGenerated by `pnpm docs:gen` from `resumeDataSchema`. Do not edit this file directly.\n\nCanonical schema: https://rxresu.me/schema.json\n",
+    "fullText": "# Reactive Resume Schema Reference\n\nGenerated by `pnpm docs:gen` from `resumeDataSchema`. Do not edit this file directly.\n\nCanonical schema: https://rxresu.me/schema.json\n\n## Required top-level fields\n\n`picture`, `basics`, `summary`, `sections`, `customSections`, and `metadata`\n\n## Union variant shapes\n\nChoose one coherent shape for each union value. Required fields are local to that variant; optional fields remain in the field catalog.\n\n| Path | Type/variant | Item schema | Representative required shape |\n| --- | --- | --- | --- |\n| `customSections[]` | `summary` | `summaryItemSchema` | `{ id, hidden, content }` |\n| `customSections[]` | `profiles` | `profileItemSchema` | `{ id, hidden, icon, iconColor, network, username, website }` |\n| `customSections[]` | `experience` | `experienceItemSchema` | `{ id, hidden, company, position, location, period, website, description, roles }` |\n| `customSections[]` | `education` | `educationItemSchema` | `{ id, hidden, school, degree, area, grade, location, period, website, description }` |\n| `customSections[]` | `projects` | `projectItemSchema` | `{ id, hidden, name, period, website, description }` |\n| `customSections[]` | `skills` | `skillItemSchema` | `{ id, hidden, icon, iconColor, name, proficiency, level, keywords }` |\n| `customSections[]` | `languages` | `languageItemSchema` | `{ id, hidden, language, fluency, level }` |\n| `customSections[]` | `interests` | `interestItemSchema` | `{ id, hidden, icon, iconColor, name, keywords }` |\n| `customSections[]` | `awards` | `awardItemSchema` | `{ id, hidden, title, awarder, date, website, description }` |\n| `customSections[]` | `certifications` | `certificationItemSchema` | `{ id, hidden, title, issuer, date, website, description }` |\n| `customSections[]` | `publications` | `publicationItemSchema` | `{ id, hidden, title, publisher, date, website, description }` |\n| `customSections[]` | `volunteer` | `volunteerItemSchema` | `{ id, hidden, organization, location, period, website, description }` |\n| `customSections[]` | `references` | `referenceItemSchema` | `{ id, hidden, name, position, website, phone, description }` |\n| `customSections[]` | `cover-letter` | `coverLetterItemSchema` | `{ id, hidden, recipient, content }` |\n\n## Field catalog\n\n| Path | Type | Required | Constraints and default | Description |\n| --- | --- | --- | --- | --- |\n| `picture` | `object` | yes | — | Configuration for photograph displayed on the resume |\n| `picture.hidden` | `boolean` | yes | — | Whether to hide the picture from the resume. |\n| `picture.fit` | `string` | no | enum: [\"cover\",\"contain\"]; default: \"cover\" | How the picture fits its frame: cover crops overflow, while contain preserves the whole image. |\n| `picture.url` | `string` | yes | — | The URL to the picture to display on the resume. Prefer local app-served paths (for example /uploads/...) populated via upload. |\n| `picture.size` | `number` | yes | minimum: 32; maximum: 512 | The size of the picture to display on the resume, defined in points (pt). |\n| `picture.rotation` | `number` | yes | minimum: 0; maximum: 360 | The rotation of the picture to display on the resume, defined in degrees (°). |\n| `picture.aspectRatio` | `number` | yes | minimum: 0.5; maximum: 2.5 | The aspect ratio of the picture to display on the resume, defined as width / height (e.g. 1.5 for 1.5:1 or 0.5 for 1:2). |\n| `picture.borderRadius` | `number` | yes | minimum: 0; maximum: 100 | The border radius of the picture to display on the resume, defined in points (pt). |\n| `picture.borderColor` | `string` | yes | — | The color of the border of the picture to display on the resume, defined as rgba(r, g, b, a). |\n| `picture.borderWidth` | `number` | yes | minimum: 0 | The width of the border of the picture to display on the resume, defined in points (pt). |\n"
+   },
+   {
+    "anchor": "reactive-resume-schema-reference/required-top-level-fields",
+    "fingerprint": "sha256:52680c2d7fd680f9381d795e0bd1b73d23bfc92aacf83be833563d72c08cd44c",
+    "headingText": "Required top-level fields",
+    "level": 2,
+    "startLine": 7,
+    "endLine": 10,
+    "ownText": "## Required top-level fields\n\n`picture`, `basics`, `summary`, `sections`, `customSections`, and `metadata`\n",
+    "fullText": "## Required top-level fields\n\n`picture`, `basics`, `summary`, `sections`, `customSections`, and `metadata`\n"
+   },
+   {
+    "anchor": "reactive-resume-schema-reference/union-variant-shapes",
+    "fingerprint": "sha256:5aa28219bcc45f81172e9cbb43377128e00eeba79741609c80b16d6280534529",
+    "headingText": "Union variant shapes",
+    "level": 2,
+    "startLine": 11,
+    "endLine": 31,
+    "ownText": "## Union variant shapes\n\nChoose one coherent shape for each union value. Required fields are local to that variant; optional fields remain in the field catalog.\n\n| Path | Type/variant | Item schema | Representative required shape |\n| --- | --- | --- | --- |\n| `customSections[]` | `summary` | `summaryItemSchema` | `{ id, hidden, content }` |\n| `customSections[]` | `profiles` | `profileItemSchema` | `{ id, hidden, icon, iconColor, network, username, website }` |\n| `customSections[]` | `experience` | `experienceItemSchema` | `{ id, hidden, company, position, location, period, website, description, roles }` |\n| `customSections[]` | `education` | `educationItemSchema` | `{ id, hidden, school, degree, area, grade, location, period, website, description }` |\n| `customSections[]` | `projects` | `projectItemSchema` | `{ id, hidden, name, period, website, description }` |\n| `customSections[]` | `skills` | `skillItemSchema` | `{ id, hidden, icon, iconColor, name, proficiency, level, keywords }` |\n| `customSections[]` | `languages` | `languageItemSchema` | `{ id, hidden, language, fluency, level }` |\n| `customSections[]` | `interests` | `interestItemSchema` | `{ id, hidden, icon, iconColor, name, keywords }` |\n| `customSections[]` | `awards` | `awardItemSchema` | `{ id, hidden, title, awarder, date, website, description }` |\n| `customSections[]` | `certifications` | `certificationItemSchema` | `{ id, hidden, title, issuer, date, website, description }` |\n| `customSections[]` | `publications` | `publicationItemSchema` | `{ id, hidden, title, publisher, date, website, description }` |\n| `customSections[]` | `volunteer` | `volunteerItemSchema` | `{ id, hidden, organization, location, period, website, description }` |\n| `customSections[]` | `references` | `referenceItemSchema` | `{ id, hidden, name, position, website, phone, description }` |\n| `customSections[]` | `cover-letter` | `coverLetterItemSchema` | `{ id, hidden, recipient, content }` |\n",
+    "fullText": "## Union variant shapes\n\nChoose one coherent shape for each union value. Required fields are local to that variant; optional fields remain in the field catalog.\n\n| Path | Type/variant | Item schema | Representative required shape |\n| --- | --- | --- | --- |\n| `customSections[]` | `summary` | `summaryItemSchema` | `{ id, hidden, content }` |\n| `customSections[]` | `profiles` | `profileItemSchema` | `{ id, hidden, icon, iconColor, network, username, website }` |\n| `customSections[]` | `experience` | `experienceItemSchema` | `{ id, hidden, company, position, location, period, website, description, roles }` |\n| `customSections[]` | `education` | `educationItemSchema` | `{ id, hidden, school, degree, area, grade, location, period, website, description }` |\n| `customSections[]` | `projects` | `projectItemSchema` | `{ id, hidden, name, period, website, description }` |\n| `customSections[]` | `skills` | `skillItemSchema` | `{ id, hidden, icon, iconColor, name, proficiency, level, keywords }` |\n| `customSections[]` | `languages` | `languageItemSchema` | `{ id, hidden, language, fluency, level }` |\n| `customSections[]` | `interests` | `interestItemSchema` | `{ id, hidden, icon, iconColor, name, keywords }` |\n| `customSections[]` | `awards` | `awardItemSchema` | `{ id, hidden, title, awarder, date, website, description }` |\n| `customSections[]` | `certifications` | `certificationItemSchema` | `{ id, hidden, title, issuer, date, website, description }` |\n| `customSections[]` | `publications` | `publicationItemSchema` | `{ id, hidden, title, publisher, date, website, description }` |\n| `customSections[]` | `volunteer` | `volunteerItemSchema` | `{ id, hidden, organization, location, period, website, description }` |\n| `customSections[]` | `references` | `referenceItemSchema` | `{ id, hidden, name, position, website, phone, description }` |\n| `customSections[]` | `cover-letter` | `coverLetterItemSchema` | `{ id, hidden, recipient, content }` |\n"
+   },
+   {
+    "anchor": "reactive-resume-schema-reference/field-catalog",
+    "fingerprint": "sha256:849f64b8182a34e6d235405b22a74b2bfb83319c78b6d29eb9e7885eca1e4057",
+    "headingText": "Field catalog",
+    "level": 2,
+    "startLine": 32,
+    "endLine": 45,
+    "ownText": "## Field catalog\n\n| Path | Type | Required | Constraints and default | Description |\n| --- | --- | --- | --- | --- |\n| `picture` | `object` | yes | — | Configuration for photograph displayed on the resume |\n| `picture.hidden` | `boolean` | yes | — | Whether to hide the picture from the resume. |\n| `picture.fit` | `string` | no | enum: [\"cover\",\"contain\"]; default: \"cover\" | How the picture fits its frame: cover crops overflow, while contain preserves the whole image. |\n| `picture.url` | `string` | yes | — | The URL to the picture to display on the resume. Prefer local app-served paths (for example /uploads/...) populated via upload. |\n| `picture.size` | `number` | yes | minimum: 32; maximum: 512 | The size of the picture to display on the resume, defined in points (pt). |\n| `picture.rotation` | `number` | yes | minimum: 0; maximum: 360 | The rotation of the picture to display on the resume, defined in degrees (°). |\n| `picture.aspectRatio` | `number` | yes | minimum: 0.5; maximum: 2.5 | The aspect ratio of the picture to display on the resume, defined as width / height (e.g. 1.5 for 1.5:1 or 0.5 for 1:2). |\n| `picture.borderRadius` | `number` | yes | minimum: 0; maximum: 100 | The border radius of the picture to display on the resume, defined in points (pt). |\n| `picture.borderColor` | `string` | yes | — | The color of the border of the picture to display on the resume, defined as rgba(r, g, b, a). |\n| `picture.borderWidth` | `number` | yes | minimum: 0 | The width of the border of the picture to display on the resume, defined in points (pt). |\n",
+    "fullText": "## Field catalog\n\n| Path | Type | Required | Constraints and default | Description |\n| --- | --- | --- | --- | --- |\n| `picture` | `object` | yes | — | Configuration for photograph displayed on the resume |\n| `picture.hidden` | `boolean` | yes | — | Whether to hide the picture from the resume. |\n| `picture.fit` | `string` | no | enum: [\"cover\",\"contain\"]; default: \"cover\" | How the picture fits its frame: cover crops overflow, while contain preserves the whole image. |\n| `picture.url` | `string` | yes | — | The URL to the picture to display on the resume. Prefer local app-served paths (for example /uploads/...) populated via upload. |\n| `picture.size` | `number` | yes | minimum: 32; maximum: 512 | The size of the picture to display on the resume, defined in points (pt). |\n| `picture.rotation` | `number` | yes | minimum: 0; maximum: 360 | The rotation of the picture to display on the resume, defined in degrees (°). |\n| `picture.aspectRatio` | `number` | yes | minimum: 0.5; maximum: 2.5 | The aspect ratio of the picture to display on the resume, defined as width / height (e.g. 1.5 for 1.5:1 or 0.5 for 1:2). |\n| `picture.borderRadius` | `number` | yes | minimum: 0; maximum: 100 | The border radius of the picture to display on the resume, defined in points (pt). |\n| `picture.borderColor` | `string` | yes | — | The color of the border of the picture to display on the resume, defined as rgba(r, g, b, a). |\n| `picture.borderWidth` | `number` | yes | minimum: 0 | The width of the border of the picture to display on the resume, defined in points (pt). |\n"
+   }
+  ]
+ },
+ "tests/fixtures/doc-sentences/selecting-page-format.mdx": {
+  "markdown": true,
+  "sections": [
+   {
+    "anchor": "example-pdfs",
+    "fingerprint": "sha256:bef356b0b48ec01fe7b8272b31ccc9f21f44ade4c908388c8f7f443090ad5435",
+    "headingText": "Example PDFs",
+    "level": 2,
+    "startLine": 1,
+    "endLine": 25,
+    "ownText": "## Example PDFs\n\nDownload these sample resumes to see how different formats affect the final PDF output:\n\n<CardGroup cols={1}>\n  <Card\n    arrow\n    horizontal\n    title=\"A4 Format Example\"\n    icon=\"file-pdf\"\n    href=\"https://github.com/user-attachments/files/24849548/a4.pdf\"\n  >\n    A sample resume in A4 format showing traditional page breaks and constraints.\n  </Card>\n  <Card\n    arrow\n    horizontal\n    title=\"Free-Form Example\"\n    icon=\"file-lines\"\n    href=\"https://github.com/user-attachments/files/24849552/free-form.pdf\"\n  >\n    A sample resume in Free-Form format showing a continuous single-page layout.\n  </Card>\n</CardGroup>\n",
+    "fullText": "## Example PDFs\n\nDownload these sample resumes to see how different formats affect the final PDF output:\n\n<CardGroup cols={1}>\n  <Card\n    arrow\n    horizontal\n    title=\"A4 Format Example\"\n    icon=\"file-pdf\"\n    href=\"https://github.com/user-attachments/files/24849548/a4.pdf\"\n  >\n    A sample resume in A4 format showing traditional page breaks and constraints.\n  </Card>\n  <Card\n    arrow\n    horizontal\n    title=\"Free-Form Example\"\n    icon=\"file-lines\"\n    href=\"https://github.com/user-attachments/files/24849552/free-form.pdf\"\n  >\n    A sample resume in Free-Form format showing a continuous single-page layout.\n  </Card>\n</CardGroup>\n"
+   },
+   {
+    "anchor": "frequently-asked-questions",
+    "fingerprint": "sha256:f5d616341271acfc4f3793b5acefbe2127f15ecd786a3b3bf235804f048ef8ae",
+    "headingText": "Frequently asked questions",
+    "level": 2,
+    "startLine": 26,
+    "endLine": 51,
+    "ownText": "## Frequently asked questions\n\n<AccordionGroup>\n  <Accordion title=\"Does Free-Form work with ATS systems?\">\n    Yes. An ATS parses the text in your PDF, not the page dimensions. Free-Form resumes work with applicant tracking systems.\n  </Accordion>\n\n<Accordion title=\"Can I switch formats after creating my resume?\">\n  Yes. You can change the format at any time from the Page section in the right sidebar. Your content is preserved.\n  Only the layout changes.\n</Accordion>\n\n<Accordion title=\"What if a job posting asks for a 'one-page resume'?\">\n  If the employer asks for a one-page resume and expects a traditional format, use A4 or Letter and fit your content on\n  a single page. See [Fitting content on a page](/guides/fitting-content-on-a-page) for tips.\n</Accordion>\n\n<Accordion title=\"Does Free-Form affect the file size?\">\n  Slightly. A longer single page may produce a marginally larger PDF than a paginated version of the same content, but\n  the difference is negligible for typical resume lengths.\n</Accordion>\n\n  <Accordion title=\"Which format should I use for LinkedIn?\">\n    LinkedIn doesn't display uploaded resumes in their original format; it extracts the content. Free-Form works fine for LinkedIn uploads.\n  </Accordion>\n</AccordionGroup>\n",
+    "fullText": "## Frequently asked questions\n\n<AccordionGroup>\n  <Accordion title=\"Does Free-Form work with ATS systems?\">\n    Yes. An ATS parses the text in your PDF, not the page dimensions. Free-Form resumes work with applicant tracking systems.\n  </Accordion>\n\n<Accordion title=\"Can I switch formats after creating my resume?\">\n  Yes. You can change the format at any time from the Page section in the right sidebar. Your content is preserved.\n  Only the layout changes.\n</Accordion>\n\n<Accordion title=\"What if a job posting asks for a 'one-page resume'?\">\n  If the employer asks for a one-page resume and expects a traditional format, use A4 or Letter and fit your content on\n  a single page. See [Fitting content on a page](/guides/fitting-content-on-a-page) for tips.\n</Accordion>\n\n<Accordion title=\"Does Free-Form affect the file size?\">\n  Slightly. A longer single page may produce a marginally larger PDF than a paginated version of the same content, but\n  the difference is negligible for typical resume lengths.\n</Accordion>\n\n  <Accordion title=\"Which format should I use for LinkedIn?\">\n    LinkedIn doesn't display uploaded resumes in their original format; it extracts the content. Free-Form works fine for LinkedIn uploads.\n  </Accordion>\n</AccordionGroup>\n"
+   }
+  ]
+ },
+ "tests/fixtures/guard-fixture-api/openapi.yaml": {
+  "markdown": false,
+  "sections": [
+   {
+    "anchor": "paths/get-gethealth",
+    "fingerprint": "sha256:df94b02fba439074932b273d5b3e9ee23cd35370deef5b812172018b6fa72e0a",
+    "headingText": "GET /health",
+    "level": 1,
+    "startLine": 1,
+    "endLine": 165,
+    "ownText": "{\"method\":\"get\",\"operation\":{\"description\":\"Returns status 200 with an ok flag set to true when the service is up.\",\"operationId\":\"getHealth\",\"responses\":{\"200\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"ok\":{\"type\":\"boolean\"}},\"type\":\"object\"}}},\"description\":\"The service is healthy.\"}},\"summary\":\"Liveness probe\"},\"path\":\"/health\"}",
+    "fullText": "{\"method\":\"get\",\"operation\":{\"description\":\"Returns status 200 with an ok flag set to true when the service is up.\",\"operationId\":\"getHealth\",\"responses\":{\"200\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"ok\":{\"type\":\"boolean\"}},\"type\":\"object\"}}},\"description\":\"The service is healthy.\"}},\"summary\":\"Liveness probe\"},\"path\":\"/health\"}"
+   },
+   {
+    "anchor": "paths/get-listtodos",
+    "fingerprint": "sha256:172ebde7981612f1794745fe221bd84d788489e24f3e1788ed9e04fe7c0e11ec",
+    "headingText": "GET /todos",
+    "level": 1,
+    "startLine": 1,
+    "endLine": 165,
+    "ownText": "{\"method\":\"get\",\"operation\":{\"description\":\"Returns status 200 with a todos array holding every todo currently stored.\",\"operationId\":\"listTodos\",\"responses\":{\"200\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"todos\":{\"items\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"id\":{\"type\":\"integer\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"},\"type\":\"array\"}},\"type\":\"object\"}}},\"description\":\"The full todo list.\"}},\"summary\":\"List all todos\"},\"path\":\"/todos\"}",
+    "fullText": "{\"method\":\"get\",\"operation\":{\"description\":\"Returns status 200 with a todos array holding every todo currently stored.\",\"operationId\":\"listTodos\",\"responses\":{\"200\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"todos\":{\"items\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"id\":{\"type\":\"integer\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"},\"type\":\"array\"}},\"type\":\"object\"}}},\"description\":\"The full todo list.\"}},\"summary\":\"List all todos\"},\"path\":\"/todos\"}"
+   },
+   {
+    "anchor": "paths/post-createtodo",
+    "fingerprint": "sha256:4ef22c8dfa3f135bc28ce72a5e6be6371b6b34301add4b40b720d251e9e4277e",
+    "headingText": "POST /todos",
+    "level": 1,
+    "startLine": 1,
+    "endLine": 165,
+    "ownText": "{\"method\":\"post\",\"operation\":{\"description\":\"Creates a todo from a JSON body carrying a non-empty title. Returns status 201 with the created todo. A missing or empty title is a status 400 with an error of \\\"title is required\\\".\",\"operationId\":\"createTodo\",\"requestBody\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"title\":{\"type\":\"string\"}},\"required\":[\"title\"],\"type\":\"object\"}}},\"required\":true},\"responses\":{\"201\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"id\":{\"type\":\"integer\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"The created todo.\"},\"400\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"error\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"The title was missing or empty.\"}},\"summary\":\"Create a todo\"},\"path\":\"/todos\"}",
+    "fullText": "{\"method\":\"post\",\"operation\":{\"description\":\"Creates a todo from a JSON body carrying a non-empty title. Returns status 201 with the created todo. A missing or empty title is a status 400 with an error of \\\"title is required\\\".\",\"operationId\":\"createTodo\",\"requestBody\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"title\":{\"type\":\"string\"}},\"required\":[\"title\"],\"type\":\"object\"}}},\"required\":true},\"responses\":{\"201\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"id\":{\"type\":\"integer\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"The created todo.\"},\"400\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"error\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"The title was missing or empty.\"}},\"summary\":\"Create a todo\"},\"path\":\"/todos\"}"
+   },
+   {
+    "anchor": "paths/get-gettodo",
+    "fingerprint": "sha256:452ceb4c9ddb79786be4820b4b6b011fbbbd0e013e7e2ced888b14df34476ab7",
+    "headingText": "GET /todos/{id}",
+    "level": 1,
+    "startLine": 1,
+    "endLine": 165,
+    "ownText": "{\"method\":\"get\",\"operation\":{\"description\":\"Returns status 200 with the todo of the given id, or status 404 with an error of \\\"todo not found\\\" when no todo has that id.\",\"operationId\":\"getTodo\",\"parameters\":[{\"in\":\"path\",\"name\":\"id\",\"required\":true,\"schema\":{\"type\":\"integer\"}}],\"responses\":{\"200\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"id\":{\"type\":\"integer\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"The requested todo.\"},\"404\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"error\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"No todo has that id.\"}},\"summary\":\"Fetch one todo\"},\"path\":\"/todos/{id}\"}",
+    "fullText": "{\"method\":\"get\",\"operation\":{\"description\":\"Returns status 200 with the todo of the given id, or status 404 with an error of \\\"todo not found\\\" when no todo has that id.\",\"operationId\":\"getTodo\",\"parameters\":[{\"in\":\"path\",\"name\":\"id\",\"required\":true,\"schema\":{\"type\":\"integer\"}}],\"responses\":{\"200\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"id\":{\"type\":\"integer\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"The requested todo.\"},\"404\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"error\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"No todo has that id.\"}},\"summary\":\"Fetch one todo\"},\"path\":\"/todos/{id}\"}"
+   },
+   {
+    "anchor": "paths/delete-deletetodo",
+    "fingerprint": "sha256:f8fdc1373a965190899056ce4271131f29f293797b6d3fd18deb1c6cbbecd50b",
+    "headingText": "DELETE /todos/{id}",
+    "level": 1,
+    "startLine": 1,
+    "endLine": 165,
+    "ownText": "{\"method\":\"delete\",\"operation\":{\"description\":\"Deletes the todo and returns status 204 with an empty body, or status 404 when it does not exist.\",\"operationId\":\"deleteTodo\",\"parameters\":[{\"in\":\"path\",\"name\":\"id\",\"required\":true,\"schema\":{\"type\":\"integer\"}}],\"responses\":{\"204\":{\"description\":\"The todo was deleted.\"},\"404\":{\"description\":\"No todo has that id.\"}},\"summary\":\"Delete a todo\"},\"path\":\"/todos/{id}\"}",
+    "fullText": "{\"method\":\"delete\",\"operation\":{\"description\":\"Deletes the todo and returns status 204 with an empty body, or status 404 when it does not exist.\",\"operationId\":\"deleteTodo\",\"parameters\":[{\"in\":\"path\",\"name\":\"id\",\"required\":true,\"schema\":{\"type\":\"integer\"}}],\"responses\":{\"204\":{\"description\":\"The todo was deleted.\"},\"404\":{\"description\":\"No todo has that id.\"}},\"summary\":\"Delete a todo\"},\"path\":\"/todos/{id}\"}"
+   },
+   {
+    "anchor": "paths/patch-updatetodo",
+    "fingerprint": "sha256:5a46ea14e4f2b674ebba568ecd0da6b0346b5b74560e581757b23e383afda626",
+    "headingText": "PATCH /todos/{id}",
+    "level": 1,
+    "startLine": 1,
+    "endLine": 165,
+    "ownText": "{\"method\":\"patch\",\"operation\":{\"description\":\"Updates the done and/or title of the todo, returning status 200 with the updated todo, or status 404 when no todo has that id.\",\"operationId\":\"updateTodo\",\"parameters\":[{\"in\":\"path\",\"name\":\"id\",\"required\":true,\"schema\":{\"type\":\"integer\"}}],\"requestBody\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"}}}},\"responses\":{\"200\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"id\":{\"type\":\"integer\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"The updated todo.\"},\"404\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"error\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"No todo has that id.\"}},\"summary\":\"Update a todo\"},\"path\":\"/todos/{id}\"}",
+    "fullText": "{\"method\":\"patch\",\"operation\":{\"description\":\"Updates the done and/or title of the todo, returning status 200 with the updated todo, or status 404 when no todo has that id.\",\"operationId\":\"updateTodo\",\"parameters\":[{\"in\":\"path\",\"name\":\"id\",\"required\":true,\"schema\":{\"type\":\"integer\"}}],\"requestBody\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"}}}},\"responses\":{\"200\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"id\":{\"type\":\"integer\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"The updated todo.\"},\"404\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"error\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"No todo has that id.\"}},\"summary\":\"Update a todo\"},\"path\":\"/todos/{id}\"}"
+   }
+  ]
+ }
+}

@@ -102,8 +102,8 @@ export {
   buildGuardDocUniverse,
   docOutlineLines,
   resolveSection,
-  renderDocChunk,
-  docChunkCount,
-  GUARD_DOC_CHUNK_CHARS,
+  renderDocWindow,
+  docWindowCount,
+  GUARD_DOC_WINDOW_CHARS,
   type GuardDocUniverse,
 } from './tools.js'

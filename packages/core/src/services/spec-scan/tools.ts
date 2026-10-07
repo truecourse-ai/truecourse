@@ -17,20 +17,35 @@ import { defineToolSpec, type SessionTool, type ToolDisplay } from '@truecourse/
 import {
   classifyStatusValue,
   docBody,
-  headingOutline,
-  leadText,
   readDocFrontmatter,
-  sectionText,
   type DocCandidate,
   type DocFrontmatter,
 } from '@truecourse/spec-consolidator'
-import { parseHeadings, planDocChunks } from '@truecourse/shared'
+import {
+  docOutline,
+  findSection,
+  leadSection,
+  parseDocTree,
+  parseHeadings,
+  planWindows,
+  sectionText,
+  windowText,
+  type DocTree,
+  type DocWindow,
+} from '@truecourse/shared'
 
 /** Caps — a tool result is context, and context is the budget. */
 const MAX_DOCS_LISTED = 200
-/** One chunk of a doc a tool (or the briefing) shows per call. The SAME size
- *  the curate briefing chunks with, so "chunk 2" means one thing everywhere. */
-export const DOC_CHUNK_CHARS = 16_000
+/** The character budget of one window of a doc a tool (or the briefing) shows
+ *  per call. The SAME size the curate briefing uses, so "window 2" means one
+ *  thing everywhere. */
+export const DOC_WINDOW_CHARS = 16_000
+
+/** A doc's tree and its read windows, as the briefing and the read tools page it. */
+export function docWindows(doc: DocCandidate): { tree: DocTree; windows: DocWindow[] } {
+  const tree = parseDocTree(doc.path, docBody(doc))
+  return { tree, windows: planWindows(tree, { maxChars: DOC_WINDOW_CHARS }) }
+}
 
 /**
  * One scan cache key: sha256 over ordered parts joined with `::`. Every scan
@@ -162,23 +177,21 @@ export function docLifecycleFingerprint(doc: DocCandidate): string {
   ].join('|')
 }
 
-/** Render one chunk of a doc, with an honest chunk header. */
-function renderChunk(doc: DocCandidate, chunk: number): { content: string; isError?: boolean } {
-  const chunks = planDocChunks(doc.path, docBody(doc), DOC_CHUNK_CHARS)
-  if (chunk > chunks.length) {
+/** Render one window of a doc, with an honest window header. */
+export function renderWindow(doc: DocCandidate, index: number): { content: string; isError?: boolean } {
+  const { tree, windows } = docWindows(doc)
+  if (index > windows.length) {
     return {
-      content: `\`${doc.path}\` has ${chunks.length} chunk(s) — chunk ${chunk} is past the end.`,
+      content: `\`${doc.path}\` has ${windows.length} window(s) — window ${index} is past the end.`,
       isError: true,
     }
   }
-  const c = chunks[chunk - 1]
-  const head =
-    chunks.length > 1 ? `--- ${doc.path} (chunk ${c.index}/${c.total}) ---` : `--- ${doc.path} ---`
-  return { content: [head, c.text, `--- end ---`].join('\n') }
+  const head = windows.length > 1 ? `--- ${doc.path} (window ${index}/${windows.length}) ---` : `--- ${doc.path} ---`
+  return { content: [head, windowText(tree, windows[index - 1]!), `--- end ---`].join('\n') }
 }
 
 /**
- * `read_doc` — any universe doc, by ref, one chunk at a time. Steps 3 and 4
+ * `read_doc` — any universe doc, by ref, one window at a time. Steps 3 and 4
  * share it: a curation session opens ANOTHER doc only to resolve an explicit
  * reference/deferral; the settle session reads samples of a label's docs — a
  * different purpose, so it passes its own `display`.
@@ -186,7 +199,7 @@ function renderChunk(doc: DocCandidate, chunk: number): { content: string; isErr
 const READ_DOC = defineToolSpec({
   name: 'read_doc',
   description:
-    'Read any doc of the universe by its repo-relative ref. Long docs come one chunk at a time — pass `chunk` to page (1-based).',
+    'Read any doc of the universe by its repo-relative ref. Long docs come one window at a time — pass `window` to page (1-based).',
   kind: 'read-doc',
   readOnly: true,
   destructive: false,
@@ -194,7 +207,7 @@ const READ_DOC = defineToolSpec({
   inputSchema: z
     .object({
       ref: z.string().min(1).describe('Repo-relative doc ref, as listed by `list_docs`.'),
-      chunk: z.number().int().positive().optional().describe('Chunk number (default 1).'),
+      window: z.number().int().positive().optional().describe('Window number (default 1).'),
     })
     .strict(),
 })
@@ -205,31 +218,31 @@ export function readDocTool(universe: ScanDocUniverse, display?: ToolDisplay): S
     async execute(args) {
       const doc = universe.byPath.get(args.ref)
       if (!doc) return { content: `No doc \`${args.ref}\` in the universe — \`list_docs\` shows what exists.`, isError: true }
-      return renderChunk(doc, args.chunk ?? 1)
+      return renderWindow(doc, args.window ?? 1)
     },
   })
 }
 
 /**
- * `read_chunk` — the session's OWN doc, paged. The briefing already carries
- * chunk 1; this fetches the rest under the same chunk plan.
+ * `read_window` — the session's OWN doc, paged. The briefing already carries
+ * window 1; this fetches the rest under the same window plan.
  */
-const READ_CHUNK = defineToolSpec({
-  name: 'read_chunk',
-  description: 'Read another chunk of THE doc you are curating (the briefing carried chunk 1).',
-  kind: 'read-own-doc-chunk',
+const READ_WINDOW = defineToolSpec({
+  name: 'read_window',
+  description: 'Read another window of THE doc you are curating (the briefing carried window 1).',
+  kind: 'read-own-doc-window',
   readOnly: true,
   destructive: false,
-  display: { one: 'I read one chunk of the doc', many: 'I read {n} chunks of the doc' },
+  display: { one: 'I read one window of the doc', many: 'I read {n} windows of the doc' },
   inputSchema: z
-    .object({ chunk: z.number().int().positive().describe('Chunk number (2 and up — 1 is in the briefing).') })
+    .object({ window: z.number().int().positive().describe('Window number (2 and up — 1 is in the briefing).') })
     .strict(),
 })
 
-export function readChunkTool(doc: DocCandidate): SessionTool {
-  return READ_CHUNK.bind({
+export function readWindowTool(doc: DocCandidate): SessionTool {
+  return READ_WINDOW.bind({
     async execute(args) {
-      return renderChunk(doc, args.chunk)
+      return renderWindow(doc, args.window)
     },
   })
 }
@@ -388,21 +401,21 @@ export function readSectionTool(universe: ScanDocUniverse): SessionTool {
     async execute(args) {
       const doc = universe.byPath.get(args.doc)
       if (!doc) return { content: `No doc \`${args.doc}\` in the universe.`, isError: true }
-      const body = docBody(doc)
+      const tree = parseDocTree(doc.path, docBody(doc))
       if (args.heading === null) {
-        const lead = leadText(body)
-        return lead.trim()
-          ? { content: [`--- ${args.doc} · lead ---`, lead, '--- end ---'].join('\n') }
-          : { content: `\`${args.doc}\` has no lead — it opens straight with a heading. Its outline:\n${headingOutline(body)}`, isError: true }
+        const lead = leadSection(tree)
+        return lead
+          ? { content: [`--- ${args.doc} · lead ---`, sectionText(tree, lead), '--- end ---'].join('\n') }
+          : { content: `\`${args.doc}\` has no lead — it opens straight with a heading. Its outline:\n${docOutline(tree)}`, isError: true }
       }
-      const text = sectionText(body, args.heading)
-      if (text === null) {
+      const section = findSection(tree, args.heading)
+      if (!section) {
         return {
-          content: `\`${args.doc}\` has no section \`${args.heading}\`. Its outline:\n${headingOutline(body)}`,
+          content: `\`${args.doc}\` has no section \`${args.heading}\`. Its outline:\n${docOutline(tree)}`,
           isError: true,
         }
       }
-      return { content: [`--- ${args.doc} · ${args.heading} ---`, text, '--- end ---'].join('\n') }
+      return { content: [`--- ${args.doc} · ${args.heading} ---`, sectionText(tree, section), '--- end ---'].join('\n') }
     },
   })
 }

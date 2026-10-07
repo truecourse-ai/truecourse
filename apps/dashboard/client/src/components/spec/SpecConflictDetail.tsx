@@ -1,7 +1,7 @@
 /**
  * SpecConflictDetail, right-pane viewer for one conflict.
- * Shows the two docs that may disagree (side-by-side, scrolled to + highlighting
- * the conflicting section) and the resolution: a
+ * Shows the two docs that may disagree (side-by-side, each scrolled to and
+ * marking the very sentence it points at) and the resolution: a
  * verdict on the disagreement, "<docA> is right" / "<docB> is right" (the loser's
  * disputed claim is suppressed at guard generate) or "Not a real conflict"
  * (dismissal). Verdicts are recorded instantly (no re-curate) and
@@ -10,9 +10,9 @@
  * picks the edit up. Opened from Context's conflicts, and from a conflict
  * opened inside a document.
  *
- * A contradiction inside ONE doc shows that doc in both columns, each scrolled
- * to and highlighting its own sentence (the first sentence left, the second
- * right), and names each side by its sentence so the two verdicts differ.
+ * A contradiction inside ONE doc shows that doc in both columns, each marking
+ * its own sentence (the first sentence left, the second right), and names each
+ * side by its sentence so the two verdicts differ.
  *
  * The pane reads top-down the way a guard test's does: the judge's ASSESSMENT
  * leads (reasoning and recommendation in one card), the verdict actions sit with
@@ -27,7 +27,6 @@ import {
   conflictSides,
   type ConflictResolutionLike,
   type CorpusConflict,
-  type ConflictSideLike,
 } from '@truecourse/shared';
 import { Button } from '@/components/ui/button';
 import { HoverPopover } from '@/dashboard/ui/hover-popover';
@@ -75,9 +74,6 @@ export function SpecConflictDetail({
   // Optimistic verdict override: `undefined` = derive from data, `null` = optimistically
   // undone, an object = optimistically recorded. Reset when the viewed pair changes.
   const [override, setOverride] = useState<ConflictResolutionLike | null | undefined>(undefined);
-  // Which heading to scroll each column to (nonce lets re-clicking the same one re-scroll).
-  const [scrollA, setScrollA] = useState<{ heading: string; nonce: number } | undefined>();
-  const [scrollB, setScrollB] = useState<{ heading: string; nonce: number } | undefined>();
 
   // Single-product repos tag everything `core/*`; drop the redundant product so
   // the area reads as its concern (matches the left-nav tags + conflict rows).
@@ -125,10 +121,6 @@ export function SpecConflictDetail({
 
   // Each column's sides: the doc's own, or inside one doc its sentence.
   const [pointersA, pointersB] = conflictSides(docA, docB, conflict?.sections ?? []);
-  // Headings of a side (a null heading is a preamble side).
-  const headingsOf = (side: readonly ConflictSideLike[]): string[] =>
-    side.flatMap((s) => (s.heading !== null ? [s.heading] : []));
-  const preambleOf = (side: readonly ConflictSideLike[]): boolean => side.some((s) => s.heading === null);
 
   // How each side is named: its doc, and inside one doc its sentence too.
   const sideNames = (r: Pick<ConflictResolutionLike, 'docA' | 'anchorA' | 'docB' | 'anchorB'>): [string, string] => {
@@ -143,18 +135,12 @@ export function SpecConflictDetail({
     anchorB: pointersB[0]?.heading ?? null,
   });
 
-  // On open (or when the conflict changes), scroll each pane to its first
-  // flagged section, and drop any stale optimistic verdict from a prior one.
-  // Keyed on the conflict ID, not the doc pair: two conflicts on the SAME pair are
-  // distinct panes, and keying on the pair would leave the second showing the
-  // first's scroll position and optimistic verdict.
+  // On open (or when the conflict changes), drop any stale optimistic verdict
+  // from a prior one. Keyed on the conflict ID, not the doc pair: two conflicts
+  // on the SAME pair are distinct panes, and keying on the pair would leave the
+  // second showing the first's optimistic verdict.
   useEffect(() => {
     setOverride(undefined);
-    const a = headingsOf(pointersA)[0];
-    const b = headingsOf(pointersB)[0];
-    if (a) setScrollA({ heading: a, nonce: 1 });
-    if (b) setScrollB({ heading: b, nonce: 1 });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conflict?.id, docA, docB, area]);
 
   const lastTouched = new Map(data.corpus.docs.map((d) => [d.ref, d.lastTouched] as const));
@@ -316,9 +302,7 @@ export function SpecConflictDetail({
             title={docMeta.get(docA)?.title}
             url={docMeta.get(docA)?.url}
             badge={badgeOf(docA)}
-            scrollTo={scrollA}
-            highlight={headingsOf(pointersA)}
-            highlightPreamble={preambleOf(pointersA)}
+            sentences={pointersA}
           />
         </div>
         <div className="flex min-h-0 flex-col overflow-hidden">
@@ -328,9 +312,7 @@ export function SpecConflictDetail({
             title={docMeta.get(docB)?.title}
             url={docMeta.get(docB)?.url}
             badge={badgeOf(docB)}
-            scrollTo={scrollB}
-            highlight={headingsOf(pointersB)}
-            highlightPreamble={preambleOf(pointersB)}
+            sentences={pointersB}
           />
         </div>
       </div>

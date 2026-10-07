@@ -44,7 +44,8 @@ import {
   type SubjectPart,
 } from '../../packages/core/src/services/spec-scan/settle-subjects'
 import { instructionsFingerprint, scanCacheKey } from '../../packages/core/src/services/spec-scan/tools'
-import { splitDocSentences, writeDecisions, type DecisionsFile } from '../../packages/spec-consolidator/src/index.js'
+import { writeDecisions, type DecisionsFile } from '../../packages/spec-consolidator/src/index.js'
+import { splitDocSentences } from '@truecourse/shared'
 import { docPathOf, memoryPersistence, outcome, stubDriver, transportFailure, malformedFailure, type StubCall } from './spec-scan-session-stub'
 import { compare, compareBriefing, record, settle, subjectNames, type SentenceFact } from './spec-scan-facts-stub'
 import type { DriverResult } from '../../packages/agent-loop/src/index'

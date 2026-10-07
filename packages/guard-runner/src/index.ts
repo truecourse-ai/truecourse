@@ -465,7 +465,6 @@ export {
 export {
   buildDocSectionIndex,
   extractSectionTexts,
-  splitTopLevelSections,
   resolveBinding,
   resolveScenarioBinds,
   slugifyHeading,

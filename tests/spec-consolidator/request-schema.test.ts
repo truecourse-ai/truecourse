@@ -74,8 +74,8 @@ describe('spec-scan.curate-doc', () => {
     expect(def.tools.map((t) => t.name).sort()).toEqual([
       'corpus_vocab',
       'list_docs',
-      'read_chunk',
       'read_doc',
+      'read_window',
     ]);
     expect(def.tools.every((t) => t.readOnly && !t.destructive)).toBe(true);
   });

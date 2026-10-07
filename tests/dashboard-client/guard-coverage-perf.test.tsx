@@ -10,6 +10,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from '@testing-library/react';
 import type { GuardDocCoverage as GuardDocCoverageData, GuardSectionCoverage, GuardSectionCoverageStatus } from '@truecourse/shared';
+import { parseDocTree } from '@truecourse/shared';
 
 const state = vi.hoisted(() => ({ sources: [] as string[] }));
 vi.mock('@/components/spec/DocMarkdown', () => ({
@@ -23,7 +24,7 @@ import { GuardDocCoverage } from '@/components/guard/GuardDocCoverage';
 
 function sec(headingText: string, level: number, status: GuardSectionCoverageStatus): GuardSectionCoverage {
   return {
-    anchor: headingText.toLowerCase().replace(/\s+/g, '-'),
+    anchor: parseDocTree('docs/SPEC.md', MD).sections.find((s) => s.headingText === headingText)!.anchor,
     headingText,
     level,
     fingerprint: 'sha256:x',

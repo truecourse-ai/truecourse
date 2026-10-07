@@ -73,7 +73,6 @@ import {
   docBody,
   partitionByAffinity,
   type DocCandidate,
-  type DocSentence,
   type ConflictReview,
 } from '@truecourse/spec-consolidator'
 import {
@@ -85,6 +84,7 @@ import {
   sameSentence,
   type ConflictLike,
   type ConflictSideLike,
+  type DocSentence,
 } from '@truecourse/shared'
 import type { RecordedFact } from './record-facts.js'
 import { subjectKey } from './settle-subjects.js'

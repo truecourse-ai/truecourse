@@ -1,39 +1,32 @@
 /**
- * Deterministic, LLM-free section derivation over a spec document — the runner
- * needs it to check each scenario's binding against the live doc before it
- * executes, and the generator will import the same functions to author bindings.
+ * Section BINDING over a spec document, LLM-free: the runner checks each
+ * scenario's binding against the live doc before it executes, and the
+ * generator authors bindings with the same functions. The sections themselves
+ * come from the shared document tree (`parseDocTree`): a section is a heading
+ * plus its body down to the next heading of the same or a higher level, named
+ * by an anchor, and here it gains a FINGERPRINT, a hash of its normalized text,
+ * so a binding tells "moved" from "edited" from "gone".
  *
- * A section is the binding unit. It is a heading plus its body up to the next
- * heading of the SAME OR HIGHER level, so a parent section's text includes its
- * descendant subsections. Its identity is an `anchor` (the slugified heading
- * path, parent/child chain) plus a `fingerprint` (a hash of the normalized
- * section text). Non-markdown docs collapse to a single whole-document section.
- *
- * A markdown doc's LEAD REGION — everything before its first heading, frontmatter
- * included — is a section too, named by the doc's frontmatter title (see
- * {@link leadSection}). Published docs put their title in frontmatter and state
- * real behavior before the first `##`, and text that belongs to no section is
- * text nothing can bind to.
- *
- * The slug helper is a small, self-contained duplicate of the heading-slug
- * convention used elsewhere in the codebase (spec-consolidator's
- * concern canonicalization): strip inline emphasis/code markers, lowercase, fold non-alphanumeric
- * runs to single hyphens, trim. Kept local so this module stays dependency-lean.
+ * An OpenAPI document is the one doc the tree does not cut: its bindable
+ * sections are its OPERATIONS, each fingerprinted over a canonical
+ * serialization of the resolved operation, so a cosmetic reformat never churns
+ * a binding.
  */
 
-import path from 'node:path'
 import crypto from 'node:crypto'
-import { isMarkdownDoc, parseHeadings, type RawHeading } from '@truecourse/shared'
+import {
+  isMarkdownDoc,
+  parseDocTree,
+  sectionOwnText,
+  sectionText,
+  slugifyHeading,
+} from '@truecourse/shared'
 import { isOpenApiDoc, deriveOpenApiSections, type RefResolutionContext } from '@truecourse/shared/openapi'
 
-// The heading scan, markdown check, and top-level section splitter live in
-// @truecourse/shared (doc-chunks) — the one splitting mechanism shared with the
-// guard generator's views and spec-scan's section reads. Re-exported here so
-// this module remains their canonical import site for runner consumers.
-export { isMarkdownDoc, splitTopLevelSections } from '@truecourse/shared'
-// Re-exported so this module stays the canonical import site for the runner and
-// generator: OpenAPI detection is the predicate that flips {@link deriveSections}
-// onto the per-operation branch.
+// Re-exported so this module stays the canonical import site for the runner
+// and generator: the slug rule anchors are made of, the markdown check, and the
+// OpenAPI detection that flips {@link deriveSections} onto the per-operation branch.
+export { isMarkdownDoc, slugifyHeading } from '@truecourse/shared'
 export { isOpenApiDoc, deriveOpenApiSections } from '@truecourse/shared/openapi'
 export type { RefResolutionContext } from '@truecourse/shared/openapi'
 
@@ -44,9 +37,9 @@ export interface DocSection {
   fingerprint: string
   /** Raw heading text, for display. Basename for the whole-doc fallback. */
   headingText: string
-  /** Heading level 1–6; `0` for the whole-document (non-markdown) fallback. */
+  /** Heading level 1–6; `0` for the lead and the whole-document (non-markdown) fallback. */
   level: number
-  /** 1-based line of the heading (`1` for the whole-doc fallback). */
+  /** 1-based line of the heading (`1` for the lead and the whole-doc fallback). */
   startLine: number
   /**
    * 1-based last line before the next same-or-higher-level heading — end of file
@@ -75,15 +68,6 @@ export type BindingResolution =
   | { kind: 'stale'; anchor: string; currentFingerprint: string }
   | { kind: 'orphaned'; anchor: string }
 
-/** Slugify a heading (or filename) segment. See the module note for the rule. */
-export function slugifyHeading(text: string): string {
-  return text
-    .replace(/[`*_~]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-}
-
 /**
  * THE canonical section-text normalization. Every run of whitespace — spaces,
  * tabs, and line breaks (`\r`, `\n`, `\r\n` all count) — folds to a single space
@@ -99,49 +83,6 @@ export function normalizeSectionText(text: string): string {
 export function fingerprintText(text: string): string {
   const digest = crypto.createHash('sha256').update(normalizeSectionText(text), 'utf-8').digest('hex')
   return `sha256:${digest}`
-}
-
-/** Document line count for line ranges: a trailing newline adds no phantom line. */
-function countLines(content: string): number {
-  const lines = content.split('\n')
-  return Math.max(1, content.endsWith('\n') ? lines.length - 1 : lines.length)
-}
-
-/**
- * The doc's frontmatter `title`, when it declares one — a `---` fence on the very
- * first line, closed by the next `---`, holding a top-level `title:` entry. Only
- * the title is read (it is the doc's human name, and the only thing the lead
- * section needs from the block); everything else in the block is body text as far
- * as the section index is concerned. Quotes around the value are stripped.
- */
-export function frontmatterTitle(lines: readonly string[]): string | null {
-  if (lines.length === 0 || lines[0].trim() !== '---') return null
-  // An unterminated block is not frontmatter — it is a horizontal rule and body.
-  let close = -1
-  for (let i = 1; i < lines.length; i++) {
-    if (lines[i].trim() === '---') {
-      close = i
-      break
-    }
-  }
-  if (close === -1) return null
-  for (let i = 1; i < close; i++) {
-    const m = /^title[ \t]*:[ \t]*(.*)$/.exec(lines[i])
-    if (!m) continue
-    const raw = m[1].trim()
-    const value = /^(["'])([\s\S]*)\1$/.exec(raw)?.[2] ?? raw
-    return value.trim() || null
-  }
-  return null
-}
-
-/** Line index where a section ends: the next heading of same-or-higher level. */
-function sectionEndLine(headings: readonly RawHeading[], index: number, totalLines: number): number {
-  const level = headings[index].level
-  for (let j = index + 1; j < headings.length; j++) {
-    if (headings[j].level <= level) return headings[j].line
-  }
-  return totalLines
 }
 
 /**
@@ -162,27 +103,24 @@ export interface SectionText {
 
 /**
  * Derive the sections of a document with both their identity (anchor +
- * fingerprint) and their text (full + own). The single anchor-assignment
- * algorithm both {@link buildDocSectionIndex} and {@link extractSectionTexts}
- * build on, so the two can never disagree on an anchor.
+ * fingerprint) and their text (full + own). The single derivation both
+ * {@link buildDocSectionIndex} and {@link extractSectionTexts} build on, so
+ * the two can never disagree on an anchor.
  */
 function deriveSections(
   doc: string,
   content: string,
   ctx?: RefResolutionContext,
 ): Array<DocSection & { fullText: string; ownText: string }> {
-  // OpenAPI / Swagger documents: one bindable section per operation (method +
-  // path). The section's text is a CANONICAL serialization of the resolved
-  // operation slice (in-file $refs dereferenced), so generate and run derive
-  // byte-identical fingerprints and a cosmetic reformat of the source never
-  // churns them. The anchor is one synthetic level — `paths/<method>-<slug>` —
-  // never the raw path (a raw `/users/{id}` would create fake hierarchy levels
-  // and its `{id}` would fold to collide with `/users/id`); collisions fall to
-  // the same `-N` disambiguation the markdown path uses. A doc detected as
-  // OpenAPI but declaring no operations falls through to the whole-doc fallback.
+  // One bindable section per operation (method + path). The anchor is one
+  // synthetic level — `paths/<method>-<slug>` — never the raw path (a raw
+  // `/users/{id}` would create fake hierarchy levels and its `{id}` would fold
+  // to collide with `/users/id`); collisions fall to the same `-N`
+  // disambiguation the markdown path uses. A doc detected as OpenAPI but
+  // declaring no operations falls through to the tree's whole-doc section.
   const openApiSections = isOpenApiDoc(doc, content) ? deriveOpenApiSections(content, ctx) : []
   if (openApiSections.length > 0) {
-    const total = countLines(content)
+    const total = parseDocTree(doc, content).sections[0]!.endLine
     const used = new Set<string>()
     return openApiSections.map((op) => {
       const slug = slugifyHeading(`${op.method}-${op.slugSource}`) || 'operation'
@@ -203,120 +141,20 @@ function deriveSections(
     })
   }
 
-  if (!isMarkdownDoc(doc)) {
-    const base = path.basename(doc)
-    return [
-      {
-        anchor: slugifyHeading(base) || 'document',
-        fingerprint: fingerprintText(content),
-        headingText: base,
-        level: 0,
-        startLine: 1,
-        endLine: countLines(content),
-        fullText: content,
-        ownText: content,
-      },
-    ]
-  }
-
-  const lines = content.split('\n')
-  const totalLines = countLines(content)
-  const headings = parseHeadings(lines)
-  const out: Array<DocSection & { fullText: string; ownText: string }> = []
-  const used = new Set<string>()
-  const ancestors: Array<{ level: number; anchor: string }> = []
-
-  for (let h = 0; h < headings.length; h++) {
-    const heading = headings[h]
-    while (ancestors.length && ancestors[ancestors.length - 1].level >= heading.level) ancestors.pop()
-
-    const parent = ancestors.length ? ancestors[ancestors.length - 1].anchor : ''
-    const segment = slugifyHeading(heading.text) || 'section'
-    const base = parent ? `${parent}/${segment}` : segment
-    let anchor = base
-    for (let n = 2; used.has(anchor); n++) anchor = `${base}-${n}`
-    used.add(anchor)
-
-    const end = sectionEndLine(headings, h, lines.length)
-    const fullText = lines.slice(heading.line, end).join('\n')
-    // The very next heading in document order is either this section's first
-    // child or the boundary that ends it — either way, own text stops there.
-    const ownEnd = h + 1 < headings.length ? headings[h + 1].line : lines.length
-    const ownText = lines.slice(heading.line, ownEnd).join('\n')
-    // `end` is the exclusive 0-based slice end, so as a 1-based line it is already
-    // the last line before the boundary; the last section clamps to the real line
-    // count (a trailing newline's phantom empty split element never counts).
-    out.push({
-      anchor,
+  const tree = parseDocTree(doc, content)
+  return tree.sections.map((s) => {
+    const fullText = sectionText(tree, s)
+    return {
+      anchor: s.anchor,
       fingerprint: fingerprintText(fullText),
-      headingText: heading.text,
-      level: heading.level,
-      startLine: heading.line + 1,
-      endLine: Math.min(end, totalLines),
+      headingText: s.headingText,
+      level: s.level,
+      startLine: s.startLine,
+      endLine: s.endLine,
       fullText,
-      ownText,
-    })
-    ancestors.push({ level: heading.level, anchor })
-  }
-
-  const lead = leadSection(doc, lines, headings, totalLines, used)
-  return lead ? [lead, ...out] : out
-}
-
-/**
- * The LEAD REGION as a bindable section: everything from the first byte of the
- * document down to its first heading (the whole document when it has none),
- * frontmatter included. Published documentation typically carries its title in
- * frontmatter and states substantive behavior before the first `##`, and without
- * this that text belongs to no section at all — a claim anchored there binds to
- * nothing and reads as permanently stale.
- *
- * Two rules keep it strictly ADDITIVE, so no repository in the field sees an
- * identity move:
- *
- *  - it is emitted only when the lead region has substance (a doc that opens
- *    directly with a heading, or whose lead is blank/whitespace, gets none — the
- *    behaviour before this section existed);
- *  - its anchor is claimed AFTER every heading has taken its own, so a doc whose
- *    frontmatter title also exists as a heading leaves the heading's anchor
- *    untouched and the lead takes the `-N` ordinal instead.
- *
- * Its text is the lead region ALONE — never the whole document. A lead is a
- * sibling of the top-level headings, not their parent, and folding their text in
- * would roll the lead's fingerprint on every unrelated edit further down.
- */
-function leadSection(
-  doc: string,
-  lines: readonly string[],
-  headings: readonly RawHeading[],
-  totalLines: number,
-  used: Set<string>,
-): (DocSection & { fullText: string; ownText: string }) | null {
-  const end = headings.length > 0 ? headings[0].line : lines.length
-  const text = lines.slice(0, end).join('\n')
-  if (normalizeSectionText(text) === '') return null
-
-  // The doc's human name: its frontmatter title, or its filename when it declares
-  // none — the same "name it by what it is" rule the non-markdown fallback uses.
-  const headingText =
-    frontmatterTitle(lines) ?? path.basename(doc, path.extname(doc))
-  const base = slugifyHeading(headingText) || 'lead'
-  let anchor = base
-  for (let n = 2; used.has(anchor); n++) anchor = `${base}-${n}`
-  used.add(anchor)
-
-  return {
-    anchor,
-    fingerprint: fingerprintText(text),
-    headingText,
-    // `0` — the level the whole-document fallback already uses for "this section
-    // is not a heading". A lead has no heading by definition.
-    level: 0,
-    startLine: 1,
-    endLine: Math.min(Math.max(end, 1), totalLines),
-    fullText: text,
-    ownText: text,
-  }
+      ownText: sectionOwnText(tree, s),
+    }
+  })
 }
 
 /** Anchor → section text (full + own) for a document. See {@link SectionText}. */
@@ -344,15 +182,7 @@ function indexFromSections(doc: string, markdown: boolean, sections: DocSection[
   return { doc, markdown, sections, byAnchor, byFingerprint }
 }
 
-/**
- * Build the section index for one document.
- *
- * Duplicate anchors are disambiguated deterministically by document order: the
- * first occurrence keeps the slug path; each later collision (including a clash
- * with a real `-N` slug) takes the next free `-N` ordinal (`-2`, `-3`, …).
- * Descendants inherit the disambiguated ancestor segment, so a whole subtree
- * stays uniquely addressable.
- */
+/** Build the section index for one document: the tree's sections, fingerprinted. */
 export function buildDocSectionIndex(
   doc: string,
   content: string,
@@ -370,6 +200,7 @@ export function buildDocSectionIndex(
   )
   return indexFromSections(doc, isMarkdownDoc(doc), sections)
 }
+
 
 /**
  * Resolve a scenario binding (its anchor + fingerprint) against a doc's live

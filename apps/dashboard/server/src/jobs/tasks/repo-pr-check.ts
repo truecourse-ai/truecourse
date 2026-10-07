@@ -42,6 +42,7 @@ import {
   conflictSides,
   isForkPullRequest,
   openConflicts,
+  headingKey,
   parseHeadings,
   pullRequestWorkspaceScope,
   type CorpusConflict,
@@ -495,8 +496,8 @@ function reportConflict(
  * a fenced block is never one.
  */
 function headingLine(body: string, heading: string): number | null {
-  const key = (text: string): string => text.replace(/[`*_~]/g, '').trim().toLowerCase();
-  const found = parseHeadings(body.split('\n')).find((h) => key(h.text) === key(heading));
+  const key = headingKey(heading);
+  const found = parseHeadings(body.split('\n')).find((h) => headingKey(h.text) === key);
   return found ? found.line + 1 : null;
 }
 

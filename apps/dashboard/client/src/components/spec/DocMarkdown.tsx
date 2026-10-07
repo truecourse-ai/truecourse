@@ -15,38 +15,35 @@
  * the page. Hiding it is presentation only: the block stays in the source every
  * consumer downstream reads, and {@link DocFacts} states it as facts instead.
  *
- * `highlight` marks the conflicting sections in place: the WHOLE section (its
- * heading + body up to the next heading) gets an amber band, so the user sees
- * exactly where two docs disagree, right on the document. `highlightPreamble`
- * bands the doc's LEAD — the disputed opening sentence — the same way: content
- * before the first heading when the doc has such a preamble (a badge/tagline
- * block), else the opening heading's own section (the H1 line + its body up to
- * the next heading) for the common README shape that starts with an H1 title.
- * The heading line stays inside the band since it's part of the disputed lead.
+ * `marks` are the sentences a conflict points at, by their character ranges in
+ * the source: each is marked in place, so the reader sees the very sentence
+ * two docs disagree on, not the section around it.
  */
 
-import type { ComponentType, ReactNode } from 'react';
-import ReactMarkdown, { type Components } from 'react-markdown';
+import { useMemo, type ComponentType, type ReactNode } from 'react';
+import ReactMarkdown, { type Components, type Options } from 'react-markdown';
 import remarkDirective from 'remark-directive';
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { Info, Lightbulb, OctagonAlert, TriangleAlert } from 'lucide-react';
-import { parseHeadings } from '@truecourse/shared';
 
-import { headingMatchKey as norm } from '@/lib/heading-match';
 import { ADMONITION_KIND, ADMONITION_TITLE, remarkAdmonitions } from '@/lib/remark-admonitions';
+import { SENTENCE_MARK, remarkSentenceMarks, type SentenceRange } from '@/lib/remark-sentence-marks';
 
 // Extend GitHub's sanitize schema so README-style raw HTML renders instead of
 // leaking as source: images (logos/badges), alignment wrappers, and invisible
 // `<a id>`/heading anchors, plus the two data attributes the admonition
-// transform puts on its container. Everything else stays on the default
-// allowlist and `<script>` is still stripped.
+// transform puts on its container and the sentence mark (`<mark>` and the key
+// it carries). Everything else stays on the default allowlist and `<script>`
+// is still stripped.
 const SANITIZE_SCHEMA = {
   ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), 'mark'],
   attributes: {
     ...defaultSchema.attributes,
+    '*': [...(defaultSchema.attributes?.['*'] ?? []), SENTENCE_MARK],
     img: [...(defaultSchema.attributes?.img ?? []), 'src', 'alt', 'width', 'height'],
     a: [...(defaultSchema.attributes?.a ?? []), 'id'],
     h1: [...(defaultSchema.attributes?.h1 ?? []), 'id'],
@@ -139,9 +136,27 @@ const COMPONENTS: Components = {
     <a href={href} id={id} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">{children}</a>
   ),
   img: ({ node, ...props }) => <img {...props} className="inline-block max-w-full" />,
-  // The container a `:::type` directive was turned into — every other div (raw
-  // HTML alignment wrappers) passes through untouched.
+  // The sentence a conflict points at, in place.
+  mark: ({ node, children }) => (
+    <mark
+      data-sentence={node?.properties?.[SENTENCE_MARK]}
+      className="rounded-sm bg-amber-500/20 px-0.5 text-foreground ring-1 ring-amber-500/50"
+    >
+      {children}
+    </mark>
+  ),
+  // The container a `:::type` directive was turned into, or the band around a
+  // code block a conflict's sentence lies in — every other div (raw HTML
+  // alignment wrappers) passes through untouched.
   div: ({ node, children, ...props }) => {
+    const sentence = node?.properties?.[SENTENCE_MARK];
+    if (typeof sentence === 'string') {
+      return (
+        <div data-sentence={sentence} className="-mx-2 my-1 rounded border-l-4 border-amber-500 bg-amber-500/10 px-2 py-1">
+          {children}
+        </div>
+      );
+    }
     const kind = node?.properties?.[ADMONITION_KIND];
     if (typeof kind !== 'string') return <div {...props}>{children}</div>;
     const title = node?.properties?.[ADMONITION_TITLE];
@@ -167,86 +182,23 @@ const COMPONENTS: Components = {
   td: ({ children }) => <td className="px-2 py-1 align-top">{children}</td>,
 };
 
-function Md({ source }: { source: string }) {
-  return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkDirective, remarkFrontmatter, remarkAdmonitions]}
-      rehypePlugins={[rehypeRaw, [rehypeSanitize, SANITIZE_SCHEMA]]}
-      components={COMPONENTS}
-    >
-      {source}
-    </ReactMarkdown>
+const NO_MARKS: readonly SentenceRange[] = [];
+type RemarkPlugins = NonNullable<Options['remarkPlugins']>;
+
+export function DocMarkdown({ source, marks = NO_MARKS }: { source: string; marks?: readonly SentenceRange[] }): ReactNode {
+  const remarkPlugins = useMemo(
+    (): RemarkPlugins => [remarkGfm, remarkDirective, remarkFrontmatter, remarkAdmonitions, [remarkSentenceMarks, marks]],
+    [marks],
   );
-}
-
-interface Section {
-  heading: string;
-  text: string;
-}
-
-/**
- * Split markdown into sections, each = a heading line + its body up to the next
- * heading, at exactly the headings `parseHeadings` finds: a `#` line inside a
- * fenced block stays in its block, as the scan's section pointers read it.
- */
-function splitSections(source: string): Section[] {
-  const lines = source.split('\n');
-  const headingAt = new Map(parseHeadings(lines).map((h) => [h.line, h.text]));
-  const sections: Section[] = [];
-  let cur: Section = { heading: '', text: '' };
-  lines.forEach((line, i) => {
-    const heading = headingAt.get(i);
-    if (heading !== undefined) {
-      if (cur.text.trim() || cur.heading) sections.push(cur);
-      cur = { heading, text: `${line}\n` };
-    } else {
-      cur.text += `${line}\n`;
-    }
-  });
-  if (cur.text.trim() || cur.heading) sections.push(cur);
-  return sections;
-}
-
-export function DocMarkdown({
-  source,
-  highlight = [],
-  highlightPreamble = false,
-}: {
-  source: string;
-  highlight?: string[];
-  /** Band the doc's lead (content before the first heading, else the opening
-   *  heading's own section) — for null-heading preamble conflicts. */
-  highlightPreamble?: boolean;
-}): ReactNode {
-  const hl = new Set(highlight.map(norm));
-
-  if (hl.size === 0 && !highlightPreamble) {
-    return (
-      <div className="text-[13px] leading-relaxed text-foreground">
-        <Md source={source} />
-      </div>
-    );
-  }
-
-  // Render section-by-section so a whole conflicting section can be banded.
   return (
     <div className="text-[13px] leading-relaxed text-foreground">
-      {splitSections(source).map((sec, i) => {
-        // The preamble band = the doc's LEAD (section 0): the true preamble when
-        // the doc has content before its first heading, else the opening heading's
-        // own section (the common README shape that starts with an H1). Heading
-        // pointers band their matching section as usual.
-        const headingMatch = sec.heading !== '' && hl.has(norm(sec.heading));
-        const on = headingMatch || (i === 0 && highlightPreamble);
-        return (
-          <div
-            key={i}
-            className={on ? '-mx-2 my-1 scroll-mt-2 rounded border-l-4 border-amber-500 bg-amber-500/10 px-2 py-1' : undefined}
-          >
-            <Md source={sec.text} />
-          </div>
-        );
-      })}
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, SANITIZE_SCHEMA]]}
+        components={COMPONENTS}
+      >
+        {source}
+      </ReactMarkdown>
     </div>
   );
 }
