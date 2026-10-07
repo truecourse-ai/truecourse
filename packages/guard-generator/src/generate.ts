@@ -11,7 +11,7 @@ import {
 import { completeRealization } from './match.js'
 import { navigationGroundingProblem } from './proof-grounding.js'
 import { resolvePrerequisites } from '@truecourse/guard-runner'
-import { bindClaimPrerequisites, bindScenarioPrerequisites, scenarioCasePrerequisiteProblems, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowPrerequisiteShapeFingerprint, flowInvocationGaps } from './prerequisites.js'
+import { bindScenarioPrerequisites, scenarioCasePrerequisiteProblems, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowPrerequisiteShapeFingerprint, flowInvocationGaps } from './prerequisites.js'
 import { outcomeCorrection, reconcileRemaining, type RepairIssue } from './worker-repair.js'
 import { GUARD_OBSERVATION_CAPABILITIES, isCreditsExhausted, verificationRequirements, scenarioFullFlowDefect, type GuardEvidenceProofContext, type GuardCaseEvidence } from '@truecourse/shared'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
@@ -190,13 +190,15 @@ import {
   flowSettleDigest,
   flowSettleVerdict,
   type FlowGenerationInputParts,
+  docContentHash,
   type GuardDoc,
   type SectionInput,
 } from './section-plan.js'
 import { LEGACY_WORLD_CLASSIFY_PROMPT_FINGERPRINT } from './legacy-prompt-fingerprints.js'
 import { buildOperationIndex, matchedRequestSchemas, parseOperationSection, type OperationEntry } from './openapi-enrich.js'
-import { persistExtractedClaims } from './claims-persist.js'
-import { priorExtractions } from './extract-prior.js'
+import { writeClaimsCorpus } from './claims-persist.js'
+import { claimAreaInputs, dismissedReason, docTreesOf, oneLine, placeClaims, readSpecClaims } from './claims-input.js'
+import { readSuppressedClaims } from './suppression.js'
 import {
   resolveSectionAuth,
   recipeAuthCredentials,
@@ -216,23 +218,14 @@ import {
 } from './prompts.js'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import { WorldClassifySchema, rawScenarioSchemaFor, type RawGeneratedScenario } from './schemas.js'
-import { EMPTY_CLAIM_DIFF_GATE, docContentHash, rememberDocTexts, reuseCosmeticExtractions } from './claim-diff.js'
 import {
   MATCH_SESSION_KIND,
-  type ClaimDiffRunner,
   type LeafSummaries,
   type MatchRunner,
   type RecipeRunner,
   type WorldClassifyRunner,
 } from './leaf-seams.js'
-import {
-  isSystemicSessionLoss,
-  type DocClaims,
-  type ExtractResult,
-  type ExtractSessionSeam,
-  type ReuseExtractionSeam,
-  type GuardSessionSummary,
-} from './extract.js'
+import { isSystemicSessionLoss, type GuardSessionSummary } from './sessions.js'
 import {
   synthesizeFlows,
   isFlowSynthesisWipeout,
@@ -364,7 +357,7 @@ export function looksWorldMutating(flow: { title: string; milestones: readonly s
  *  input to its claims), and a run of the flow tests is stamped with it. */
 export const PRODUCT_WORLD_RECIPE_FINGERPRINT = 'product-world'
 
-export const GENERATE_SESSION_STEPS = ['extract', 'flows', 'worker'] as const
+export const GENERATE_SESSION_STEPS = ['flows', 'worker'] as const
 export type GenerateStep = (typeof GENERATE_SESSION_STEPS)[number]
 
 export interface GeneratedScenarioInfo {
@@ -402,14 +395,13 @@ export type { GuardBirthFinding } from '@truecourse/shared'
 export type { GuardGenerateError } from '@truecourse/shared'
 
 /**
- * A document whose claim extraction could not complete — the model returned
- * invalid output even after one corrective re-ask, or a call threw. An error
- * state, NOT an empty extraction: the doc's claims are missing from synthesis, so
- * the areas that read them are reported and re-attempt next run.
+ * A claim the scan read from a document that the repository's copy of the
+ * document no longer holds: its sentences are gone or reworded, so it enters
+ * no flow until the next scan reads the document again.
  */
 export interface GuardExtractionFailure {
   doc: string
-  /** One-line reason — the flattened Zod message or the thrown error text. */
+  /** One line naming the claim and what is missing. */
   reason: string
 }
 
@@ -673,8 +665,6 @@ export interface GenerateGuardsOptions {
   // --- the session seams — REQUIRED since the one-shot stages retired: they
   // are THE extract / flows / author-adjudicate paths. Injected by `@truecourse/core` (the engine cannot depend on it);
   // tests inject stubs.
-  /** The claim-extraction session seam (`guard-generate.extract`, one session per doc). */
-  extractSession: ExtractSessionSeam
   /** The per-area flow-synthesis session seam (`guard-generate.flows`). */
   flowsAreaSession: FlowsAreaSessionSeam
   /** The epic-pass session seam (one session over the flow digests). */
@@ -695,18 +685,8 @@ export interface GenerateGuardsOptions {
   matchRunner: MatchRunner
   /** The batched world classification over the changed flows. */
   worldClassifyRunner: WorldClassifyRunner
-  /** The claim-diff gate's verdict on one edited section. */
-  claimDiffRunner: ClaimDiffRunner
   /** What the leaf kinds did, read at every exit — see {@link LeafSummaries}. */
   leafSummaries?: LeafSummaries
-  /**
-   * The claim-diff gate's access to the extract cache (prior-outcome lookup +
-   * reuse). Absent, the gate is skipped and every edited document re-extracts
-   * and re-authors as before — the seam belongs to whoever owns the extraction
-   * cache (core's session seams), so an injected `extractSession` with no
-   * matching seam runs gate-less.
-   */
-  reuseExtraction?: ReuseExtractionSeam
   /**
    * The incremental-authoring escape hatch: re-author every changed flow from
    * scratch instead of briefing its committed scenarios for editing. Flows whose
@@ -716,8 +696,8 @@ export interface GenerateGuardsOptions {
   fromScratch?: boolean
   // --- progress hooks ---
   onPlan?: (total: number, work: number) => void
-  /** Extraction progress, ticking per settled doc session (cache hits included). */
-  onExtractProgress?: (done: number, total: number) => void
+  /** The claims read and placed: how many, from how many documents. */
+  onClaims?: (claims: number, docs: number) => void
   /** Interface mapping settled: how many interfaces were derived, across all surfaces. */
   onInterfaces?: (interfaces: number, surfaces: number) => void
   /** Flow synthesis progress, ticking per area as it settles. */
@@ -1211,7 +1191,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const limit = pLimit(Math.max(1, options.concurrency ?? defaultConcurrency()))
   const matchRunner = options.matchRunner
   const worldClassifyRunner = options.worldClassifyRunner
-  const claimDiffRunner = options.claimDiffRunner
 
   const coverageGaps: GuardCoverageGap[] = []
   const errors: GuardGenerateError[] = []
@@ -1265,57 +1244,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // (`GuardAutoResolvedSchema` and its readers are unchanged).
   const autoResolved: GuardAutoResolved[] = []
 
-  // 3. Extract — one (cached) read per document VIEW, across the WHOLE universe: a
-  // flow spans sections, and its area's synthesis needs the complete claim
-  // inventory, not only the changed sections'. Extraction is content-cached, so an
-  // unchanged document costs nothing.
+  // 3. Claims — what the scan read from the slice's documents, materialized
+  // into the tree as specs/claims.json. The whole universe is read: a flow
+  // spans sections, and its area's synthesis needs the complete claim
+  // inventory, not only the changed sections'.
   const docs = collectWorkDocs(repoRoot, { ...plan, work: plan.sections })
   // Doc path → its raw text: the OpenAPI security resolution the api authoring prompt
   // carries needs the WHOLE document (schemes + the doc-level `security` fallback).
   const docText = new Map(docs.map((d) => [d.doc, d.content]))
   const sectionByKey = new Map(plan.sections.map((s) => [flowSectionKey(s.doc, s.anchor), s]))
-
-  // THE CLAIM-DIFF GATE: an edited document whose every changed section still
-  // states the same obligations keeps its PRIOR extraction (copied under its
-  // new cache key, so the pool below hits) — no session, no reworded claims, and
-  // the flows bound to those sections are spared a re-author further down (the
-  // per-flow gate substitutes the prior fingerprints). Fail closed: no seam, no
-  // recorded prior, a new or vanished section, or one `changed` verdict leaves
-  // the document to extraction exactly as before.
-  // Every document's text, remembered under its content hash: the next
-  // generate's gate reads an edited document's OLD text from here.
   const prerequisiteResolution = resolvePrerequisites(repoRoot, recipe?.api?.externals)
-  await rememberDocTexts(repoRoot, docs)
-  const priorManifestForExtract = readManifest(repoRoot)
-  const claimDiff = options.reuseExtraction
-    ? await reuseCosmeticExtractions({
-        repoRoot,
-        docs,
-        priorManifest: priorManifestForExtract,
-        seam: options.reuseExtraction,
-        prerequisiteTargets: prerequisiteResolution.targets,
-        runner: claimDiffRunner,
-      })
-    : EMPTY_CLAIM_DIFF_GATE
-  for (const message of claimDiff.errors) errors.push({ doc: '', anchor: '', message })
-  for (const doc of claimDiff.reusedDocs) {
-    fact('extract', `${doc}: the edits are cosmetic, prior claims reused from cache`)
-  }
-  // THE PRIOR every document reconciles against when its own cache entry
-  // misses: its last extraction, with the sections whose text did not move
-  // settled — taken verbatim, never re-extracted — and the rest briefed so an
-  // unchanged sentence keeps its claim. Without it a doc edit re-extracts the
-  // whole document from scratch and every claim in it can change identity.
-  const extractPriors = options.reuseExtraction
-    ? await priorExtractions({
-        repoRoot,
-        docs,
-        priorManifest: priorManifestForExtract,
-        seam: options.reuseExtraction,
-        prerequisiteTargets: prerequisiteResolution.targets,
-        cachedPriors: claimDiff.priors,
-      })
-    : new Map<string, never>()
 
   // A credential's `satisfies` naming a scheme NO OpenAPI doc in
   // the corpus declares can never bind — the matcher would silently fall through to
@@ -1348,239 +1286,48 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const sessionLossHead = (s: GuardSessionSummary): string =>
     `every session of the \`${s.kind}\` kind failed (${s.failed} of ${s.ran})${s.firstError ? `. First failure: ${s.firstError}` : ''}`
 
-  // The declared dependencies: the closed vocabulary a case prerequisite may
-  // name. The extraction sessions are briefed on it and their outcomes are held
-  // to it; every fold below resolves against the same list.
-
-  // One `guard-generate.extract` session per doc, pooled +
-  // cached by the seam; the seam's fold already re-snapped every anchor.
-  // Fail-open per doc — a doc with no (or a failed) result lands in
-  // `extractionFailures` below.
-  let extractSystemicLoss: GuardSessionSummary | null = null
-  const { byDoc: extractByDoc, summary: extractSummary } = await options.extractSession({
-    docs,
-    prerequisiteTargets: prerequisiteResolution.targets,
-    priors: extractPriors,
-    onDoc: (done, total) => options.onExtractProgress?.(done, total),
-  })
-  recordSessionSummary(extractSummary)
-  if (isSystemicSessionLoss(extractSummary)) extractSystemicLoss = extractSummary
-  const extracted: { doc: (typeof docs)[number]; result: ExtractResult }[] = docs.map((doc) => ({
-    doc,
-    result: extractByDoc.get(doc.doc) ?? { ok: false, reason: 'the extraction session produced no result for this doc' },
-  }))
-  // The pool reports its cache hits as a TALLY, not per doc, so a doc's line
-  // carries the attribution only when the tally is unanimous; a mixed pool
-  // files the tally as a line of its own.
-  const extractSource =
-    extractSummary.fromCache === 0 ? ', extracted' : extractSummary.fromCache >= docs.length ? ', from cache' : ''
-  for (const { doc, result } of extracted) {
-    if (!result.ok) {
-      fact('extract', `${doc.doc}: extraction failed, ${asLine(result.reason)}`)
-      continue
-    }
-    const claims = result.data.claims.length
-    fact('extract', `${doc.doc}: ${claims} claim${claims === 1 ? '' : 's'}${extractSource}`)
-    const prior = extractPriors.get(doc.doc)
-    if (prior && extractSource !== ', from cache') {
-      const settled = prior.settledAnchors.length
-      const reextracted = doc.sections.length - settled
-      fact('extract', `${doc.doc}: ${settled} section${settled === 1 ? '' : 's'} settled from the last extraction, ${reextracted} re-extracted against ${prior.claims.length} prior claim${prior.claims.length === 1 ? '' : 's'}`)
-    }
-    if (!result.complete) fact('extract', `${doc.doc}: ${result.failedViews} extraction view(s) failed`)
-  }
-  if (extractSource === '') {
-    fact('extract', `${extractSummary.fromCache} of ${docs.length} docs from cache`)
-  }
-
-  // Claim inventory per document, plus the claim-level coverage gaps extraction
-  // itself settles (dismissed, untestable, no-claim, awaiting-driver, prep-missing).
-  const areaTagsByDoc = new Map(plan.sections.map((s) => [s.doc, s.areaTags]))
-  const extractedClaimKeys = new Set<string>()
-  const extractedDocs = new Set<string>()
-  const areaInputs: FlowAreaDocInput[] = []
-
-  for (const { doc, result } of extracted) {
-    if (!result.ok) {
-      extractionFailures.push({ doc: doc.doc, reason: result.reason })
-      continue
-    }
-    if (!result.complete) {
-      extractionFailures.push({
-        doc: doc.doc,
-        reason: `${result.failedViews} extraction view(s) failed — re-run to complete coverage for affected sections`,
-      })
-    }
-    extractedDocs.add(doc.doc)
-    for (const c of result.data.claims) {
-      extractedClaimKeys.add(dismissedClaimKey(doc.doc, c.sectionAnchor, c.claim))
-    }
-    const { claimsByAnchor, noteByAnchor } = groupExtraction(result.data)
-    const live: FlowClaimInput[] = []
-
-    for (const s of doc.sections) {
-      const claims = claimsByAnchor.get(s.anchor) ?? []
-      const note = noteByAnchor.get(s.anchor)
-      let kept = 0
-      for (const c of claims) {
-        const dismissal = dismissalByKey.get(dismissedClaimKey(s.doc, s.anchor, c.claim))
-        if (dismissal) {
-          coverageGaps.push({
-            doc: s.doc,
-            anchor: s.anchor,
-            kind: 'dismissed',
-            reason: dismissedReason(c.claim, dismissal.note),
-          })
-          continue
-        }
-        const proofDrivers = [c.driver, ...(c.alternativeDrivers ?? [])]
-        if (!proofDrivers.some(isRunnableDriver)) {
-          // A claim on a surface with no driver yet is recorded coverage honesty.
-          coverageGaps.push({ doc: s.doc, anchor: s.anchor, kind: 'awaiting-driver', driver: c.driver, reason: c.reason })
-          continue
-        }
-        // A product world serves whatever the product is; a recipe prepares only what it declares.
-        if (recipe && !proofDrivers.some((driver) => isRunnableDriver(driver) && driverPrepared(recipe, driver))) {
-          // A runnable claim whose driver has no recipe preparation is an honest
-          // blocked-on gap — never composed into a flow that could only die.
-          coverageGaps.push({
-            doc: s.doc,
-            anchor: s.anchor,
-            kind: 'blocked-on',
-            reason: composeBlockedOnReason([missingPrepNoun(c.driver)], oneLine(c.claim)),
-          })
-          continue
-        }
-        kept++
-        live.push({
-          doc: s.doc,
-          anchor: s.anchor,
-          title: c.claim,
-          driver: c.driver,
-          ...(c.alternativeDrivers ? { alternativeDrivers: c.alternativeDrivers } : {}),
-          ...(c.verification ? { verification: c.verification } : {}),
-          // The extraction session's structured needs ride into flow synthesis;
-          // the one-shot path carries none.
-          ...(c.needs && c.needs.length > 0 ? { needs: c.needs } : {}),
-          // The prior sentence this claim supersedes: a committed flow's
-          // milestone still names it, and resolves to this claim through it.
-          ...(c.replaces ? { replaces: c.replaces } : {}),
-        })
-      }
-      if (claims.length === 0 && kept === 0) {
-        // No claim at all. In a COMPLETE doc that's an honest gap; in an incomplete
-        // one the section may live in a failed view — don't settle it either way.
-        if (result.complete || note) {
-          coverageGaps.push({
-            doc: s.doc,
-            anchor: s.anchor,
-            kind: note ? 'untestable' : 'no-claim',
-            reason: note?.reason ?? 'the section states no claim a runnable driver can assert',
-          })
-        }
-      }
-    }
-
-    areaInputs.push({
-      doc: doc.doc,
-      areaTags: areaTagsByDoc.get(doc.doc) ?? [],
-      outline: doc.sections.map((s) => ({ anchor: s.anchor, headingText: s.headingText, level: s.level })),
-      untestable: result.data.untestable.map((u) => ({ anchor: u.sectionAnchor, reason: u.reason })),
-      claims: live,
+  // Each claim is placed under the section whose own text holds its first
+  // sentence: the anchor flows bind until bindings go by sentence. A claim the
+  // live document no longer holds is reported, never placed; one read from a
+  // sentence a resolved conflict rejected is dropped by its key.
+  const docSet = new Set(docs.map((d) => d.doc))
+  const treeOf = docTreesOf(repoRoot, docSet)
+  const placement = placeClaims(
+    (readSpecClaims(repoRoot)?.claims ?? []).filter((c) => docSet.has(c.doc)),
+    (doc) => (docSet.has(doc) ? treeOf(doc) : null),
+  )
+  for (const { claim, missing } of placement.unplaced) {
+    extractionFailures.push({
+      doc: claim.doc,
+      reason: `"${oneLine(claim.statement)}" is read from ${missing.length} sentence${missing.length === 1 ? '' : 's'} the document no longer holds`,
     })
   }
+  const suppressed = new Set(readSuppressedClaims(repoRoot).map((s) => `${s.doc}\0${s.sentence}`))
+  // Claim inventory per document, plus the claim-level coverage gaps the claims
+  // themselves settle (dismissed, untestable, no-claim).
+  const inventory = claimAreaInputs({
+    docs,
+    placed: placement.placed,
+    areaTagsByDoc: new Map(plan.sections.map((s) => [s.doc, s.areaTags])),
+    dismissals: dismissalByKey,
+    suppressed,
+  })
+  coverageGaps.push(...inventory.gaps)
+  for (const line of inventory.lines) fact('extract', line)
+  const areaInputs = inventory.inputs
+  const liveClaimKeys = inventory.claimKeys
+  options.onClaims?.(placement.placed.length, docs.length)
 
-  // A document that could not be extracted (or whose views did not all land)
-  // leaves nothing in the extract caches for it, so the step finished over work
-  // a replay cannot supply.
-  if (extractionFailures.length > 0) incomplete('extract')
-
-  // Extraction is the stage everything downstream reads: when EVERY extract call
-  // failed there are no claims, so synthesis, authoring, and the manifest would run
-  // over nothing and the run would report `ok` with an empty result — a run that
-  // verified nothing, indistinguishable from a clean no-op. Abort here instead,
-  // before any scenario file or manifest write: the committed scenarios and
-  // `manifest.json` stay exactly as they were, and the next run re-attempts the
-  // failed views (a failed view is never cached). The per-doc reasons ride along so
-  // the report names the affected documents.
-  if (extractSystemicLoss) {
-    return llmFailedResult(
-      {
-        recipe: recipeMeta,
-        recipeFingerprint,
-        sectionsTotal: plan.sections.length,
-        sectionsChanged: plan.work.length,
-        skippedUnchanged: plan.sections.length - plan.work.length,
-        coverageGaps,
-        errors,
-        extractionFailures,
-        orphaned: orphanedSections,
-        llmFailures: [...leafTallies(), ...sessionTallies],
-      },
-      sessionLossHead(extractSystemicLoss),
-    )
-  }
-
-  // Orphan honesty: a dismissal whose doc was extracted but whose claim text matched
-  // no live claim is stale — surfaced so it is never silently honored.
+  // Orphan honesty: a dismissal naming a claim the scan no longer reads from
+  // its document is stale — surfaced so it is never silently honored.
   const orphanedDismissals: GuardOrphanedDismissal[] = decisions.dismissedClaims
-    .filter((d) => extractedDocs.has(d.doc) && !extractedClaimKeys.has(dismissedClaimKey(d.doc, d.anchor, d.title)))
+    .filter((d) => docSet.has(d.doc) && !liveClaimKeys.has(dismissedClaimKey(d.doc, d.anchor, d.title)))
     .map((d) => ({ doc: d.doc, anchor: d.anchor, title: d.title }))
 
-  // Single-step early return (`only: 'extract'`): the extraction pool ran (or
-  // replayed), and nothing downstream starts — not even the free interface
-  // mapping below. No corpus file is touched; the step's durable artifact is
-  // its own outcome cache, which the next step replays from.
-  if (options.only === 'extract') {
-    return {
-      status: 'ok',
-      recipe: recipeMeta,
-      recipeFingerprint,
-      sectionsTotal: plan.sections.length,
-      sectionsChanged: plan.work.length,
-      skippedUnchanged: plan.sections.length - plan.work.length,
-      // A warm re-run of this step spends nothing and has nothing to report.
-      noChanges: extractSummary.ran === 0,
-      written: [],
-      coverageGaps,
-      birthFindings: [],
-      errors,
-      extractionFailures,
-      llmFailures: [...leafTallies(), ...sessionTallies],
-      unadjudicated: [],
-      orphaned: orphanedSections,
-      birthPassed: 0,
-      orphanedDismissals,
-      orphanedFlowDismissals: [],
-      autoResolved: [],
-      flows: {
-        total: 0,
-        settled: 0,
-        unsettled: 0,
-        skipped: 0,
-        dismissed: 0,
-        orphaned: 0,
-        subsumed: 0,
-        noFlowClaims: 0,
-        unsettledAreas: [],
-      },
-      interfaces: { total: 0, bySurface: {} },
-      externalServices: [],
-      stoppedAfter: 'extract',
-    }
-  }
-
-  // Persist what extraction minted BEFORE synthesis writes the flows naming it —
-  // a flow referencing a claim `scenarios/claims.json` does not hold is a load
-  // error on every `guard run` (see claims-persist.ts). Additive-only, and a
-  // warm re-run adds nothing, so nothing is written on a no-op.
-  for (const extraction of extracted) if (extraction.result.ok) {
-    for (const claim of extraction.result.data.claims) claim.verification = bindClaimPrerequisites(claim.verification, claim.needs ?? [], prerequisiteResolution.targets)
-  }
-  persistExtractedClaims(
-    repoRoot,
-    extracted.flatMap(({ doc, result }) => (result.ok ? [{ doc: doc.doc, outcome: result.data }] : [])),
-  )
+  // The claim corpus every claim reference resolves against at load time
+  // (`scenarios/claims.json`), written whole from the scan's claims BEFORE
+  // synthesis writes the flows naming them.
+  writeClaimsCorpus(repoRoot, placement.placed, new Date().toISOString())
 
   // 4. Interfaces — deterministic, free, and independent of everything spec-side.
   // Recipe discovery ranks its health path over the same walk, so on a repo it
@@ -1625,9 +1372,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // grounding — read off the surface catalogs, which already exclude
   // procedure-bearing api interfaces (`buildSurfaceCatalogs`), so no
   // tRPC-derived operation ever enters a synthesis briefing.
-  for (const input of areaInputs) for (const claim of input.claims) {
-    claim.verification = bindClaimPrerequisites(claim.verification, claim.needs ?? [], prerequisiteResolution.targets)
-  }
   const areas = buildFlowAreas(areaInputs)
   const flowsGrounding: FlowsSessionGrounding = {
     interfaces: [...catalogs].map(([surface, c]) => ({
@@ -1784,7 +1528,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       skippedUnchanged: plan.sections.length - plan.work.length,
       // Single-step mode: a warm re-run of the step spends nothing on either
       // the replayed extraction or this step's own sessions.
-      noChanges: options.only === 'flows' && extractSummary.ran === 0 && synthesis.calls === 0,
+      noChanges: options.only === 'flows' && synthesis.calls === 0,
       written: [],
       coverageGaps,
       birthFindings: [],
@@ -1844,9 +1588,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         !scenarioFullFlowDefect(work.flow.milestones, scenario.steps, prior.caseEvidence ?? []))
   }
 
-  // 6. Match only drivers that can verify a milestone of this flow. Recipe
-  // preparation is availability, never evidence that a flow requires that driver.
-  const surfacesByFlow = new Map(liveFlows.map((flow) => [flow.id, flowDriversToMatch(flow)]))
+  // 6. The surfaces a flow is realized on: the drivers its milestones name,
+  // else every runnable surface the recipe prepares — one test writer drives
+  // them all, so a flow asks for no surface in particular.
+  const preparedSurfaces = runnableDriverIds.filter((driver) => driverPrepared(recipe, driver))
+  const surfacesByFlow = new Map(
+    liveFlows.map((flow) => [flow.id, flow.milestones.some((m) => !m.proofDrivers?.length) ? preparedSurfaces : flowDriversToMatch(flow)]),
+  )
   /** One flow's match outcome, folded back in flow order. */
   interface FlowMatchResult {
     work?: FlowWork
@@ -2119,35 +1867,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         scenarioCasePrerequisiteProblems(flow, committedScenariosById.get(s.id)!, prerequisiteResolution.targets, undefined, recipe).length ||
         scenarioFullFlowDefect(flow.milestones, committedScenariosById.get(s.id)!.steps, s.caseEvidence ?? []))))
     let changed = !settle.settled || (prior !== undefined && violatesSettleInvariant(prior)) || invalidCaseReview
-    // THE PER-FLOW CLAIM-DIFF GATE: when the only inputs that moved are bound
-    // sections the gate judged cosmetic (their prior extraction was reused, so
-    // the claims — and this flow's fingerprint — are byte-identical), the flow
-    // settles against the sections' PRIOR fingerprints and stays unchanged. The
-    // unchanged branch re-stamps the CURRENT components, so the next generate is
-    // a genuine no-op. A settle-invariant violation still wins: an unaccounted
-    // surface must re-run regardless.
-    if (changed && prior && !invalidCaseReview && prior.generationInputsHash !== null && !violatesSettleInvariant(prior) && claimDiff.cosmetic.size > 0) {
-      let substituted = false
-      const priorSectionKeys = boundSections.map((s) => {
-        const priorFingerprint = claimDiff.cosmetic.get(flowSectionKey(s.doc, s.anchor))
-        if (priorFingerprint === undefined) return sectionInputsKey(s)
-        substituted = true
-        return sectionInputsKey({ ...s, fingerprint: priorFingerprint })
-      })
-      const cosmetic =
-        substituted &&
-        flowSettleVerdict({
-          prior,
-          components: flowGenerationInputComponents({ ...inputParts, sectionKeys: priorSectionKeys }),
-          legacyHash: legacyFlowGenerationInputsHash({
-            flowFingerprint: flow.fingerprint,
-            sectionKeys: priorSectionKeys,
-            interfaceFingerprints,
-            recipeFingerprint,
-          }),
-        }).settled
-      if (cosmetic) changed = false
-    }
     if (!changed && prior) {
       // Unchanged ⇒ authoring does not run, so the gaps the AUTHOR stage settled last
       // time (a refusal: "blocked on world-state the sandbox cannot provide") cannot
@@ -4210,9 +3929,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           .filter((s) => !boundKeys.has(`${s.doc}\0${s.anchor}`))
           .map((s) => ({ doc: s.doc, anchor: s.anchor, fingerprint: s.fingerprint }))
       : (priorGapSections ?? []).filter((g) => !boundKeys.has(`${g.doc}\0${g.anchor}`))
-    // Every document extraction read, with the content hash its cache entry is
-    // keyed on — what the next generate's claim-diff gate needs to find the
-    // prior extraction of a document whose text has since moved.
+    // Every document read, with the hash of its text.
     const manifestDocs = docs.map((d) => ({ doc: d.doc, contentHash: docContentHash(d.content) }))
     writeManifest(repoRoot, { flows, gapSections, docs: manifestDocs })
   }
@@ -4269,47 +3986,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     return { hash: flowSettleDigest(components), components, catalogReads }
   }
 
-  /**
-   * An unchanged flow's committed scenarios, re-pinned to the sections the
-   * claim-diff gate judged cosmetic. A bind still at the prior fingerprint the
-   * gate settled against takes the section's current one and the file is
-   * rewritten; a review that held for the old text is re-stamped for the new,
-   * since the claims under it are byte-identical (the gate's finding). Left at
-   * the old fingerprint, the runner calls the scenario stale and never runs it.
-   */
-  const scenarioFiles = claimDiff.cosmetic.size > 0 ? scenarioFileIndex(repoRoot) : new Map<string, string>()
-  const repinCosmetic = (rows: readonly GuardManifestScenario[]): GuardManifestScenario[] =>
-    rows.map((row) => {
-      const scenario = committedScenariosById.get(row.id)
-      const file = scenarioFiles.get(row.id)
-      if (!scenario || !file) return row
-      let repinned = 0
-      const binds = scenario.binds.map((bind) => {
-        const key = flowSectionKey(bind.doc, bind.section)
-        const section = sectionByKey.get(key)
-        if (!section || claimDiff.cosmetic.get(key) !== bind.fingerprint || section.fingerprint === bind.fingerprint) return bind
-        repinned += 1
-        return { ...bind, fingerprint: section.fingerprint }
-      })
-      if (repinned === 0) return row
-      const next = { ...scenario, binds }
-      fs.writeFileSync(file, serializeScenarioYaml(next))
-      committedScenariosById.set(row.id, next)
-      fact('validate', `${row.id}: re-pinned to ${repinned} cosmetically edited section${repinned === 1 ? '' : 's'}`)
-      return row.reviewedScenarioFingerprint === scenarioReviewFingerprint(scenario)
-        ? { ...row, reviewedScenarioFingerprint: scenarioReviewFingerprint(next) }
-        : row
-    })
-
   for (const work of works) {
     if (!work.changed) {
-      // Unchanged: its committed scenarios stand (re-pinned to any section the
-      // gate judged cosmetic), its MATCH-stage gaps are re-derived (the
+      // Unchanged: its committed scenarios stand, its MATCH-stage gaps are re-derived (the
       // author-stage ones were carried forward above, since authoring does not
       // run), and its hash carries so the next generate is a no-op again.
       workingManifest.set(
         work.flow.id,
-        enforceSettleInvariant(manifestEntry(work, repinCosmetic(work.prior?.scenarios ?? []), settleRecord(work))),
+        enforceSettleInvariant(manifestEntry(work, work.prior?.scenarios ?? [], settleRecord(work))),
       )
       const carried = work.prior?.scenarios.length ?? 0
       fact(
@@ -4652,8 +4336,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     skippedUnchanged: plan.sections.length - plan.work.length,
     // A prune rewrites a committed file, so it is never a no-op run.
     noChanges: changedWorks.length === 0 && removedFlows === 0 && prunedFlows === 0,
-    cosmeticSections: claimDiff.cosmetic.size,
-    claimDiffCalls: claimDiff.calls,
     matchContextMoved,
     retiredScenarios: retiredReport,
     written,
@@ -5014,10 +4696,6 @@ function fidelityVerdictLine(scenarioId: string, verdict: WorkerFidelityVerdict)
   return `${scenarioId}: fidelity faithful`
 }
 
-function oneLine(text: string): string {
-  const t = asLine(text)
-  return t.length > 120 ? `${t.slice(0, 120)}…` : t
-}
 
 /** The whole of a reason on one line: a fact keeps every word, and the page folds it. */
 function asLine(text: string): string {
@@ -5029,17 +4707,6 @@ function asLine(text: string): string {
 function firstSentence(text: string): string {
   const stop = text.indexOf('. ')
   return stop === -1 ? text : text.slice(0, stop)
-}
-
-/** Group a doc's snapped extraction by anchor: claims per section + notes per section. */
-function groupExtraction(data: DocClaims): {
-  claimsByAnchor: Map<string, DocClaims['claims']>
-  noteByAnchor: Map<string, DocClaims['untestable'][number]>
-} {
-  const claimsByAnchor = new Map<string, DocClaims['claims']>()
-  for (const c of data.claims) pushInto(claimsByAnchor, c.sectionAnchor, c)
-  const noteByAnchor = new Map(data.untestable.map((n) => [n.sectionAnchor, n]))
-  return { claimsByAnchor, noteByAnchor }
 }
 
 /**
@@ -5174,11 +4841,6 @@ function missingPrepNoun(driver: GuardDriverId): string {
   return key === undefined || key === 'entry' ? 'a recipe `entry`' : `a recipe \`${key}\` block`
 }
 
-/** The `dismissed` coverage-gap reason: the subject one-liner, plus the note if any. */
-function dismissedReason(subject: string, note?: string): string {
-  const base = `dismissed: ${oneLine(subject)}`
-  return note ? `${base} — ${oneLine(note)}` : base
-}
 
 // --- Worker pre-flight checkers ---------------------------------------------
 

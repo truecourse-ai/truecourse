@@ -18,7 +18,7 @@ import {
   writeDoc,
   writeCorpus,
   raw,
-  extractSessionBy,
+  claimsBy,
   runGenerate,
   submitWorkerSessions,
   PASSING_STEPS,
@@ -50,7 +50,7 @@ function seed(): string {
 async function generateOnce(r: string): Promise<void> {
   const res = await runGenerate({
     repoRoot: r,
-    extractSession: extractSessionBy({ background: { untestable: 'design history, nothing observable' } }),
+    claims: claimsBy({ background: { untestable: 'design history, nothing observable' } }),
     flowWorkerSession: submitWorkerSessions(() => raw('relkit --version prints the version', PASSING_STEPS)),
   })
   expect(res.status).toBe('ok')

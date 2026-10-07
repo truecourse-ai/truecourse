@@ -263,52 +263,6 @@ export const SeedProposalSchema = z
 export type SeedProposal = z.infer<typeof SeedProposalSchema>
 
 // ---------------------------------------------------------------------------
-// Claim extraction (one call per document / view)
-// ---------------------------------------------------------------------------
-
-/**
- * One testable claim the model read out of a document: a single externally-
- * observable behavior, the driver that could assert it, the section it belongs to
- * (an anchor the engine snaps against the live index), and the observable a test
- * would check.
- */
-export const ExtractedClaimSchema = z.object({
-  claim: z.string().min(1),
-  driver: z.enum(CLAIM_DRIVERS),
-  alternativeDrivers: z.array(z.enum(CLAIM_DRIVERS)).optional(),
-  verification: GuardVerificationSchema.optional(),
-  sectionAnchor: z.string().min(1),
-  reason: z.string().min(1),
-})
-export type ExtractedClaim = z.infer<typeof ExtractedClaimSchema>
-
-/** A section the model judged to state no testable behavior — a visible coverage
- *  gap with an honest reason. */
-export const UntestableNoteSchema = z.object({
-  sectionAnchor: z.string().min(1),
-  reason: z.string().min(1),
-})
-export type UntestableNote = z.infer<typeof UntestableNoteSchema>
-
-/**
- * One document's (or view's) extraction: its claims plus per-section untestable
- * notes. Either array may be omitted (a doc with only claims, or only notes), but
- * at least one MUST be a real array — a wrong-shaped object with neither is a
- * malformed reply that triggers the corrective re-ask, never a silent empty read.
- * The engine unions views and snaps anchors after parsing.
- */
-export const DocExtractionSchema = z
-  .object({
-    claims: z.array(ExtractedClaimSchema).optional(),
-    untestable: z.array(UntestableNoteSchema).optional(),
-  })
-  .refine((d) => d.claims !== undefined || d.untestable !== undefined, {
-    message: 'expected a "claims" and/or "untestable" array',
-  })
-  .transform((d) => ({ claims: d.claims ?? [], untestable: d.untestable ?? [] }))
-export type DocExtraction = z.infer<typeof DocExtractionSchema>
-
-// ---------------------------------------------------------------------------
 // Scenario authoring (batched per claim)
 // ---------------------------------------------------------------------------
 
@@ -593,7 +547,7 @@ export type RetiredFlow = z.infer<typeof RetiredFlowSchema>
  * One area's synthesis output. Either array may be omitted (an area that composes
  * everything, or one that flows nothing), but at least one MUST be a real array —
  * a wrong-shaped object with neither is a malformed reply that triggers the
- * corrective re-ask, never a silent empty read (mirrors {@link DocExtractionSchema}).
+ * corrective re-ask, never a silent empty read.
  */
 export const FlowSynthesisSchema = z
   .object({
@@ -695,19 +649,6 @@ export const WorldClassifySchema = z
   .strict()
 export type WorldClassify = z.infer<typeof WorldClassifySchema>
 
-/**
- * The claim-diff gate's reply for ONE edited section: `cosmetic` when the
- * current text still guarantees every previously extracted claim and adds no
- * observable behavior, `changed` otherwise. Cached per (prompt, new section
- * fingerprint, prior claims), so the same edit is judged once per repo.
- */
-export const ClaimDiffSchema = z
-  .object({
-    verdict: z.enum(['cosmetic', 'changed']),
-    reason: z.string().min(1),
-  })
-  .strict()
-export type ClaimDiff = z.infer<typeof ClaimDiffSchema>
 
 export const RealizationGapSchema = z.object({
   milestone: z.number().int().positive(),

@@ -33,7 +33,7 @@ import {
   FAILING_STEPS,
   PASSING_STEPS,
   acceptedSha,
-  extractSessionBy,
+  claimsBy,
   faithfulJudge,
   flowOfAllSession,
   flowWorkerSessionOf,
@@ -106,7 +106,7 @@ describe('run_scenario — the deterministic pre-flight', () => {
     await runGenerate({
       repoRoot: r,
       executor: exec.executor,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         const yaml = scenarioYaml(raw('inspect the prerequisite', PASSING_STEPS))
         probe = await task.runScenario(yaml)
@@ -128,7 +128,7 @@ describe('run_scenario — the deterministic pre-flight', () => {
     await runGenerate({
       repoRoot: r,
       executor: exec.executor,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         report = await task.runScenario(
           scenarioYaml(raw('step 1 claims milestone 4', [{ run: ['--version'], expect: { exit: 0 }, milestone: 4 }] as never)),
@@ -149,7 +149,7 @@ describe('run_scenario — the deterministic pre-flight', () => {
     await runGenerate({
       repoRoot: r,
       executor: exec.executor,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         // The recipe entry is ["node", <bin>] — `run[0] === 'node'` repeats it.
         report = await task.runScenario(draft('repeats the entrypoint', [{ run: ['node', '--version'], expect: { exit: 0 } }]))
@@ -169,7 +169,7 @@ describe('run_scenario — the deterministic pre-flight', () => {
     await runGenerate({
       repoRoot: r,
       executor: exec.executor,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         report = await task.runScenario(
           draft('bad pattern', [{ run: ['--version'], expect: { exit: 0, stdout: { matches: '([unclosed' } } }]),
@@ -196,7 +196,7 @@ describe('run_scenario — the deterministic pre-flight', () => {
     await runGenerate({
       repoRoot: r,
       executor: exec.executor,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         reports.push(
           await task.runScenario(
@@ -233,7 +233,7 @@ describe('run_scenario — the deterministic pre-flight', () => {
     await runGenerate({
       repoRoot: r,
       executor: exec.executor,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         report = await task.runScenario('title: [unterminated\n')
         return { kind: 'outcome', outcome: { kind: 'retired', attempts: 1, lastEvidence: 'pre-flight' } }
@@ -263,7 +263,7 @@ describe('run refusals end the flow, never a thrash', () => {
     const res = await runGenerate({
       repoRoot: r,
       executor: refusing,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         reports.push(await task.runScenario(draft('probe', PASSING_STEPS)))
         reports.push(await task.runScenario(draft('probe again', PASSING_STEPS)))
@@ -295,7 +295,7 @@ describe('run refusals end the flow, never a thrash', () => {
     const res = await runGenerate({
       repoRoot: r,
       executor: refusing,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         await task.runScenario(draft('probe', PASSING_STEPS))
         return { kind: 'outcome', outcome: { kind: 'retired', attempts: 1, lastEvidence: 'refused' } }
@@ -319,7 +319,7 @@ describe('submit_scenario — the red-prediction gate', () => {
   ): Promise<void> {
     await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         await submissions(task)
         return { kind: 'outcome', outcome: { kind: 'retired', attempts: 1, lastEvidence: 'probe only' } }
@@ -392,7 +392,7 @@ describe('the engine stash is what the fold persists', () => {
     let declared: GuardExpectedRed | undefined
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         const redYaml = draft('boom exits 0 (it does not)', FAILING_STEPS)
         const probe = await task.submitScenario(redYaml, [], faithfulJudge)
@@ -427,7 +427,7 @@ describe('the engine stash is what the fold persists', () => {
     const r = seed()
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         expect(task.hasStash('f'.repeat(64))).toBe(false)
         return { kind: 'outcome', outcome: { kind: 'settled', scenarioYamlSha: 'f'.repeat(64), expectedReds: [] } }
@@ -446,7 +446,7 @@ describe('the engine stash is what the fold persists', () => {
     const shas: Record<string, string> = {}
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         const accepted = await task.submitScenario(draft(`${task.flowId} prints`, PASSING_STEPS), [], faithfulJudge)
         shas[task.flowId] = acceptedSha(accepted)!
@@ -470,7 +470,7 @@ describe('the routing fold', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: withExternalServices(DEFAULT_INTERFACES(r), { service: 'stripe', category: 'payment' }),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => ({
         blocked: [{ order: 1, capability: 'external-service' }],
       })),
@@ -489,7 +489,7 @@ describe('the routing fold', () => {
     const r = seed()
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => ({
         journeyDefect: { interfaceId: 'cli/relkit', detail: 'the derived command does not exist' },
       })),
@@ -508,7 +508,7 @@ describe('the routing fold', () => {
     const r = seed()
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => ({
         retired: { attempts: 3, lastEvidence: 'no faithful scenario passes' },
       })),
@@ -535,7 +535,7 @@ describe('the routing fold', () => {
     })
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => ({
         retired: { attempts: 4, lastEvidence: 'still no faithful scenario' },
       })),
@@ -551,7 +551,7 @@ describe('the routing fold', () => {
     const r = seed()
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async () => undefined),
     })
 
@@ -564,7 +564,7 @@ describe('the routing fold', () => {
     const r = seed()
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async () => ({ kind: 'failed', reason: 'budget exhausted' })),
     })
 
@@ -596,7 +596,7 @@ describe('taint', () => {
     let seen: FlowWorkerTask['taint']
     await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => raw('the version prints', PASSING_STEPS), {
         onSubmit: () => undefined,
       }),
@@ -619,7 +619,7 @@ describe('taint', () => {
     fs.rmSync(path.join(r, '.truecourse', 'scenarios', 'manifest.json'), { force: true })
     await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions((task) => {
         seen = task.taint
         return raw('the version prints', PASSING_STEPS)
@@ -641,7 +641,7 @@ describe('taint', () => {
     })
     await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => ({ retired: { attempts: 2, lastEvidence: 'new evidence' } })),
     })
     expect(readGuardAutoResolutions(r).tainted[KEY]).toMatchObject({ mismatch: 'new evidence' })
@@ -716,7 +716,7 @@ describe('wave ordering', () => {
     let epicCount = 0
     await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowsEpicSession: chainEverything,
       flowWorkerSession: async ({ tasks, epicTasks }) => {
         waves.tasks = tasks.map((t) => t.flowId)
@@ -757,7 +757,7 @@ describe('wave ordering', () => {
     let epicBriefing = ''
     await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowsEpicSession: chainEverything,
       flowWorkerSession: async ({ tasks, epicTasks }) => {
         const out = new Map<string, FlowWorkerSessionResult>()
@@ -797,7 +797,7 @@ describe('the C4 no-op anomaly abort', () => {
     let aborted!: { content: string; isError?: boolean }
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       // The anomaly gate needs 20 executed steps: one scenario carries them all.
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         aborted = await task.runScenario(
@@ -836,7 +836,7 @@ describe('isolation', () => {
     const res = await runGenerate({
       repoRoot: r,
       executor: exec.executor,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         // Probe run + confirmation run: two executions, each of one scenario.
         await task.runScenario(draft(`${task.flowId} works`, PASSING_STEPS))
@@ -873,7 +873,7 @@ describe('the fidelity judge’s engine half', () => {
     }
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         reports.push(await task.submitScenario(draft('first try', PASSING_STEPS), [], judge))
         reports.push(await task.submitScenario(draft('revised', PASSING_STEPS), [], judge))
@@ -916,7 +916,7 @@ describe('the fidelity judge’s engine half', () => {
     let report!: { content: string; isError?: boolean }
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         report = await task.submitScenario(draft('first try', PASSING_STEPS), [], async () => ({
           kind: 'flagged',
@@ -939,7 +939,7 @@ describe('the fidelity judge’s engine half', () => {
     let accepted!: { content: string; isError?: boolean }
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => raw('the version prints', PASSING_STEPS), {
         judge: async () => ({ kind: 'unavailable', reason: 'the child session died' }),
         onSubmit: (_t, report) => (accepted = report),
@@ -969,7 +969,7 @@ describe('the fidelity judge’s engine half', () => {
     let hasStash = false
     await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         const accepted = await task.submitScenario(draft('the version prints', PASSING_STEPS), [], async () => ({
           kind: 'unavailable',
@@ -991,7 +991,7 @@ describe('the fidelity judge’s engine half', () => {
     let accepted!: { content: string; isError?: boolean }
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => raw('the version prints', PASSING_STEPS), {
         onSubmit: (_t, report) => (accepted = report),
       }),
@@ -1015,7 +1015,7 @@ describe('confirmCached', () => {
     // Round 1: settle the flow and keep the committed yaml.
     await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         const accepted = await task.submitScenario(draft('the version prints', PASSING_STEPS), [], faithfulJudge)
         const sha = acceptedSha(accepted)!
@@ -1033,7 +1033,7 @@ describe('confirmCached', () => {
     let mispredicted: boolean | undefined
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         mispredicted = await task.confirmCached([
           {

@@ -14,7 +14,7 @@ import { loadScenarios, readManifest } from '@truecourse/guard-runner'
 import { GuardGenerateReportSchema } from '@truecourse/shared'
 import {
   PASSING_STEPS,
-  extractSessionBy,
+  claimsBy,
   judgeBy,
   makeTempRepo,
   raw,
@@ -46,7 +46,7 @@ const DOC_CONTENT = [
 ].join('\n')
 
 /** version → default cli claim, background → untestable. */
-const versionExtract = extractSessionBy({ background: { untestable: 'design history' } })
+const versionExtract = claimsBy({ background: { untestable: 'design history' } })
 
 function seed(): string {
   const r = repo()
@@ -66,7 +66,7 @@ describe('generateGuards — the fidelity child’s verdict', () => {
     const r = seed()
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionExtract,
+      claims: versionExtract,
       flowWorkerSession: submitWorkerSessions(() => raw('v', PASSING_STEPS)),
     })
     expect(res.written.map((w) => w.flowId)).toEqual(['version'])
@@ -78,7 +78,7 @@ describe('generateGuards — the fidelity child’s verdict', () => {
     const r = seed()
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: versionExtract,
+      claims: versionExtract,
       flowWorkerSession: submitWorkerSessions(() => raw('weak', PASSING_STEPS), {
         judge: judgeBy({ weak: 'asserts exit 0 but the claim quotes exact output' }),
         onRefusal: 'retire',
@@ -121,7 +121,7 @@ describe('generateGuards — the fidelity child’s verdict', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(
         (task) => (task.flowId === 'version' ? raw('good', PASSING_STEPS) : raw('bad', PASSING_STEPS)),
         {

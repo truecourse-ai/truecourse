@@ -18,7 +18,7 @@ import {
   writeDoc,
   writeCorpus,
   raw,
-  extractSessionBy,
+  claimsBy,
   runGenerate,
   submitWorkerSessions,
   PASSING_STEPS,
@@ -41,7 +41,7 @@ const DOC_CONTENT = [
 /** A real obligation change in the bound section — the flow must re-author. */
 const EDITED = DOC_CONTENT.replace('prints the version and exits 0.', 'prints the SEMVER version and exits 0.')
 
-const extraction = () => extractSessionBy({ background: { untestable: 'design history, nothing observable' } })
+const extraction = () => claimsBy({ background: { untestable: 'design history, nothing observable' } })
 const ORIGINAL = raw('relkit --version prints the version', PASSING_STEPS)
 const REVISED = raw('relkit --version prints the semver version', PASSING_STEPS)
 const EXTRA = raw('relkit --version prints the semver version (extra check)', PASSING_STEPS)
@@ -62,7 +62,7 @@ async function generate(
 ) {
   return runGenerate({
     repoRoot: r,
-    extractSession: extraction(),
+    claims: extraction(),
     ...(opts.fromScratch ? { fromScratch: true } : {}),
     flowWorkerSession: submitWorkerSessions(
       (task) => (typeof spec === 'function' ? spec(task.prior?.scenarios.map((s) => s.id) ?? []) : spec),

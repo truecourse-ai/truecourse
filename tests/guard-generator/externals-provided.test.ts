@@ -16,7 +16,7 @@ import {
   rmrf,
   writeDoc,
   writeCorpus,
-  extractSessionBy,
+  claimsBy,
   submitWorkerSessions,
   runGenerate,
   withExternalServices,
@@ -53,7 +53,7 @@ async function apiBriefing(repo: string, detected: { service: string; baseUrlEnv
       interfacesOf(repo, apiInterface('GET', '/todos')),
       ...detected.map((d) => ({ category: 'ai' as const, ...d })),
     ),
-    extractSession: extractSessionBy({
+    claims: claimsBy({
       list: [{ driver: 'api', claim: 'GET /todos returns 200 with the todo list', reason: 'HTTP status' }],
     }),
     flowWorkerSession: submitWorkerSessions(() => rawApi('GET /todos answers 200', PASSING_API_STEPS), {

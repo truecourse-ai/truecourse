@@ -14,11 +14,8 @@ import {
   matchCacheKey,
   matchLegacyCacheKeys,
   readCachedMatch,
-  claimDiffCacheKey,
-  claimDiffLegacyCacheKey,
   recipeCacheKey,
   recipeLegacyCacheKey,
-  type ClaimDiffSectionInput,
 } from '@truecourse/guard-generator'
 import { getCacheEntry, getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
 import type { GuardFlow, Interface } from '@truecourse/shared'
@@ -99,17 +96,4 @@ describe('a stage whose key formula moved', () => {
     expect(await getCacheEntry('/repo', 'guard/match', current)).not.toBeNull()
   })
 
-  it('claim diff and recipe: the old key is computable from the current inputs', () => {
-    const section: ClaimDiffSectionInput = {
-      doc: 'docs/cli.md',
-      anchor: 'version',
-      oldText: '# version\nprints 1.0',
-      newText: '# version\nprints the version',
-      priorClaims: [{ claim: 'prints the version', reason: 'stdout' }],
-    } as unknown as ClaimDiffSectionInput
-    expect(claimDiffLegacyCacheKey(section)).not.toBe(claimDiffCacheKey(section))
-    expect(claimDiffLegacyCacheKey(section)).toMatch(/^[0-9a-f]{64}$/)
-    expect(recipeLegacyCacheKey('sha256:inputs')).not.toBe(recipeCacheKey('sha256:inputs'))
-    expect(recipeLegacyCacheKey('sha256:inputs', 'proj')).not.toBe(recipeLegacyCacheKey('sha256:inputs'))
-  })
 })

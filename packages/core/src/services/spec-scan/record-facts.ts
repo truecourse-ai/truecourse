@@ -644,11 +644,15 @@ export function docFactLedger(input: DocLedgerInput): DocFactLedger {
  */
 export function claimsFromLedgers(ledgers: readonly DocFactLedger[], generatedAt: string): ClaimsFile {
   const claims: Claim[] = []
+  const seen = new Map<string, number>()
   for (const ledger of ledgers) {
     for (const fact of ledger.facts) {
       const sentences = fact.sentences.map((s) => sentenceKey(s.text, s.repeat))
+      const identity = `${fact.doc}\0${[...sentences].sort().join('\0')}`
+      const repeat = seen.get(identity) ?? 0
+      seen.set(identity, repeat + 1)
       claims.push({
-        id: claimId(fact.doc, sentences),
+        id: claimId(fact.doc, sentences, repeat),
         doc: fact.doc,
         sentences,
         subject: fact.subject,

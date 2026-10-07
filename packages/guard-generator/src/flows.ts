@@ -43,8 +43,6 @@ import {
   flowFingerprint,
   flowMilestoneKey,
   resolveFlowIdentity,
-  isRunnableDriver,
-  type ClaimNeed,
   type GuardDriverId,
   type GuardFlow,
   type GuardFlowBinding,
@@ -59,7 +57,7 @@ import {
   type SynthesizedMilestone,
 } from './schemas.js'
 import { type FlowDigest, type OutlineEntry } from './prompts.js'
-import type { GuardSessionSummary } from './extract.js'
+import type { GuardSessionSummary } from './sessions.js'
 import type { GuardDoc } from './section-plan.js'
 import type { InterfaceDigest } from './prompts.js'
 
@@ -76,28 +74,17 @@ export const readFlowsFile = readGuardFlowsCorpus
 /** One extracted claim as synthesis consumes it. The caller has already dropped
  *  dismissed claims — synthesis never re-reads decisions. */
 export interface FlowClaimInput {
-  /** Repo-relative doc path the claim was extracted from. */
+  /** The claim's id, as the scan wrote it. */
+  id: string
+  /** Repo-relative doc path the claim is read from. */
   doc: string
-  /** The live section anchor the claim is bound to. */
+  /** The live section anchor the claim is placed under. */
   anchor: string
-  /** The claim's text — becomes a milestone's `claimTitle` verbatim. */
+  /** The claim's statement — becomes a milestone's `claimTitle` verbatim. */
   title: string
-  /** The surface hint extraction assigned; runnable surfaces must be accounted for. */
-  driver: GuardDriverId
-  alternativeDrivers?: GuardDriverId[]
+  /** The keys of the sentences the claim is read from. */
+  sentences: readonly string[]
   verification?: GuardVerification
-  /**
-   * The extraction session's structured needs for this claim, read by flow
-   * synthesis (and its `check_flows` needs-vs-catalog binding).
-   * Advisory — they steer composition, never gate it.
-   */
-  needs?: ClaimNeed[]
-  /**
-   * The prior claim's sentence this one supersedes, when a re-extraction
-   * reworded it. A committed flow's milestone still names the prior sentence
-   * and resolves to this claim through it, so the flow is amended, not retired.
-   */
-  replaces?: string
 }
 
 /** One document's synthesis context: its outline and its untestable sections. */
@@ -246,12 +233,7 @@ export function flowAreaClaimsMaterial(area: FlowSynthesisArea): string {
   return area.claims
     .map((c) => {
       const verification = c.verification ? `\0verification:${JSON.stringify(c.verification)}` : ''
-      const base = verification + `${c.doc}\0${normalizeText(c.anchor)}\0${normalizeText(c.title)}\0${c.driver}${c.alternativeDrivers?.length ? `\0alternatives:${[...new Set(c.alternativeDrivers)].sort().join(',')}` : ''}`
-      const needs = (c.needs ?? [])
-        .map((n) => `${n.kind}\0${normalizeText(n.name)}${n.detail ? `\0${normalizeText(n.detail)}` : ''}`)
-        .sort()
-        .join('')
-      return needs ? `${base}\0needs:${needs}` : base
+      return verification + `${c.doc}\0${normalizeText(c.anchor)}\0${normalizeText(c.title)}`
     })
     .sort()
     .join('\n')
@@ -308,10 +290,6 @@ function buildClaimIndex(claims: readonly FlowClaimInput[]): ClaimIndex {
   const index: ClaimIndex = { byKey: new Map(), byDocAnchor: new Map(), byDocLoose: new Map(), all: [...claims] }
   for (const c of claims) {
     index.byKey.set(claimKey(c.doc, c.anchor, c.title), c)
-    // The superseded sentence resolves here too, unless a live claim states it.
-    if (c.replaces !== undefined && !index.byKey.has(claimKey(c.doc, c.anchor, c.replaces))) {
-      index.byKey.set(claimKey(c.doc, c.anchor, c.replaces), c)
-    }
     const da = flowSectionKey(c.doc, c.anchor)
     const list = index.byDocAnchor.get(da)
     if (list) list.push(c)
@@ -399,7 +377,6 @@ function orderMilestones(raw: { milestone: SynthesizedMilestone; claim: FlowClai
       anchor: e.claim.anchor,
       claimTitle: e.claim.title,
       ...(e.milestone.caseIds ? { caseIds: [...e.milestone.caseIds].sort() } : {}),
-      proofDrivers: [...new Set([e.claim.driver, ...(e.claim.alternativeDrivers ?? [])])].sort(),
       ...(e.claim.verification ? { verification: { ...e.claim.verification, ...(e.claim.verification.cases ? { cases: e.claim.verification.cases.filter(c => !e.milestone.caseIds || e.milestone.caseIds.includes(c.id)).sort((a, b) => a.id.localeCompare(b.id)) } : {}) } } : {}),
       ...(e.milestone.note ? { note: e.milestone.note } : {}),
     })
@@ -586,7 +563,6 @@ function validateAreaSynthesis(
   }
 
   const uncoveredClaims = index.all
-    .filter(c => [c.driver, ...(c.alternativeDrivers ?? [])].some(isRunnableDriver))
     .flatMap(c => obligationKeys(c).filter(key => !covered.has(key)).map(key => `${describeClaim(c)}${c.verification?.cases?.length ? ` / case ${key.split('\0').at(-1)}` : ''}`))
 
   for (const flow of flows) {
@@ -610,8 +586,6 @@ export interface FlowSetCheckContext {
   area: FlowSynthesisArea
   /** Live {@link flowSectionKey}s — the bindability check. Omit to skip. */
   sectionKeys?: ReadonlySet<string>
-  /** Dependency-catalog entry names — the needs-binding check. Omit to skip. */
-  catalogNames?: ReadonlySet<string>
   /** The area's EXISTING flows the draft must reconcile against. Omit when
    *  there are none (a first synthesis). */
   prior?: readonly GuardFlow[]
@@ -641,8 +615,6 @@ export interface FlowSetCheckReport {
   subsumed: SubsumedFlow[]
   /** Milestones whose section is outside the live index — no flow can bind them. */
   unbindable: string[]
-  /** Claim needs naming no dependency-catalog entry (observation only). */
-  unboundNeeds: string[]
 }
 
 /** True when the report carries no refusal-class defect. */
@@ -662,19 +634,10 @@ export function checkFlowSet(data: FlowSet, ctx: FlowSetCheckContext): FlowSetCh
   const subsumed = applySubsumption(v.flows).dropped
 
   const unbindable: string[] = []
-  const unboundNeeds: string[] = []
-  const seenNeed = new Set<string>()
   for (const flow of v.flows) {
     for (const m of flow.milestones) {
       if (ctx.sectionKeys && !ctx.sectionKeys.has(flowSectionKey(m.doc, m.anchor))) {
         unbindable.push(`${m.doc}#${m.anchor} — "${normalizeText(m.claimTitle)}"`)
-      }
-      if (!ctx.catalogNames) continue
-      const claim = index.byKey.get(claimKey(m.doc, m.anchor, m.claimTitle))
-      for (const need of claim?.needs ?? []) {
-        if (ctx.catalogNames.has(need.name) || seenNeed.has(need.name)) continue
-        seenNeed.add(need.name)
-        unboundNeeds.push(`"${need.name}" (${need.kind}) — named by "${normalizeText(m.claimTitle)}" but in no dependency-catalog entry`)
       }
     }
   }
@@ -686,7 +649,6 @@ export function checkFlowSet(data: FlowSet, ctx: FlowSetCheckContext): FlowSetCh
     unaccountedNoFlow: v.unaccountedNoFlow,
     subsumed,
     unbindable,
-    unboundNeeds,
   }
 }
 

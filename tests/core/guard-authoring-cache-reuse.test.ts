@@ -21,12 +21,11 @@ import {
 import { buildAuthorUserPrompt } from '../../packages/guard-generator/src/prompts.js'
 import type { FlowWorkerTask } from '../../packages/guard-generator/src/generate.js'
 import { createGuardGenerateSessionSeams } from '../../packages/core/src/services/guard-generate/run.js'
-import { EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey } from '../../packages/core/src/services/guard-generate/extract.js'
 import { FLOWS_SESSION_CACHE_NAME, flowsSessionCacheKey } from '../../packages/core/src/services/guard-generate/flows.js'
 import { CachedWorkerEntrySchema, flowWorkerCacheKey, flowWorkerPromptFingerprint } from '../../packages/core/src/services/guard-generate/flow-worker.js'
 import { authoringFixture } from '../fixtures/guard-authoring-benchmark/fixture.js'
 import {
-  extractSessionBy,
+  claimsBy,
   FIXTURE_WEB_SERVER,
   flowWorkerSessionOf,
   interfacesOf,
@@ -75,25 +74,21 @@ const BASE_PARTS: FlowGenerationInputParts = {
 }
 
 describe('author-only changes retain upstream cache compatibility', () => {
-  it('reads seeded extract and synthesis outcomes with zero upstream driver calls', async () => {
+  it('reads seeded synthesis outcomes with zero upstream driver calls', async () => {
     const { root, doc, area } = seededRepo()
-    const extract = { claims: [{ claim: CLAIM, driver: 'cli', sectionAnchor: ANCHOR, reason: 'stdout carries the id',
-      verification: { scope: 'configuration', method: 'behavior', observable: 'Task id', cases: [{ id: 'created-id', claim: 'Prints the id', method: 'behavior', requires: ['process'], conditions: [] }] }, needs: [] }], untestable: [] }
     const flows = { flows: [{ title: 'Create task', goal: 'Create task', milestones: [{ order: 1, doc: DOC, anchor: ANCHOR, claimTitle: CLAIM }] }], noFlowClaims: [] }
-    const keys = [extractSessionCacheKey(doc), flowsSessionCacheKey(area)]
-    await setCacheEntry(root, EXTRACT_SESSION_CACHE_NAME, keys[0], extract)
-    await setCacheEntry(root, FLOWS_SESSION_CACHE_NAME, keys[1], flows)
+    const keys = [flowsSessionCacheKey(area)]
+    await setCacheEntry(root, FLOWS_SESSION_CACHE_NAME, keys[0], flows)
     const f = authoringFixture(); const catalog = createAuthorCatalog(f.interfaces, f.resources)
     buildAuthorUserPrompt({ ...f.context, webSetupCandidates: catalog.candidates([f.own], 'organisation') })
     const calls = vi.fn(() => { throw new Error('Warm upstream cache must never call a provider') })
     const { driver } = stubDriver(calls)
     const acquire = vi.fn(async () => ({ driver, persistence: memoryPersistence().persistence }))
     const seams = createGuardGenerateSessionSeams({ repoRoot: root, driver: acquire })
-    expect((await seams.extractSession({ docs: [doc], prerequisiteTargets: [] })).summary).toMatchObject({ ran: 0, fromCache: 1 })
     expect((await seams.flowsAreaSession({ areas: [area], docs: [doc] })).summary).toMatchObject({ ran: 0, fromCache: 1 })
     expect(calls).not.toHaveBeenCalled()
     expect(acquire).not.toHaveBeenCalled()
-    expect([extractSessionCacheKey(doc), flowsSessionCacheKey(area)]).toEqual(keys)
+    expect([flowsSessionCacheKey(area)]).toEqual(keys)
   })
   it('classifies valid, invalid, missing and deterministic no-call matching pairs individually', async () => {
     const root = makeTempRepo(); roots.push(root)
@@ -203,7 +198,7 @@ describe('author-only changes retain upstream cache compatibility', () => {
     await runGenerate({
       repoRoot: root,
       interfaces: interfacesOf(root, home),
-      extractSession: extractSessionBy({ home: [{ driver: 'web' }] }),
+      claims: claimsBy({ home: [{ driver: 'web' }] }),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         tasks.push(task)
         return { kind: 'outcome', outcome: { kind: 'blocked', perMilestone: [{ order: 1, capability: 'credentials' }] } }

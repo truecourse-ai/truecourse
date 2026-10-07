@@ -1,30 +1,10 @@
 /**
- * The guard-generate session kinds: claim extraction and flow synthesis as agent
+ * The guard-generate session kinds: flow synthesis and the flow workers as agent
  * sessions, plus the seam factory the command adapter injects into
  * `generateGuards`. The key builders and prompt fingerprints are exported for
  * the estimate, which must probe the REAL keys.
  */
 
-export {
-  EXTRACT_SESSION_KIND,
-  EXTRACT_SESSION_CACHE_NAME,
-  EXTRACT_SESSION_BUDGET,
-  EXTRACT_SESSION_SYSTEM_PROMPT,
-  EXTRACT_SESSION_PROMPT_FINGERPRINT,
-  EXTRACT_STAGE_VERSION,
-  extractSessionCacheKey,
-  extractSessionLegacyCacheKey,
-  extractSessionCacheKeyForContentHash,
-  extractSessionLegacyCacheKeyForContentHash,
-  extractDocContentHash,
-  extractSessionWorkItem,
-  extractSessionDef,
-  extractContextSchema,
-  extractSessionBriefing,
-  validateExtractDraft,
-  priorExtractionLines,
-  type ExtractSessionInput,
-} from './extract.js'
 
 export {
   FLOWS_SESSION_KIND,

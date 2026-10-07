@@ -48,7 +48,6 @@ import {
   LEGACY_RETIRED_FLOWS_PROMPT_FINGERPRINT,
   LEGACY_RETIRED_FLOWS_EPIC_PROMPT_FINGERPRINT,
 } from './legacy-prompt-fingerprints.js'
-import { readSuppressionIndex, suppressedQuotesIn, suppressionKey } from './suppression.js'
 import { buildOperationIndex, matchedSchemaFingerprint } from './openapi-enrich.js'
 import { securityFingerprintForSection } from './openapi-security.js'
 import { corpusFilePath } from '@truecourse/shared/work-tree'
@@ -71,15 +70,6 @@ export interface SectionInput {
   fullText: string
   /** Canonical area ids the doc covers, from the corpus (empty when no corpus). */
   areaTags: string[]
-  /**
-   * Content key over this section's stale-suppressed quotes: the losing side of a
-   * side-verdict resolution whose disputed sentence lives in this section. Folded
-   * into {@link sectionInputsKey} so a newly-suppressed (or un-suppressed) section
-   * re-detects as WORK and re-extracts freshly. Empty (`''`) when nothing is
-   * suppressed here — the section's inputs hash is then the fingerprint alone, so
-   * unaffected sections keep their manifest entry.
-   */
-  suppressionFingerprint: string
   /**
    * Content key over the OpenAPI write-op request schemas this (markdown) section's
    * prose references. Folded into {@link sectionInputsKey} and the authoring cache
@@ -115,10 +105,6 @@ export interface GuardWorkPlan {
   recipeFingerprint: string
   /** True when `recipe.json` is absent (discovery will run). */
   recipeMissing: boolean
-  /** Losing doc → its stale-suppressed quotes; the extraction stage injects these
-   *  so a resolved dispute's loser yields no claims. Empty when no side verdict
-   *  currently suppresses anything. */
-  suppressionIndex: Map<string, string[]>
   /** OpenAPI doc → its `servers` base path (`/api/v1`), for base-path-aware prose→op
    *  matching. Absent/`''` for base-path-less specs. The generator reuses this map
    *  so its own operation index matches identically to the plan's. */
@@ -174,20 +160,17 @@ export function corpusOpenApiDocs(repoRoot: string): { doc: string; content: str
 
 /**
  * ONE section's content key, as the flow hash folds it: the section-text
- * fingerprint plus the three inputs a scenario depends on that the text itself
- * cannot see — the stale quotes a conflict verdict suppresses, the OpenAPI write-op
- * request schema its prose references, and a secured operation's resolved security
- * context. Each is appended ONLY when non-empty, so an unaffected section's key is
- * exactly its fingerprint.
+ * fingerprint plus the two inputs a scenario depends on that the text itself
+ * cannot see — the OpenAPI write-op request schema its prose references, and a
+ * secured operation's resolved security context. Each is appended ONLY when
+ * non-empty, so an unaffected section's key is exactly its fingerprint.
  */
 export function sectionInputsKey(section: {
   fingerprint: string
-  suppressionFingerprint?: string
   endpointSchemaFingerprint?: string
   securityFingerprint?: string
 }): string {
   const parts = [section.fingerprint]
-  if (section.suppressionFingerprint) parts.push(section.suppressionFingerprint)
   if (section.endpointSchemaFingerprint) parts.push(section.endpointSchemaFingerprint)
   if (section.securityFingerprint) parts.push(section.securityFingerprint)
   return parts.join('|')
@@ -392,10 +375,6 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
   const hasUniverse = hasGuardUniverse(repoRoot)
   const { indexes } = indexRepoDocs(repoRoot, [])
   const areaTags = readCorpusAreaTags(repoRoot)
-  // Conflict verdicts: losing doc → stale quotes. A section carrying a
-  // suppressed quote gets a non-empty suppressionFingerprint, which re-keys ONLY that
-  // section (unaffected sections stay byte-identical).
-  const suppressionIndex = readSuppressionIndex(repoRoot)
 
   const sections: SectionInput[] = []
   // The parsed OpenAPI doc per doc (null for markdown), reused to stamp each operation
@@ -412,7 +391,6 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
       if (base) basePaths.set(doc, base)
     }
     const texts = extractSectionTexts(doc, content, nodeRefContext(repoRoot, doc))
-    const docQuotes = suppressionIndex.get(doc) ?? []
     for (const s of index.sections) {
       const t = texts.get(s.anchor)
       const fullText = t?.fullText ?? ''
@@ -425,7 +403,6 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
         ownText: t?.ownText ?? '',
         fullText,
         areaTags: areaTags.get(doc) ?? [],
-        suppressionFingerprint: suppressionKey(suppressedQuotesIn(fullText, docQuotes)),
         // Both fingerprints are stamped below (endpoint one needs the cross-doc index).
         endpointSchemaFingerprint: '',
         securityFingerprint: '',
@@ -473,33 +450,30 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
 
   const orphaned = manifestSections.filter((e) => !seen.has(`${e.doc}\0${e.anchor}`))
 
-  return { hasUniverse, sections, work, orphaned, recipeFingerprint: recipeFp, recipeMissing, suppressionIndex, basePaths }
+  return { hasUniverse, sections, work, orphaned, recipeFingerprint: recipeFp, recipeMissing, basePaths }
 }
 
-/** One work document fed to extraction: its full text plus ALL its sections. */
+/** One document of the universe: its full text plus ALL its sections. */
 export interface GuardDoc {
   /** Repo-relative doc path. */
   doc: string
-  /** The document's full text — the extraction input (chunked when over budget). */
+  /** The document's full text. */
   content: string
   /** Every section of the doc, in document order — the outline + snapping set. */
   sections: SectionInput[]
-  /**
-   * This doc's stale-suppressed quotes, when it is the losing side of a side
-   * verdict. Extraction injects a "resolved stale — extract no claim asserting
-   * this" block for the quotes present in each view, so the loser's disputed claim
-   * is never authored. Empty ⇒ extraction is byte-identical to an unsuppressed doc.
-   */
-  suppressedQuotes: string[]
 }
 
 /**
- * The documents that contain at least one WORK (changed/new) section — the unit
- * extraction reads. Each carries its full text and ALL its sections (the outline
- * the model picks anchors from), even the unchanged ones; the caller filters
- * extracted claims down to the work sections. Sections come straight from the
- * plan, so their anchors/fingerprints match what a run binds against.
+ * The documents that contain at least one WORK (changed/new) section. Each
+ * carries its full text and ALL its sections (the outline the flows sessions
+ * read), even the unchanged ones. Sections come straight from the plan, so
+ * their anchors/fingerprints match what a run binds against.
  */
+/** `sha256` hex over a document's text, the key the manifest remembers a document by. */
+export function docContentHash(content: string): string {
+  return createHash('sha256').update(content).digest('hex')
+}
+
 export function collectWorkDocs(repoRoot: string, plan: GuardWorkPlan): GuardDoc[] {
   const workDocs = new Set(plan.work.map((s) => s.doc))
   const byDoc = new Map<string, SectionInput[]>()
@@ -513,6 +487,5 @@ export function collectWorkDocs(repoRoot: string, plan: GuardWorkPlan): GuardDoc
     doc,
     content: fs.readFileSync(path.resolve(repoRoot, doc), 'utf-8'),
     sections,
-    suppressedQuotes: plan.suppressionIndex.get(doc) ?? [],
   }))
 }

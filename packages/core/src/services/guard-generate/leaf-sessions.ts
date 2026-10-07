@@ -31,18 +31,13 @@
 import { defineSessionKind, type SessionDriver, type SessionPersistence } from '@truecourse/agent-loop'
 import { z } from 'zod'
 import {
-  CLAIM_DIFF_SYSTEM_PROMPT,
-  ClaimDiffSchema,
   MATCH_SYSTEM_PROMPT,
   RealizationMatchSchema,
   WORLD_CLASSIFY_SYSTEM_PROMPT,
   WorldClassifySchema,
-  buildClaimDiffUserPrompt,
   buildMatchCatalogPrompt,
   buildMatchTaskPrompt,
   buildWorldClassifyUserPrompt,
-  type ClaimDiff,
-  type ClaimDiffRunner,
   type MatchRunner,
   type WorldClassify,
   type WorldClassifyRunner,
@@ -51,7 +46,6 @@ import { createLeafSessionSeam, type LeafSessionSeam } from '../agent/leaf-sessi
 import { withOutcomeDelivery } from '../agent/one-turn.js'
 
 export const MATCH_SESSION_KIND = 'guard-generate.match'
-export const CLAIM_DIFF_SESSION_KIND = 'guard-generate.claim-diff'
 export const WORLD_CLASSIFY_SESSION_KIND = 'guard-generate.world-classify'
 
 const MATCH_SESSION = defineSessionKind({
@@ -61,7 +55,6 @@ const MATCH_SESSION = defineSessionKind({
   outcomeSchema: z.unknown(),
   outcomeInputSchema: RealizationMatchSchema,
 })
-const CLAIM_DIFF_SESSION = defineSessionKind({ kind: CLAIM_DIFF_SESSION_KIND, outcomeSchema: ClaimDiffSchema })
 const WORLD_CLASSIFY_SESSION = defineSessionKind({ kind: WORLD_CLASSIFY_SESSION_KIND, outcomeSchema: WorldClassifySchema })
 
 /** The driver + journal a leaf session runs on, built on first use. */
@@ -72,7 +65,6 @@ export type AcquireLeafSession = () => Promise<{
 
 export interface LeafSessionSeams {
   matchRunner: MatchRunner
-  claimDiffRunner: ClaimDiffRunner
   worldClassifyRunner: WorldClassifyRunner
   /** What each leaf kind did — folded into the run's LLM-failure accounting. */
   summaries(): readonly ReturnType<LeafSessionSeam['summary']>[]
@@ -96,7 +88,6 @@ export function createGuardGenerateLeafSessions(opts: CreateLeafSessionsOptions)
     })
 
   const match = seamFor(MATCH_SESSION_KIND)
-  const claimDiff = seamFor(CLAIM_DIFF_SESSION_KIND)
   const worldClassify = seamFor(WORLD_CLASSIFY_SESSION_KIND)
 
   return {
@@ -117,18 +108,6 @@ export function createGuardGenerateLeafSessions(opts: CreateLeafSessionsOptions)
         briefing: buildMatchTaskPrompt(ctx),
       }),
 
-    claimDiffRunner: (section) =>
-      claimDiff.ask<ClaimDiff>({
-        session: {
-          ...CLAIM_DIFF_SESSION,
-          title: 'Claim diff',
-          systemPrompt: withOutcomeDelivery(CLAIM_DIFF_SYSTEM_PROMPT),
-          tokenCeiling: 100_000,
-        },
-        workItem: `${section.doc}#${section.anchor}`,
-        briefing: buildClaimDiffUserPrompt(section),
-      }),
-
     worldClassifyRunner: (flows) =>
       worldClassify.ask<WorldClassify>({
         session: {
@@ -141,6 +120,6 @@ export function createGuardGenerateLeafSessions(opts: CreateLeafSessionsOptions)
         briefing: buildWorldClassifyUserPrompt(flows),
       }),
 
-    summaries: () => [match.summary(), claimDiff.summary(), worldClassify.summary()],
+    summaries: () => [match.summary(), worldClassify.summary()],
   }
 }

@@ -131,7 +131,6 @@ import {
 import type { ScanStep } from '../spec-scan/run.js';
 import {
   planGuardWork,
-  bindClaimPrerequisites,
   partitionFlowPrerequisites,
   flowInvocationGaps,
   buildServerRouteIndex,
@@ -155,7 +154,11 @@ import {
   legacySeedStepFingerprint,
   authFingerprint,
   collectWorkDocs,
-  snapExtraction,
+  claimAreaInputs,
+  docTreesOf,
+  placeClaims,
+  readSpecClaims,
+  readSuppressedClaims,
   readCorpusAreaTags,
   buildFlowAreas,
   buildSurfaceCatalogs,
@@ -185,14 +188,6 @@ import {
   type SurfaceCatalog,
 } from '@truecourse/guard-generator';
 import {
-  EXTRACT_SESSION_BUDGET,
-  EXTRACT_SESSION_CACHE_NAME,
-  EXTRACT_SESSION_KIND,
-  EXTRACT_SESSION_SYSTEM_PROMPT,
-  extractSessionBriefing,
-  extractContextSchema,
-  extractSessionCacheKey,
-  extractSessionLegacyCacheKey,
   FLOWS_SESSION_BUDGET,
   FLOWS_SESSION_CACHE_NAME,
   FLOWS_SESSION_KIND,
@@ -220,7 +215,6 @@ import {
   violatesSettleInvariant,
   type GuardSetupTaxonomyKey,
   dismissedClaimKey,
-  ExtractOutcomeSchema,
   type GuardDriverId,
   type GuardFlow,
 } from '@truecourse/shared';
@@ -312,7 +306,6 @@ const STAGE_LABELS: Record<string, string> = {
   // guard generate — the pooled kinds, and the two one-TURN ones
   guardRecipe: 'Discovering recipe',
   guardMatch: 'Matching flows',
-  [EXTRACT_SESSION_KIND]: 'Extracting claims',
   [FLOWS_SESSION_KIND]: 'Synthesizing flows',
   [FLOW_WORKER_SESSION_KIND]: 'Working flows',
   [FIDELITY_SESSION_KIND]: 'Reviewing fidelity',
@@ -343,7 +336,6 @@ const EXPECTED_TURNS: Record<string, number> = {
   [PREPARATION_SESSION_KIND]: 12,
   // guard generate — PROVISIONAL, to re-ground on transcript
   // data once a few session-era generates have run.
-  [EXTRACT_SESSION_KIND]: 3,
   [FLOWS_SESSION_KIND]: 4,
   [FLOW_WORKER_SESSION_KIND]: 8,
   [FIDELITY_SESSION_KIND]: 1,
@@ -372,7 +364,6 @@ const SESSION_OUTPUT_TOKENS: Record<string, number> = {
   'guard-setup.preparation-observations': 2_000,
   [PREPARATION_SESSION_KIND]: 5_000, // Multiple seed/verification scripts form the final outcome.
   // guard generate — provisional.
-  [EXTRACT_SESSION_KIND]: 1500, // the outcome carries a doc's whole claim set
   [FLOWS_SESSION_KIND]: 1200, // an area's flows + no-flow reasons
   [FLOW_WORKER_SESSION_KIND]: 700, // ~one scenario YAML per run/submit turn
   [FIDELITY_SESSION_KIND]: 60, // a verdict + a one-sentence mismatch
@@ -906,155 +897,81 @@ const GUARD_MATCH_OUTPUT_TOKENS = 300; // ~a plan over a handful of milestones
 // A worker briefing carries every milestone's section text once; sections
 // average this much when the corpus isn't readable offline.
 const GUARD_MILESTONES_PER_FLOW = 3; // rough milestones a synthesized flow carries
-// Cold-cache fallback for an extract-session briefing (outline + first chunk).
-const GUARD_EXTRACT_BRIEFING_FALLBACK_CHARS = 14_000;
 
-/** The extract + flows SESSION stages' planned work — see {@link planGuardSessionStages}. */
+/** The flows SESSION stage's planned work — see {@link planGuardSessionStages}. */
 interface GuardSessionWorkPlan {
-  /** Cache-missing `guard-generate.extract` sessions (one per doc). Exact —
-   *  probed against the run's own `guard/extract-session` keys. */
-  extractItems: number;
-  /** Docs in the universe (the extract pool's denominator). */
-  extractDocs: number;
-  /** Mean briefing chars across the extract misses (0 when none). */
-  extractBriefingChars: number;
-  /** Per-area `guard-generate.flows` sessions (exact when `exact`; one per
-   *  changed area otherwise). */
+  /** Per-area `guard-generate.flows` sessions whose cache entry misses. */
   areaCalls: number;
   /** Epic-session ceiling: 1 when more than one area can yield flows, else 0. */
   epicCalls: number;
   /** Average briefing chars one area session carries. */
   areaChars: number;
-  /** Source-obligation count for the pre-synthesis estimate (0 when unknown); not a guaranteed flow ceiling. */
+  /** Source-obligation count for the pre-synthesis estimate; not a guaranteed flow ceiling. */
   maxFlows: number;
-  /** True when the claim inventory was knowable offline (every extract-session
-   *  entry cached) and the REAL flows keys were probed. */
+  /** Always true: the claim inventory is the scan's, known offline, so the REAL flows keys are probed. */
   exact: boolean;
 }
 
 /**
- * Plan the extract + flows SESSION stages. Extraction is exact by
- * construction: one session per doc, probed
- * against the run's own `guard/extract-session` cache with the run's own key
- * builder. Flow synthesis is exact whenever EVERY doc's extraction is cached:
- * the claim inventory is then known offline, so this reconstructs the SAME
- * filtered claim set the run feeds synthesis (snap → dismissals → runnable →
- * driver-prepared), groups the SAME areas, and probes the SAME `guard/flows`
- * session keys. A doc not yet extracted degrades the flows count to one call
- * per area with a changed section — what a cold run pays.
+ * Plan the flows SESSION stage. The claim inventory is what the scan read,
+ * materialized as `specs/claims.json`, so this reconstructs the SAME filtered
+ * claim set the run feeds synthesis (placed in the live documents, dismissals
+ * dropped, testable only), groups the SAME areas, and probes the SAME
+ * `guard/flows` session keys.
  */
 async function planGuardSessionStages(repoRoot: string, plan: GuardWorkPlan): Promise<GuardSessionWorkPlan> {
   // A generate with no changed section returns before any stage runs, so zero
   // sessions is exact — not an under-count.
   if (plan.work.length === 0) {
-    return { extractItems: 0, extractDocs: 0, extractBriefingChars: 0, areaCalls: 0, epicCalls: 0, areaChars: 0, maxFlows: 0, exact: true };
+    return { areaCalls: 0, epicCalls: 0, areaChars: 0, maxFlows: 0, exact: true };
   }
   const areaTags = readCorpusAreaTags(repoRoot);
-  const recipe = loadRecipe(repoRoot, recipePath(repoRoot))?.recipe;
-  const prerequisites = resolvePrerequisites(repoRoot, recipe?.api?.externals);
   // An area's synthesis reads ALL its claims, so the estimate needs every document
   // of the universe — not only the ones with a changed section.
   const docs = collectWorkDocs(repoRoot, { ...plan, work: plan.sections });
-
-  // The run's own claim gates, reproduced so the flows keys hash the same
-  // inventory: dismissed claims drop, only runnable claims on a PREPARED driver
-  // enter synthesis (see the extraction fold in `generateGuards`).
-  const dismissed = new Set(
-    readGuardDecisions(repoRoot).dismissedClaims.map((d) => dismissedClaimKey(d.doc, d.anchor, d.title)),
+  const dismissals = new Map(
+    readGuardDecisions(repoRoot).dismissedClaims.map((d) => [dismissedClaimKey(d.doc, d.anchor, d.title), d] as const),
   );
-  const preparedSet = new Set(preparedSurfaces(repoRoot));
+  const docSet = new Set(docs.map((d) => d.doc));
+  const treeOf = docTreesOf(repoRoot, docSet);
+  const placed = placeClaims(
+    (readSpecClaims(repoRoot)?.claims ?? []).filter((c) => docSet.has(c.doc)),
+    (doc) => (docSet.has(doc) ? treeOf(doc) : null),
+  ).placed;
+  const { inputs } = claimAreaInputs({
+    docs,
+    placed,
+    areaTagsByDoc: areaTags,
+    dismissals,
+    suppressed: new Set(readSuppressedClaims(repoRoot).map((s) => `${s.doc}\0${s.sentence}`)),
+  });
 
-  let extractItems = 0;
-  const missBriefingChars: number[] = [];
-  const inputs: FlowAreaDocInput[] = [];
-  let inventoryKnown = true;
-  for (const doc of docs) {
+  const areas = buildFlowAreas(inputs);
+  let areaCalls = 0;
+  for (const area of areas) {
     const cached = await probeSessionCache(
       repoRoot,
-      EXTRACT_SESSION_CACHE_NAME,
-      extractSessionCacheKey(doc, prerequisites.targets),
-      extractContextSchema(prerequisites.targets),
-      extractSessionLegacyCacheKey(doc, prerequisites.targets),
+      FLOWS_SESSION_CACHE_NAME,
+      flowsSessionCacheKey(area),
+      FlowSetSchema,
+      flowsSessionLegacyCacheKey(area),
     );
-    if (!cached) {
-      extractItems++;
-      missBriefingChars.push(extractSessionBriefing(doc, prerequisites.targets).length);
-      inventoryKnown = false;
-      continue;
-    }
-    // The fold re-snap, exactly as the seam applies it — the cache holds the
-    // raw outcome (model anchors), never a pre-snapped one.
-    const snapped = snapExtraction(cached, doc.sections);
-    const live: FlowClaimInput[] = [];
-    for (const c of snapped.claims) {
-      if (dismissed.has(dismissedClaimKey(doc.doc, c.sectionAnchor, c.claim))) continue;
-      if (![c.driver, ...(c.alternativeDrivers ?? [])].some((driver) => isRunnableDriver(driver) && preparedSet.has(driver))) continue;
-      live.push({
-        doc: doc.doc,
-        anchor: c.sectionAnchor,
-        title: c.claim,
-        ...(c.verification ? { verification: bindClaimPrerequisites(c.verification, c.needs ?? [], prerequisites.targets) } : {}),
-        driver: c.driver,
-        ...(c.alternativeDrivers ? { alternativeDrivers: c.alternativeDrivers } : {}),
-        ...(c.needs && c.needs.length > 0 ? { needs: c.needs } : {}),
-      });
-    }
-    inputs.push({
-      doc: doc.doc,
-      areaTags: areaTags.get(doc.doc) ?? [],
-      outline: doc.sections.map((s) => ({ anchor: s.anchor, headingText: s.headingText, level: s.level })),
-      untestable: snapped.untestable.map((u) => ({ anchor: u.sectionAnchor, reason: u.reason })),
-      claims: live,
-    });
+    if (!cached) areaCalls++;
   }
-  const extractBriefingChars =
-    mean(missBriefingChars) || (extractItems > 0 ? GUARD_EXTRACT_BRIEFING_FALLBACK_CHARS : 0);
-
-  if (inventoryKnown) {
-    const areas = buildFlowAreas(inputs);
-    let areaCalls = 0;
-    for (const area of areas) {
-      const cached = await probeSessionCache(
-        repoRoot,
-        FLOWS_SESSION_CACHE_NAME,
-        flowsSessionCacheKey(area),
-        FlowSetSchema,
-        flowsSessionLegacyCacheKey(area),
-      );
-      if (!cached) areaCalls++;
-    }
-    const areasWithClaims = areas.filter((a) => a.claims.length > 0).length;
-    const chars = areas.map(
-      (a) =>
-        a.claims.reduce((n, c) => n + c.doc.length + c.anchor.length + c.title.length + 40, 0) +
-        a.docs.reduce((n, d) => n + d.outline.reduce((m, e) => m + e.anchor.length + e.headingText.length + 6, 0), 0),
-    );
-    return {
-      extractItems,
-      extractDocs: docs.length,
-      extractBriefingChars,
-      areaCalls,
-      // The epic key hashes the area sessions' OUTPUT digests — unknowable
-      // offline — so the epic session is always quoted as its 0..1 ceiling.
-      epicCalls: areasWithClaims > 1 ? 1 : 0,
-      areaChars: chars.length ? Math.round(chars.reduce((n, c) => n + c, 0) / chars.length) : 0,
-      maxFlows: areas.reduce((n, a) => n + a.claims.reduce((count, claim) => count + Math.max(claim.verification?.cases?.length ?? 1, 1), 0), 0),
-      exact: true,
-    };
-  }
-
-  const areaOf = (doc: string) => flowAreaIdForDoc(doc, areaTags.get(doc) ?? []);
-  const changedAreas = new Set(plan.work.map((s) => areaOf(s.doc)));
-  const allAreas = new Set(plan.sections.map((s) => areaOf(s.doc)));
+  const areasWithClaims = areas.filter((a) => a.claims.length > 0).length;
+  const chars = areas.map(
+    (a) =>
+      a.claims.reduce((n, c) => n + c.doc.length + c.anchor.length + c.title.length + 40, 0) +
+      a.docs.reduce((n, d) => n + d.outline.reduce((m, e) => m + e.anchor.length + e.headingText.length + 6, 0), 0),
+  );
   return {
-    extractItems,
-    extractDocs: docs.length,
-    extractBriefingChars,
-    areaCalls: changedAreas.size,
-    epicCalls: allAreas.size > 1 ? 1 : 0,
-    areaChars: GUARD_FLOWS_AREA_CHARS,
-    maxFlows: 0,
-    exact: false,
+    areaCalls,
+    // The epic key hashes the area sessions' OUTPUT digests — unknowable
+    // offline — so the epic session is always quoted as its 0..1 ceiling.
+    epicCalls: areasWithClaims > 1 ? 1 : 0,
+    areaChars: chars.length ? Math.round(chars.reduce((n, c) => n + c, 0) / chars.length) : 0,
+    maxFlows: areas.reduce((n, a) => n + a.claims.reduce((count, claim) => count + Math.max(claim.verification?.cases?.length ?? 1, 1), 0), 0),
+    exact: true,
   };
 }
 
@@ -1734,20 +1651,9 @@ export async function estimateGuardTokens(
       avgInputTokens: tokensFromChars(RECIPE_SYSTEM_PROMPT.length, 2000),
       avgOutputTokens: 120,
     },
-    // Claim extraction: one `guard-generate.extract` session per doc whose
-    // per-doc `guard/extract-session` entry misses — exact (the run's own keys).
-    sessionKindStage({
-      kind: EXTRACT_SESSION_KIND,
-      model,
-      items: sessions.extractItems,
-      budget: EXTRACT_SESSION_BUDGET,
-      systemPromptChars: EXTRACT_SESSION_SYSTEM_PROMPT.length,
-      briefingChars: sessions.extractBriefingChars,
-      bound: `${sessions.extractItems} of ${sessions.extractDocs} doc${sessions.extractDocs === 1 ? '' : 's'} changed`,
-    }),
     // Flow synthesis: one session per area whose claim inventory changed, plus
     // at most one epic session (its key hashes the areas' OUTPUT digests, so it
-    // is always a 0..1 range). Exact whenever the extract-session cache is warm.
+    // is always a 0..1 range). Exact: the claim inventory is the scan's.
     sessionKindStage({
       kind: FLOWS_SESSION_KIND,
       model,
@@ -1826,7 +1732,6 @@ export async function estimateGuardTokens(
 
 /** Which priced stages each `only` step actually runs. */
 const GENERATE_STEP_STAGES: Record<GenerateStep, readonly string[]> = {
-  extract: [EXTRACT_SESSION_KIND],
   flows: [FLOWS_SESSION_KIND],
   // The fidelity judge is a depth-1 CHILD of a worker session, so it prices with
   // the worker step rather than carrying a flag of its own.

@@ -49,7 +49,6 @@ const MODULES = [
   'packages/core/src/services/guard-adjudicate/control.ts',
   'packages/core/src/services/guard-adjudicate/session.ts',
   'packages/core/src/services/guard-adjudicate/tools.ts',
-  'packages/core/src/services/guard-generate/extract.ts',
   'packages/core/src/services/guard-generate/fidelity.ts',
   'packages/core/src/services/guard-generate/flow-worker.ts',
   'packages/core/src/services/guard-generate/flows.ts',

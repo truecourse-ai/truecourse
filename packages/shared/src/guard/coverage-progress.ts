@@ -21,14 +21,16 @@ export function guardCoverageProgress(
   const required = milestones.flatMap<GuardObligation>(m => m.verification?.cases?.length
     ? m.verification.cases.map(c => ({ milestone: m.order, caseId: c.id, claim: c.claim }))
     : [{ milestone: m.order, claim: m.claimTitle }])
+  // A milestone naming proof drivers is proved only on one of them; one
+  // naming none is proved by any surface's assertion.
   const covered = (o: GuardObligation, proof: readonly GuardMilestoneProof[]) => {
     const m = milestones.find(m => m.order === o.milestone)!
-    return !!m.proofDrivers?.length && proof.some(p => p.milestone === o.milestone &&
-      m.proofDrivers!.includes(p.driver) && (o.caseId === undefined || p.checks?.includes(o.caseId)))
+    return proof.some(p => p.milestone === o.milestone &&
+      (!m.proofDrivers?.length || m.proofDrivers.includes(p.driver)) && (o.caseId === undefined || p.checks?.includes(o.caseId)))
   }
   const outstanding = required.filter(o => !covered(o, authoredProof))
   const passing = required.filter(o => covered(o, passingProof))
-  const known = milestones.length > 0 && milestones.every(m => !!m.proofDrivers?.length)
+  const known = milestones.length > 0
   return { required, outstanding, authored: required.filter(o => covered(o, authoredProof)), passing,
     complete: known && outstanding.length === 0, known }
 }

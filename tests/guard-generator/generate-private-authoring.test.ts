@@ -10,6 +10,7 @@ import {
   makeTempRepo, rmrf, writeApiRecipe, writeCorpus, writeDoc, extractSessionBy,
   interfacesOf, apiInterface, rawApi, PASSING_API_STEPS, runGenerate,
   scenarioYaml, stampMilestones, sessionSummary, FIXTURE_API_SERVER,
+  claimsBy,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -37,7 +38,7 @@ function seed() {
   return r
 }
 
-const extraction = () => extractSessionBy({
+const extraction = () => claimsBy({
   list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status + body' }],
 })
 
@@ -55,7 +56,7 @@ describe('prepared mutator execution boundary', () => {
       })) } } as never
     }
     const result = await runGenerate({
-      repoRoot: r, executor, extractSession: extraction(),
+      repoRoot: r, executor, claims: extraction(),
       interfaces: interfacesOf(r, apiInterface('GET', '/todos')),
       worldClassifyRunner: async flows => ({ mutators: flows.map(f => f.id) }),
       flowWorkerSession: async ({ tasks, epicTasks, preparedMutatorTasks = [], mutatorTasks }) => {
@@ -109,7 +110,7 @@ describe('prepared mutator execution boundary', () => {
     const r = seed()
     let invocations = 0
     await runGenerate({
-      repoRoot: r, extractSession: extraction(),
+      repoRoot: r, claims: extraction(),
       interfaces: interfacesOf(r, apiInterface('GET', '/todos')),
       worldClassifyRunner: async flows => ({ mutators: flows.map(f => f.id) }),
       flowWorkerSession: async ({ preparedMutatorTasks = [], mutatorTasks }) => {

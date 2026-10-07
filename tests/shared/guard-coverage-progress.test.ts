@@ -26,6 +26,8 @@ describe('required obligation progress', () => {
     expect(guardCoverageProgress(milestones, []).outstanding).toHaveLength(10)
     expect(guardCoverageProgress([], []).complete).toBe(false)
     const { proofDrivers, ...legacy } = milestones[0]
-    expect(guardCoverageProgress([legacy], [{ milestone: 1, driver: 'web', checks: ['case-0'] }])).toMatchObject({ known: false, complete: false, authored: [] })
+    // A milestone naming no proof drivers is proved by any surface's assertion.
+    expect(guardCoverageProgress([legacy], [{ milestone: 1, driver: 'web', checks: ['case-0'] }])).toMatchObject({ known: true, complete: false })
+    expect(guardCoverageProgress([legacy], [{ milestone: 1, driver: 'web', checks: ['case-0'] }]).authored).toHaveLength(1)
   })
 })

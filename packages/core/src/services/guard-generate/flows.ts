@@ -35,7 +35,7 @@
 import { createHash } from 'node:crypto'
 import { LEGACY_FLOWS_SESSION_PROMPT_FINGERPRINT, LEGACY_FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import { defineSessionKind, defineToolSpec, type SessionBudget, type SessionDef, type SessionTool } from '@truecourse/agent-loop'
-import { isRunnableDriver, type GuardFlow, type GuardNoFlowClaim } from '@truecourse/shared'
+import type { GuardFlow, GuardNoFlowClaim } from '@truecourse/shared'
 import {
   FlowSetSchema,
   EpicSynthesisSchema,
@@ -112,12 +112,12 @@ A flow with no \`id\` is NEW. Emit one only for a journey no existing flow is. N
 The EXISTING NO-FLOW DECISIONS are reconciled the same way: a claim that already carries one comes back in \`noFlowClaims\` with that decision's reason verbatim, unless you now place it in a flow — the milestone is the account. Never drop one in silence; \`check_flows\` refuses that too.
 
 # Coverage honesty — the rule you are graded on
-Every case of a claim marked \`account: required\` MUST appear in a milestone selection or a scoped \`noFlowClaims\` selection. Claims without cases are indivisible. No source obligation may be both assigned and marked no-flow. Never silently drop one. A claim MAY appear in more than one flow when it genuinely belongs to both. Claims marked \`account: optional\` sit on surfaces with no test runner today: use one as a milestone when it truly belongs to the path, but you never have to account for it.
+Every case of every claim MUST appear in a milestone selection or a scoped \`noFlowClaims\` selection. Claims without cases are indivisible. No source obligation may be both assigned and marked no-flow. Never silently drop one. A claim MAY appear in more than one flow when it genuinely belongs to both.
 Legitimate \`noFlowClaims\` reasons: the claim is an edge/error condition no user path reaches, it restates another claim, or it describes a static property rather than something a user does. "It didn't fit" is not a reason.
 
 # Tools
 - \`read_section\` — open one section of an area doc when the outline alone does not settle how claims relate. The claims themselves are already complete in the briefing.
-- \`check_flows\` — REQUIRED before you finish: call it with your complete draft. It snaps every reference, checks the coverage rule, and reports near-duplicates and unbound needs — a defect costs one turn here instead of a refused outcome at the fold. Fix what it reports, then produce the outcome.
+- \`check_flows\` — REQUIRED before you finish: call it with your complete draft. It snaps every reference, checks the coverage rule, and reports near-duplicates — a defect costs one turn here instead of a refused outcome at the fold. Fix what it reports, then produce the outcome.
 
 # The outcome
 One object with BOTH arrays, either possibly empty, plus \`retiredFlows\` when an existing flow is retired:
@@ -223,7 +223,6 @@ function renderFlowSetReport(report: FlowSetCheckReport): { content: string; isE
   const notes = [
     ...report.subsumed.map((s) => `near-duplicate: "${s.title}" is contained in "${s.supersededBy}" — the engine will drop it; emit the longest path once`),
     ...report.unbindable.map((u) => `unbindable milestone (its section is not in the live index): ${u}`),
-    ...report.unboundNeeds.map((n) => `unbound need: ${n}`),
   ]
   if (refusals.length > 0) {
     const lines = [`${refusals.length} problem(s) that would refuse the outcome:`, ...refusals.map((r) => `- ${r}`)]
@@ -239,14 +238,12 @@ function renderFlowSetReport(report: FlowSetCheckReport): { content: string; isE
 export interface FlowsCheckerContext {
   /** Live {@link flowSectionKey}s (doc\0anchor) across the run's sections. */
   sectionKeys: ReadonlySet<string>
-  /** Dependency-catalog entry names, for the needs-binding observation. */
-  catalogNames: ReadonlySet<string>
 }
 
 const CHECK_FLOWS = defineToolSpec({
   name: 'check_flows',
   description:
-    "Check a draft flow set against the engine's rules — every milestone must snap onto a given claim, every required claim must be accounted for, and near-duplicates / unbound needs are reported. Call it on your complete draft before you produce the outcome.",
+    "Check a draft flow set against the engine's rules — every milestone must snap onto a given claim, every required claim must be accounted for, and near-duplicates are reported. Call it on your complete draft before you produce the outcome.",
   kind: 'check-flow-set',
   readOnly: true,
   destructive: false,
@@ -264,7 +261,6 @@ function checkFlowsTool(
       const report = checkFlowSet(args, {
         area,
         sectionKeys: checker.sectionKeys,
-        catalogNames: checker.catalogNames,
         prior,
         priorNoFlow,
       })
@@ -364,11 +360,6 @@ export function flowsEpicSessionDef(input: FlowsEpicSessionInput): SessionDef<Ep
 }
 
 /** One claim's needs, rendered inline (`credential github-token; fixture repo`). */
-function renderNeeds(claim: FlowClaimInput): string[] {
-  if (!claim.needs || claim.needs.length === 0) return []
-  return [`needs: ${claim.needs.map((n) => `${n.kind} ${n.name}`).join('; ')}`]
-}
-
 /** The grounding block both briefings may carry (the area one does). */
 function groundingLines(grounding: FlowsSessionGrounding | undefined): string[] {
   if (!grounding) return []
@@ -446,8 +437,6 @@ export function flowsSessionBriefing(
       `anchor: ${c.anchor}`,
       `claim: ${c.title}`,
       ...(c.verification ? [`verification: ${JSON.stringify(c.verification)}`] : []),
-      `proof drivers (alternatives): ${[c.driver, ...(c.alternativeDrivers ?? [])].join(', ')}   account: ${[c.driver, ...(c.alternativeDrivers ?? [])].some(isRunnableDriver) ? 'required' : 'optional'}`,
-      ...renderNeeds(c),
     )
   }
   lines.push(...groundingLines(grounding))

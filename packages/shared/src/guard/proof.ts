@@ -50,14 +50,19 @@ export function flowDriversToMatch(flow: { milestones: readonly GuardFlowMilesto
   return guardDriverIds.filter((driver) => flow.milestones.some((m) => m.proofDrivers!.includes(driver)))
 }
 
-/** Undefined means the older corpus has no requirements, never proof of completion. */
+/**
+ * Whether the proof covers every milestone; undefined for a flow with none. A
+ * milestone that names proof drivers is proved only on one of them; one that
+ * names none is proved by any surface's assertion, since one test writer
+ * drives every surface.
+ */
 export function coversFlowMilestones(
   milestones: readonly GuardFlowMilestone[],
   proof: readonly GuardMilestoneProof[],
 ): boolean | undefined {
-  if (milestones.length === 0 || milestones.some((m) => !m.proofDrivers)) return undefined
+  if (milestones.length === 0) return undefined
   return milestones.every(m => {
-    const accepted = proof.filter(p => p.milestone === m.order && m.proofDrivers!.includes(p.driver))
+    const accepted = proof.filter(p => p.milestone === m.order && (!m.proofDrivers?.length || m.proofDrivers.includes(p.driver)))
     return m.verification?.cases?.length
       ? m.verification.cases.every(c => accepted.some(p => p.checks?.includes(c.id)))
       : accepted.length > 0

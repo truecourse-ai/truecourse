@@ -15,7 +15,7 @@ import {
   writeDoc,
   writeCorpus,
   raw,
-  extractSessionBy,
+  claimsBy,
   runGenerate,
   submitWorkerSessions,
 } from './helpers.js'
@@ -85,7 +85,7 @@ describe('two-sided promises — the negative half SURVIVES the pipeline (G15 re
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({
+      claims: claimsBy({
         strictness: [{ claim: 'valid invocations are accepted and invalid ones are rejected' }],
       }),
       flowWorkerSession: submitWorkerSessions(() => twoSided),

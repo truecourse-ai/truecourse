@@ -25,8 +25,25 @@ import { GuardVerificationSchema } from './verification.js'
 
 import crypto from 'node:crypto'
 import { z } from 'zod'
-import { ClaimNeedSchema } from './extract-outcome.js'
 import { guardDriverIds } from './drivers.js'
+
+/** What kind of prerequisite a claim's test would need. Closed vocabulary. */
+export const ClaimNeedKindSchema = z.enum(['credential', 'fixture', 'state', 'external', 'manual'])
+export type ClaimNeedKind = z.infer<typeof ClaimNeedKindSchema>
+
+/**
+ * One structured need: the kind, a short stable name (what a dependency-catalog
+ * entry would be called — lower-kebab-case by convention, not enforced here),
+ * and an optional sentence of detail.
+ */
+export const ClaimNeedSchema = z
+  .object({
+    kind: ClaimNeedKindSchema,
+    name: z.string().min(1),
+    detail: z.string().optional(),
+  })
+  .strict()
+export type ClaimNeed = z.infer<typeof ClaimNeedSchema>
 
 /**
  * One extracted claim. Identity = `doc` + `anchor` + `title`.
