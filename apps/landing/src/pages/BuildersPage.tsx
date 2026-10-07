@@ -12,6 +12,7 @@ import { Who } from '@/builders/Who';
 import { Check } from '@/builders/icons';
 import { BuiltWith } from '@/builders/BuiltWith';
 import { useSectionViews } from '@/builders/useSectionViews';
+import { useHeroCopy } from '@/builders/heroCopy';
 import { MorningScene } from '@/builders/scenes/MorningScene';
 import { JobsChecklist } from '@/builders/scenes/JobsChecklist';
 import { EveningScene } from '@/builders/scenes/EveningScene';
@@ -122,6 +123,7 @@ function BuildersHeader() {
 
 export default function BuildersPage() {
   useSectionViews(SECTIONS);
+  const hero = useHeroCopy();
   return (
     <div className="builders">
       <BuildersHeader />
@@ -134,12 +136,11 @@ export default function BuildersPage() {
               <Reveal as="p" className="kicker" delay={20} rise>
                 For professionals who build their own apps with AI
               </Reveal>
-              <Reveal as="h1" delay={60} rise>
-                Your AI CTO
+              <Reveal as="h1" className={cn(hero.long && 'long')} delay={60} rise>
+                {hero.title}
               </Reveal>
               <Reveal as="p" className="sub" delay={140} rise>
-                Get your evenings and weekends back. It keeps your app working while you focus on your
-                business and the people you care about.
+                {hero.sub}
               </Reveal>
               <Reveal className="bs-cta-row" delay={220} rise>
                 <BookLink className="btn btn-primary" placement="hero">

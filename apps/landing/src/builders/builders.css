@@ -24,6 +24,12 @@
   letter-spacing: -0.035em;
   margin: 0;
 }
+/* A headline that repeats a longer search, set smaller so it keeps to a few lines. */
+.bs-hero h1.long {
+  font-size: clamp(38px, 4.4vw, 58px);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
 .bs-hero .sub {
   font-size: clamp(17px, 1.6vw, 21px);
   line-height: 1.5;

@@ -22,6 +22,9 @@ const SOURCE = 'landing';
 
 let initialized = false;
 
+/** Properties a page registered before PostHog started, sent with every event once it does. */
+const pending: Record<string, unknown> = {};
+
 /**
  * Initializes PostHog client analytics. Safe to call multiple times; only the
  * first call has effect. Skipped in SSR (no `window`).
@@ -39,11 +42,21 @@ export function initPostHog(): void {
     loaded: (ph) => {
       // Tag every event from this client with source=landing. Equivalent to
       // setting it on each capture, but cheaper and impossible to forget.
-      ph.register({ source: SOURCE });
+      ph.register({ source: SOURCE, ...pending });
     },
   });
 
   initialized = true;
+}
+
+/**
+ * Adds properties to every event from this visit. A page's effects run before
+ * the app's, so a call made before PostHog starts is held and applied as it
+ * loads, ahead of the first pageview.
+ */
+export function registerProperties(properties: Record<string, unknown>): void {
+  if (initialized) posthog.register(properties);
+  else Object.assign(pending, properties);
 }
 
 /** Manual pageview, called by Layout on every react-router pathname change. */
