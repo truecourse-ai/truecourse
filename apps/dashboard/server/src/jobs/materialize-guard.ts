@@ -240,10 +240,13 @@ export async function persistGuardRun(
  * session video), which attaches to that run row. A test whose run kept no
  * evidence has none stored: it held, and what it showed is what its accepted
  * run shows. `provenance` is the generate that left the run; the run job's
- * own opens no session and runs on no model. No coverage summary is written,
- * so the run stays out of Home's trend: a summary derives a flow's word from
- * its scenarios and its authored test, never from this run's outcomes, and
- * would not describe it.
+ * own opens no session and runs on no model.
+ *
+ * A run of the default branch's scope is a point of Home's trend, so its FLOW
+ * summary is written with it: every flow of the repository as this run's
+ * outcomes leave it. Its section summary is empty, since a test proves a flow
+ * and says nothing of a section. Best-effort, as every coverage summary is:
+ * the run is stored either way.
  */
 export async function persistFlowTestRun(
   ref: RepoRef,
@@ -253,6 +256,25 @@ export async function persistFlowTestRun(
 ): Promise<void> {
   const latest: GuardLatest = { ...run, run: { ...run.run, origin: 'hosted' } };
   await writeGuardLatest(ref.repoKey, latest, { scope: ref.scope, provenance });
+  if (ref.scope === undefined) {
+    try {
+      const flows = await readGuardRunFlowSummary(ref.repoKey, latest);
+      if (!flows) {
+        log.warn(
+          `[Guard] no flow summary could be derived for ${ref.repoKey} run ${latest.run.runId}; it stays out of the flow trend`,
+        );
+      }
+      await writeGuardRunCoverage(ref.repoKey, {
+        runId: latest.run.runId,
+        ranAt: latest.run.ranAt,
+        commit: latest.run.commit,
+        claims: {},
+        flows: flows ?? {},
+      });
+    } catch (err) {
+      log.warn(`[Guard] the coverage of ${ref.repoKey} run ${latest.run.runId} was not recorded: ${(err as Error).message}`);
+    }
+  }
   for (const test of latest.flowTests ?? []) {
     if (!test.run.evidencePath) continue;
     const files = collectEvidenceFiles(treeDir, test.run.evidencePath);

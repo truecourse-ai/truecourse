@@ -47,6 +47,7 @@ import {
   readGuardBaselineCommit,
   readGuardLatest,
   readGuardResult,
+  readGuardRunCoverage,
   readScenarioFile,
   saveGuardSetupBundle,
   saveScenarios,
@@ -1168,6 +1169,8 @@ describe('the guard generate job', () => {
       ['see-invoices', 'passing', 'pass'],
       ['export-invoices', 'passing', 'fail'],
     ]);
+    // The run is a point of Home's trend: its coverage is recorded with it.
+    expect(await readGuardRunCoverage(REPO)).toMatchObject([{ runId: STAGE_RUN, claims: {} }]);
     expect(await new PgGuardStore(db).readGuardEvidenceBytesAt(REPO, moved, 'step-1.png')).toEqual(PICTURE);
 
     const notes = await new NotificationStore(db).listForOrg(ORG);
