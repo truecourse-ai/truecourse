@@ -1,9 +1,8 @@
 /**
- * The Claims-tab corpus (`guard/claims`), every testable statement the specs
- * make, joined to the flows and scenario steps that prove it. A pure READ: claims
- * are extracted by `guard generate`, so the tab offers no action of its own and
- * the hook has no mutation half. Hoisted at page level so the claim list and the
- * detail pane share ONE fetch.
+ * One repository's claims (`guard/claims`), every testable statement the specs
+ * make, joined to the flows and scenario steps that prove it. A pure READ: the
+ * hook has no mutation half. Hoisted at page level so a page and its panes
+ * share ONE fetch.
  */
 
 import { useEffect, useState } from 'react';

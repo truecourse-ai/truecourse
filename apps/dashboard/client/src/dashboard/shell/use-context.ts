@@ -14,6 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
+  ContextClaimsViewResponse,
   ContextDocumentRow,
   ContextSourceKind,
   ContextSourceView,
@@ -22,6 +23,7 @@ import type {
 import {
   getContextSource,
   getContextStaleness,
+  listContextClaims,
   listContextDocuments,
   listContextSources,
 } from '@/lib/api';
@@ -72,7 +74,7 @@ export function useContextSignal(): number {
 }
 
 /** One read's state: null until the first answer lands — loading, not empty. */
-interface Read<T> {
+export interface Read<T> {
   data: T | null;
   error: string | null;
   refetch: () => Promise<void>;
@@ -172,6 +174,11 @@ export function useContextDocuments(signal: number): ContextDocumentsState {
     error: read.error,
     refetch: read.refetch,
   };
+}
+
+/** The Claims view; null until the first read lands. */
+export function useContextClaims(signal: number): Read<ContextClaimsViewResponse> {
+  return useRead(() => listContextClaims(), signal);
 }
 
 /** Whether the Context has moved since the corpus was built — the Scan dot. */

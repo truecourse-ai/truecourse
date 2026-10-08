@@ -7,13 +7,16 @@
  *         the milestone positions it is proved at, each a click into that flow)
  *         and the scenarios whose steps name it (with the step numbers).
  *
- * The status is the claim's own word, the worst over its flows; the reason line
- * under it says what decided a gap or a dismissal. Dismissing a claim is the
- * one ruling this page offers: the next generate drops the flows carrying it.
+ * The status is the claim's own word, the worst over its flows in every
+ * repository that reads it; the reason line under it says what decided a gap or
+ * a dismissal. Dismissing a claim is the one ruling this page offers: the next
+ * generate drops the flows carrying it.
  *
- * A claim's truth is its entry in `scenarios/claims.json`, so the header carries
- * the same two-mode switch every artifact-backed entity has: this page, or that
- * entry verbatim ({@link ArtifactModeSwitch}).
+ * A claim's truth is its entry in a repository's `scenarios/claims.json`, so
+ * the header carries the same two-mode switch every artifact-backed entity has:
+ * this page, or the first reading repository's entry verbatim
+ * ({@link ArtifactModeSwitch}). A claim no repository holds yet (Not linked)
+ * has no such entry, so it carries no switch and no ruling.
  *
  * An untestable statement ({@link GuardUntestableDetail}) is the same page minus
  * everything it doesn't have: the text, why the scan refused it, and the
@@ -23,13 +26,14 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Ban, FileText, FlaskConical, Undo2 } from 'lucide-react';
-import type { GuardClaimRow, GuardUntestableRow } from '@truecourse/shared';
+import { CONTEXT_DOCUMENT_STATUS_WORD } from '@truecourse/shared';
+import type { ContextClaimFlow, ContextClaimRow, GuardUntestableRow } from '@truecourse/shared';
 import { ArtifactModeSwitch, ArtifactRaw, useArtifactMode } from '@/dashboard/ui/artifact-view';
 import { HoverPopover } from '@/dashboard/ui/hover-popover';
 import { useGuardArtifactRaw } from '@/hooks/useGuardArtifactRaw';
-import type { GuardDecisionsState } from '@/hooks/useGuardDecisions';
 import { guardNeedsSetupNeed, guardPlainStatus } from '@/lib/guard-flow-status';
 import { GuardFlowStatusChip, GuardStatusBadge } from '@/components/guard/GuardStatusBadge';
+import { StatusWord } from '@/dashboard/ui/status-word';
 
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
 const CHIP = 'inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-medium';
@@ -71,7 +75,7 @@ function SourceLine({ doc, onOpenDoc }: { doc: string; onOpenDoc: (doc: string) 
  * TOOL recorded (`auto`) is named as the machine's call, with the reason it
  * gave, and the undo stays: a machine's call is exactly the kind a human revisits.
  */
-function ClaimRuling({ claim, decisions }: { claim: GuardClaimRow; decisions: GuardDecisionsState }) {
+function ClaimRuling({ claim, onRule }: { claim: ContextClaimRow; onRule: (dismiss: boolean) => Promise<void> }) {
   const [ruling, setRuling] = useState(false);
   const mounted = useRef(true);
   useEffect(() => {
@@ -80,15 +84,15 @@ function ClaimRuling({ claim, decisions }: { claim: GuardClaimRow; decisions: Gu
       mounted.current = false;
     };
   }, []);
-  const rule = async (run: () => Promise<void>) => {
+  const rule = async (dismiss: boolean) => {
     setRuling(true);
     try {
-      await run();
+      await onRule(dismiss);
     } finally {
       if (mounted.current) setRuling(false);
     }
   };
-  const dismissal = decisions.dismissalFor({ claimId: claim.id });
+  const dismissal = claim.dismissal;
   if (dismissal) {
     return (
       <div className="space-y-1.5">
@@ -99,7 +103,7 @@ function ClaimRuling({ claim, decisions }: { claim: GuardClaimRow; decisions: Gu
         <button
           type="button"
           disabled={ruling}
-          onClick={() => void rule(() => decisions.undismiss({ claimId: claim.id }))}
+          onClick={() => void rule(false)}
           className={BTN}
         >
           <Undo2 className="h-3 w-3 shrink-0" />
@@ -118,7 +122,7 @@ function ClaimRuling({ claim, decisions }: { claim: GuardClaimRow; decisions: Gu
       <button
         type="button"
         disabled={ruling}
-        onClick={() => void rule(() => decisions.dismiss({ claimId: claim.id }))}
+        onClick={() => void rule(true)}
         className={BTN}
       >
         <Ban className="h-3 w-3 shrink-0" />
@@ -129,30 +133,34 @@ function ClaimRuling({ claim, decisions }: { claim: GuardClaimRow; decisions: Gu
 }
 
 export function GuardClaimDetail({
-  repoId,
   claim,
-  decisions,
+  onRule,
   onOpenDoc,
   onOpenFlow,
 }: {
-  /** Whose store the raw mode reads the claim's entry out of. */
-  repoId: string;
-  claim: GuardClaimRow;
-  /** The decisions ledger, when the page offers the ruling. */
-  decisions?: GuardDecisionsState;
+  claim: ContextClaimRow;
+  /** Dismiss the claim (true) or take the dismissal back (false), when the page offers the ruling. */
+  onRule?: (dismiss: boolean) => Promise<void>;
   /** Jump to the document this claim states. */
   onOpenDoc: (doc: string) => void;
   /** Open one flow's own page. */
-  onOpenFlow: (flowId: string) => void;
+  onOpenFlow: (flow: ContextClaimFlow) => void;
 }) {
   const { mode, setMode, raw } = useArtifactMode('JSON');
-  const rawSource = useGuardArtifactRaw(repoId, 'claim', claim.id, raw);
+  const holder = claim.repositories[0];
+  // The mode outlives the claim the pane shows, so a claim with no entry reads as the page.
+  const showRaw = raw && holder !== undefined;
+  const rawSource = useGuardArtifactRaw(holder, 'claim', claim.id, showRaw);
 
   return (
     <div className="flex h-full min-w-0 flex-col bg-background">
       <div className="min-w-0 border-b border-border bg-card px-6 py-4">
-        <ArtifactModeSwitch format="JSON" mode={mode} onSelect={setMode} className="float-right ml-2" />
-        <GuardStatusBadge status={claim.status} />
+        {holder && <ArtifactModeSwitch format="JSON" mode={mode} onSelect={setMode} className="float-right ml-2" />}
+        {claim.status === 'not-linked' ? (
+          <StatusWord tone="neutral" word={CONTEXT_DOCUMENT_STATUS_WORD['not-linked']} className="uppercase tracking-wider" />
+        ) : (
+          <GuardStatusBadge status={claim.status} />
+        )}
         <h2 className="mt-1 break-words text-sm font-semibold text-foreground">{claim.statement}</h2>
         {claim.reason && (
           <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
@@ -163,7 +171,7 @@ export function GuardClaimDetail({
       </div>
 
       <div className="min-w-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden px-6 py-4">
-        {raw ? (
+        {showRaw ? (
           <ArtifactRaw content={rawSource.content} label="claim source" />
         ) : (
           <>
@@ -175,7 +183,7 @@ export function GuardClaimDetail({
               ) : (
                 <div className="flex flex-col items-start gap-1">
                   {claim.flows.map((flow) => (
-                    <button key={flow.flowId} type="button" onClick={() => onOpenFlow(flow.flowId)} className={REF_BTN}>
+                    <button key={`${flow.repo}/${flow.flowId}`} type="button" onClick={() => onOpenFlow(flow)} className={REF_BTN}>
                       <GuardFlowStatusChip status={guardPlainStatus(flow.status)} />
                       <span className="truncate text-foreground">{flow.title}</span>
                       <span className="shrink-0 text-muted-foreground">
@@ -208,10 +216,10 @@ export function GuardClaimDetail({
               </div>
             )}
 
-            {decisions && (
+            {onRule && (
               <div>
                 <div className={LABEL}>Ruling</div>
-                <ClaimRuling claim={claim} decisions={decisions} />
+                <ClaimRuling claim={claim} onRule={onRule} />
               </div>
             )}
 

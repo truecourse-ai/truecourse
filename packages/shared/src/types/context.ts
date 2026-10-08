@@ -16,7 +16,13 @@
  * {@link CONTEXT_CONNECTION_KINDS} lists for it.
  */
 
-import type { GuardCoveragePlainStatus } from '../guard/dashboard.js';
+import type {
+  GuardClaimFlow,
+  GuardClaimRow,
+  GuardCoveragePlainStatus,
+  GuardUntestableRow,
+} from '../guard/dashboard.js';
+import type { GuardDismissedClaim } from '../guard/decisions.js';
 import type { RepositoryProviderId } from './repositories.js';
 
 /** Every kind a source can be. Which ones have a driver is the server's answer. */
@@ -495,4 +501,31 @@ export interface ContextDocumentsViewResponse {
   documents: ContextDocumentRow[];
   /** When the corpus these rows come from was built; null when none has been. */
   corpusAt: string | null;
+}
+
+/** A flow that carries a claim, with the repository (by slug) it belongs to. */
+export type ContextClaimFlow = GuardClaimFlow & { repo: string };
+
+/**
+ * One row of the Claims view: a claim of the workspace's newest scan, folded
+ * across every repository that holds it. The status is the worst of theirs, and
+ * the reason and setup need are the ones behind that worst status; a claim no
+ * repository holds yet is `not-linked`.
+ */
+export interface ContextClaimRow extends Omit<GuardClaimRow, 'flows' | 'status'> {
+  status: GuardClaimRow['status'] | 'not-linked';
+  /** The slug of every repository that holds the claim. */
+  repositories: string[];
+  /** Every repository's flows that carry the claim. */
+  flows: ContextClaimFlow[];
+  /** The dismissal a repository recorded for the claim, when one did. */
+  dismissal?: GuardDismissedClaim;
+}
+
+export interface ContextClaimsViewResponse {
+  /** False until a scan has read claims: the view's empty state. */
+  extracted: boolean;
+  claims: ContextClaimRow[];
+  /** The statements the scan read and judged untestable, once each. */
+  untestable: GuardUntestableRow[];
 }

@@ -38,6 +38,7 @@ import {
   updateContextSource,
 } from '@truecourse/core/lib/context-store';
 import {
+  composeContextClaims,
   composeContextDocumentRows,
   corpusDocSourceId,
   ContextConfigError,
@@ -47,6 +48,7 @@ import {
   repositorySourceId,
   siteConfig,
   siteSourceId,
+  type ContextClaimReading,
   type ContextDocumentFilter,
   type ContextSourceDriver,
   type ContextSourceScope,
@@ -56,9 +58,12 @@ import { parseDocTree } from '@truecourse/shared';
 import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import { getWorkspaceDecisions } from '@truecourse/core/commands/spec-in-process';
 import { claimWordsByDoc, readGuardClaims } from '@truecourse/core/commands/guard-read';
+import { readGuardDecisions } from '@truecourse/core/lib/guard-store';
 import { requireWorkspaceDescription } from '@truecourse/core/lib/workspace-profile-store';
 import {
   CONTEXT_SOURCE_KINDS,
+  type ClaimsFile,
+  type ContextClaimsViewResponse,
   type ContextDocumentsViewResponse,
   type ContextSource,
   type ContextSourceConfig,
@@ -603,6 +608,27 @@ export async function listWorkspaceDocuments(
     documents: filterContextDocumentRows(rows, filter),
     corpusAt: corpus.generatedAt ?? null,
   };
+}
+
+/**
+ * The Claims view: every claim the workspace's newest scan read, each folded
+ * across the caller's repositories that hold it ({@link composeContextClaims}).
+ * One claims read and one decisions read per repository.
+ */
+export async function listWorkspaceClaims(caller: ContextCaller): Promise<ContextClaimsViewResponse> {
+  const file = await loadWorkspaceSpec<ClaimsFile>({ workspaceOrgId: caller.org }, 'claims');
+  if (!file) return composeContextClaims(null, []);
+  // The map holds each repository under two names; one reading each.
+  const repos = new Set((await linkableRepos(caller)).values());
+  const readings: ContextClaimReading[] = [];
+  for (const entry of repos) {
+    readings.push({
+      repo: entry.slug,
+      view: await readGuardClaims(entry.path),
+      dismissals: (await readGuardDecisions(entry.path)).dismissedClaims,
+    });
+  }
+  return composeContextClaims(file, readings);
 }
 
 // --- Check -------------------------------------------------------------------
