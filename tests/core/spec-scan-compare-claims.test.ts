@@ -1,5 +1,5 @@
 /**
- * THE CLAIM COMPARISON — `spec-scan.compare-facts`, one session per batch of
+ * THE CLAIM COMPARISON — `spec-scan.compare-claims`, one session per batch of
  * extracted claims, the second half of finding conflicts by comparing claims.
  *
  * What is under test:
@@ -152,7 +152,7 @@ describe('planCompareBatches', () => {
     // "Export my data" spans a/x and a/z; "PDF export" shares its rare word "export", so it comes along.
     expect(subjectBatches.map((b) => (b.kind === 'subject' ? b.subjects : []))).toEqual([['Export my data', 'PDF export']])
     expect(ids(subjectBatches[0]!)).toEqual(['F1 docs/a.md#1', 'F2 docs/b.md#1', 'F3 docs/a.md#2', 'F4 docs/a.md#3'])
-    expect(plan).toMatchObject({ subjectFamilies: 1, subjectBatchFamilies: 1, subjectBatchFacts: 4 })
+    expect(plan).toMatchObject({ subjectFamilies: 1, subjectBatchFamilies: 1, subjectBatchClaims: 4 })
     // Packed into one area batch, nothing spans: no subject batch at all.
     expect(planCompareBatches(CLAIMS, bySubject, 20).batches.map((b) => b.kind)).toEqual(['area'])
   })
@@ -177,7 +177,7 @@ describe('planCompareBatches', () => {
     expect(rest).toEqual([])
     expect(family!.kind === 'subject' ? family!.subjects : []).toEqual(['Download button', 'Download dialog', 'Download PDF button'])
     expect(ids(family!)).toEqual(['F1 docs/exports.md#1', 'F2 docs/exports.md#2', 'F3 docs/builder.md#1'])
-    expect(plan).toMatchObject({ subjectFamilies: 1, subjectBatchFamilies: 1, subjectBatchFacts: 3 })
+    expect(plan).toMatchObject({ subjectFamilies: 1, subjectBatchFamilies: 1, subjectBatchClaims: 3 })
   })
 
   it('joins no family by a word more subject names share than the vocabulary cap', () => {
@@ -217,7 +217,7 @@ describe('planCompareBatches', () => {
       splitAreas,
       subjectFamilies: 0,
       subjectBatchFamilies: expect.any(Number),
-      subjectBatchFacts: expect.any(Number),
+      subjectBatchClaims: expect.any(Number),
     })
   })
 })
@@ -282,8 +282,8 @@ describe('the comparison gate', () => {
 
   const COMPLETE: ClaimComparisonWire = {
     groups: [
-      { subject: 'Export my data', facts: ['F1', 'F2'], verdict: 'conflict', conflicts: [conflict('F1', 'F2')] },
-      { subject: 'Export schedule', facts: ['F3', 'F4', 'F5'], verdict: 'conflict', conflicts: [conflict('F3', 'F5')], consistent: ['F4'] },
+      { subject: 'Export my data', claims: ['F1', 'F2'], verdict: 'conflict', conflicts: [conflict('F1', 'F2')] },
+      { subject: 'Export schedule', claims: ['F3', 'F4', 'F5'], verdict: 'conflict', conflicts: [conflict('F3', 'F5')], consistent: ['F4'] },
     ],
     alone: [],
   }
@@ -313,23 +313,23 @@ describe('the comparison gate', () => {
   })
 
   it('refuses a claim placed twice, and one placed nowhere', () => {
-    const check = checkGroups({ ...COMPLETE, alone: ['F1'], groups: COMPLETE.groups.map((g, i) => (i === 1 ? { ...g, facts: ['F3', 'F5'], consistent: [] } : g)) }, batch)
-    expect(check.problems).toEqual(['F1 is placed twice, in groups[0] and in alone; place each fact once'])
+    const check = checkGroups({ ...COMPLETE, alone: ['F1'], groups: COMPLETE.groups.map((g, i) => (i === 1 ? { ...g, claims: ['F3', 'F5'], consistent: [] } : g)) }, batch)
+    expect(check.problems).toEqual(['F1 is placed twice, in groups[0] and in alone; place each claim once'])
     expect(check.unplaced).toEqual(['F4'])
-    expect(groupsRefusal(check)).toMatch(/^Groups refused\.\n\n1 fact\(s\) placed nowhere: F4\./)
+    expect(groupsRefusal(check)).toMatch(/^Groups refused\.\n\n1 claim\(s\) placed nowhere: F4\./)
   })
 
   it('refuses a group of one, and an unknown id', () => {
     const check = checkGroups(
       {
-        groups: [{ subject: 'Export my data', facts: ['F1'], verdict: 'agree', conflicts: [] }],
+        groups: [{ subject: 'Export my data', claims: ['F1'], verdict: 'agree', conflicts: [] }],
         alone: ['F2', 'F3', 'F4', 'F5', 'F9'],
       },
       batch,
     )
     expect(check.problems).toEqual([
-      'groups[0] holds one fact; a fact with no peer goes in "alone"',
-      'alone names "F9", which is not a fact of this batch (F1 to F5)',
+      'groups[0] holds one claim; a claim with no peer goes in "alone"',
+      'alone names "F9", which is not a claim of this batch (F1 to F5)',
     ])
     expect(check.groups).toEqual([])
   })
@@ -338,15 +338,15 @@ describe('the comparison gate', () => {
     const check = checkGroups(
       {
         groups: [
-          { subject: 'Export my data', facts: ['F1', 'F2'], verdict: 'conflict', conflicts: [conflict('F1', 'F5')], consistent: ['F2'] },
-          { subject: 'Export schedule', facts: ['F3', 'F4', 'F5'], verdict: 'conflict', conflicts: [conflict('F3', 'F4')], consistent: ['F5'] },
+          { subject: 'Export my data', claims: ['F1', 'F2'], verdict: 'conflict', conflicts: [conflict('F1', 'F5')], consistent: ['F2'] },
+          { subject: 'Export schedule', claims: ['F3', 'F4', 'F5'], verdict: 'conflict', conflicts: [conflict('F3', 'F4')], consistent: ['F5'] },
         ],
         alone: [],
       },
       batch,
     )
     expect(check.problems).toEqual([
-      'groups[0].conflicts[0] pairs F5, not in this group; a conflict is between two facts of its group',
+      'groups[0].conflicts[0] pairs F5, not in this group; a conflict is between two claims of its group',
       'groups[1].conflicts[0]: F3 and F4 are one sentence of docs/export.md; a conflict is between two sentences (two documents, or two places in one)',
     ])
     expect(check.conflicts).toEqual([])
@@ -356,15 +356,15 @@ describe('the comparison gate', () => {
     const check = checkGroups(
       {
         groups: [
-          { subject: 'Export my data', facts: ['F1', 'F2'], verdict: 'conflict', conflicts: [] },
-          { subject: 'Export schedule', facts: ['F3', 'F4', 'F5'], verdict: 'agree', conflicts: [conflict('F3', 'F5')] },
+          { subject: 'Export my data', claims: ['F1', 'F2'], verdict: 'conflict', conflicts: [] },
+          { subject: 'Export schedule', claims: ['F3', 'F4', 'F5'], verdict: 'agree', conflicts: [conflict('F3', 'F5')] },
         ],
         alone: [],
       },
       batch,
     )
     expect(check.problems).toEqual([
-      'groups[0] is a conflict and names no pair of facts that cannot both be true',
+      'groups[0] is a conflict and names no pair of claims that cannot both be true',
       'groups[1] agrees and names conflicts; give it the verdict "conflict", or drop them',
     ])
     expect(check.conflicts).toEqual([])
@@ -382,7 +382,7 @@ describe('the comparison gate', () => {
     )
     expect(confused.problems).toEqual([
       'groups[1].consistent names F1, not in this group',
-      'groups[1]: F3 is in a pair and in "consistent"; a fact that contradicts another is not consistent',
+      'groups[1]: F3 is in a pair and in "consistent"; a claim that contradicts another is not consistent',
     ])
   })
 
@@ -593,11 +593,11 @@ describe('the comparison session', () => {
 
   it('reads the section around each claim, one block per sentence', async () => {
     const read = def.tools[0]!
-    const result = await read.execute({ facts: ['F1', 'F3', 'F2'] }, ctx)
+    const result = await read.execute({ claims: ['F1', 'F3', 'F2'] }, ctx)
     expect(result.isError).toBeUndefined()
     expect(result.content).toContain('--- F1, F3 · docs/export.md · Where · lines 3-5 ---\n## Where\n\nExport my data is under Settings, Account. It runs nightly.\n--- end ---')
     expect(result.content).toContain('--- F2 · docs/privacy.md · Where')
-    expect(await read.execute({ facts: ['F9'] }, ctx)).toMatchObject({ isError: true })
+    expect(await read.execute({ claims: ['F9'] }, ctx)).toMatchObject({ isError: true })
   })
 })
 
@@ -716,15 +716,15 @@ describe('a scan that compares claims, from docs to corpus', () => {
     expect(conflict.review?.recommendation.action).toBe('fix-doc')
     expect(result.stats.conflictCount).toBe(1)
 
-    // `facts` is the stored corpus key.
-    expect(area!.comparison).toEqual({ facts: 2, groups: 1 })
+    // `claims` is the stored corpus key.
+    expect(area!.comparison).toEqual({ claims: 2, groups: 1 })
     expect(result.corpus.comparison).toEqual({
       subjectNames: 1,
       settledSubjects: 1,
       subjectFamilies: 0,
       subjectBatchFamilies: 0,
-      subjectBatchFacts: 0,
-      unplacedFacts: 0,
+      subjectBatchClaims: 0,
+      unplacedClaims: 0,
     })
     expect(facts).toContainEqual(['compare', 'core/exports: 2 claims, 1 group, 1 conflict'])
     expect(facts).toContainEqual(['conflicts', 'docs/export.md vs docs/privacy.md: docs/export.md and docs/privacy.md disagree on Export my data'])
@@ -785,7 +785,7 @@ describe('a scan that compares claims, from docs to corpus', () => {
     ])
     expect(conflicts[0]!.note).toBe('docs/export.md and docs/shared.md disagree on Export my data')
     expect(facts).toContainEqual(['verify', 'docs/export.md vs docs/shared.md: 2 conflicts on the same two sentences, folded into one'])
-    expect(result.corpus.comparison).toMatchObject({ subjectBatchFamilies: 1, subjectBatchFacts: 3, unplacedFacts: 0 })
+    expect(result.corpus.comparison).toMatchObject({ subjectBatchFamilies: 1, subjectBatchClaims: 3, unplacedClaims: 0 })
   })
 
   // Two docs that disagree, sentence by sentence, on three points.
@@ -855,7 +855,7 @@ describe('a scan that compares claims, from docs to corpus', () => {
     const [area] = result.corpus.areas
     expect(area!.notReached).toEqual(['docs/export.md', 'docs/privacy.md'])
     expect(area!.conflicts).toEqual([])
-    expect(area!.comparison).toEqual({ facts: 0, groups: 0 })
+    expect(area!.comparison).toEqual({ claims: 0, groups: 0 })
     expect(facts).toContainEqual(['compare', 'core/exports: session failed, its 2 claims from 2 docs left uncompared'])
     expect(result.stats.llmFailures).toEqual([expect.objectContaining({ stage: COMPARE_CLAIMS_SESSION_KIND, failures: 1 })])
   })
@@ -874,8 +874,8 @@ describe('a scan that compares claims, from docs to corpus', () => {
       },
     })
     // The wrap-up accepts it, and the fold counts the claim left out.
-    expect(result.corpus.comparison).toMatchObject({ unplacedFacts: 1 })
-    expect(result.corpus.areas[0]!.comparison).toEqual({ facts: 2, groups: 0 })
+    expect(result.corpus.comparison).toMatchObject({ unplacedClaims: 1 })
+    expect(result.corpus.areas[0]!.comparison).toEqual({ claims: 2, groups: 0 })
   })
 
   it('serves every batch from the cache on an unchanged re-run', async () => {

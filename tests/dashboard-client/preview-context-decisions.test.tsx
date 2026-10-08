@@ -44,7 +44,7 @@ function serve(): string[] {
     if (url.pathname.endsWith('/conflict-resolution')) return json({ conflictResolutions: [] });
     if (url.pathname.endsWith('/corpus')) {
       return json({
-        corpus: { version: 5, generatedAt: '', docs: [], areas: [], skippedDocs: [] },
+        corpus: { version: 6, generatedAt: '', docs: [], areas: [], skippedDocs: [] },
         manualIncludes: [],
         manualExcludes: [],
         conflictResolutions: [],

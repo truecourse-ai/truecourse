@@ -15,13 +15,13 @@
  *     the kept docs, dropping what does not belong (part of the curate step)
  *   → `spec-scan.settle-areas` ≤1 session per corpus (barrier, concurrency 1)
  *   → groupByArea (det)
- *   → the conflict steps: `spec-scan.record-facts` (the claim extraction)
+ *   → the conflict steps: `spec-scan.extract-claims` (the claim extraction)
  *       one session per window of a kept doc's sentences (pool), each doc's
  *       ledger collected
  *       → `spec-scan.settle-subjects` one session per part of the claims'
  *       subject names (barrier)
  *       → planCompareBatches (det — area batches, then subject batches)
- *       → `spec-scan.compare-facts` (the claim comparison) one session per
+ *       → `spec-scan.compare-claims` (the claim comparison) one session per
  *       batch (pool), each conflict it finds handed to the fold
  *   → verify sides + cross-area dedup (det; conflicts that name the same
  *     two sentences folded into one) → assemble → write.
@@ -849,7 +849,7 @@ export async function runSpecScanSessions(
       .filter((t): t is StageTransportTally => t !== null)
     const ran = summaries.reduce((n, s) => n + s.ran, 0)
     return {
-      corpus: { version: 5, generatedAt: new Date().toISOString(), docs: [], areas: [], skippedDocs: [] },
+      corpus: { version: 6, generatedAt: new Date().toISOString(), docs: [], areas: [], skippedDocs: [] },
       skippedDocs: over.skippedDocs ?? [],
       decisions,
       stats: {
@@ -1497,7 +1497,7 @@ export async function runSpecScanSessions(
     if (subjectBatches > 0) {
       fact(
         'compare',
-        `${plan.subjectBatchFamilies} famil${plan.subjectBatchFamilies === 1 ? 'y' : 'ies'} of subjects spanning area batches, ${plan.subjectBatchFacts} claims, compared again in ${subjectBatches} subject batch${subjectBatches === 1 ? '' : 'es'}`,
+        `${plan.subjectBatchFamilies} famil${plan.subjectBatchFamilies === 1 ? 'y' : 'ies'} of subjects spanning area batches, ${plan.subjectBatchClaims} claims, compared again in ${subjectBatches} subject batch${subjectBatches === 1 ? '' : 'es'}`,
       )
     }
     if (opts.disableConflictDetection !== true) {
@@ -1576,9 +1576,8 @@ export async function runSpecScanSessions(
         settledSubjects: settledCount,
         subjectFamilies: plan.subjectFamilies,
         subjectBatchFamilies: plan.subjectBatchFamilies,
-        // Stored corpus keys, kept so earlier corpora keep parsing.
-        subjectBatchFacts: plan.subjectBatchFacts,
-        unplacedFacts: unplaced.size,
+        subjectBatchClaims: plan.subjectBatchClaims,
+        unplacedClaims: unplaced.size,
       }
     }
     return [settleSummary, compareSummary]
@@ -1617,8 +1616,7 @@ export async function runSpecScanSessions(
     const notReached = notReachedByArea.get(a.id)
     const compared = comparisonByArea.get(a.id)
     const comparison: AreaComparison | undefined = compared && {
-      // `facts` is a stored corpus key, kept so earlier corpora keep parsing.
-      facts: compared.claims.size,
+      claims: compared.claims.size,
       groups: compared.groups,
       ...splitAreas.get(a.id),
     }
@@ -1643,7 +1641,7 @@ export async function runSpecScanSessions(
   const generatedAt = new Date().toISOString()
   const claims = claimsFromLedgers(claimLedgers, generatedAt)
   const corpus: CuratedCorpus = {
-    version: 5,
+    version: 6,
     generatedAt,
     docs: [
       ...grouped.docs.map((doc) => {

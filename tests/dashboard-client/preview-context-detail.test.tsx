@@ -123,7 +123,7 @@ const LEGACY: ContextDocumentRow = {
 /** A workspace corpus with one area and one disagreement inside it. */
 const CORPUS = {
   corpus: {
-    version: 5,
+    version: 6,
     generatedAt: '2026-09-02T00:00:00.000Z',
     docs: [
       { ref: REFUNDS_REF, kind: 'prd', lastTouched: '', areaTags: ['acme/payments'] },

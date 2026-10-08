@@ -1,13 +1,10 @@
 /**
- * THE CLAIM EXTRACTION — `spec-scan.record-facts`, one session per WINDOW of
+ * THE CLAIM EXTRACTION — `spec-scan.extract-claims`, one session per WINDOW of
  * one kept prose doc: consecutive sections of its sentences (the doc tree's
  * sentences, packed by `planWindows`). It is the first half of finding
  * conflicts by comparing claims: each session writes the LEDGER of one window,
  * the concrete claims its sentences state and the sentences it skips with a
- * reason. The session kind, cache name and key prefix still say "facts": they
- * are stored names, kept so caches and stored sessions keep matching, and the
- * model is asked for facts under a `facts` key, the wording its prompt was
- * tuned with.
+ * reason.
  *
  * The session's whole attention is one window of one doc. It is briefed with
  * the doc's ref, title, lifecycle, outline and area tags, and the window's
@@ -77,11 +74,10 @@ import {
   scanCacheKey,
 } from './tools.js'
 
-/** A stored name, kept so stored sessions and their indexes keep matching. */
-export const EXTRACT_CLAIMS_SESSION_KIND = 'spec-scan.record-facts'
+export const EXTRACT_CLAIMS_SESSION_KIND = 'spec-scan.extract-claims'
 
-/** One entry per doc window. A stored name, kept so cached ledgers keep matching. */
-export const EXTRACT_CLAIMS_CACHE_NAME = 'consolidator/fact-record'
+/** One entry per doc window. */
+export const EXTRACT_CLAIMS_CACHE_NAME = 'consolidator/claim-extract'
 
 /**
  * THE EXTRACTION'S VERSION, bumped by hand. A prompt change that fixes wrong
@@ -113,20 +109,20 @@ const ExtractedClaimWireSchema = z
   .object({
     sentences: z
       .array(z.number().int())
-      .describe(`The numbers of the sentences the fact is stated in: one, or up to ${CLAIM_SENTENCES_MAX} when it spans them.`),
+      .describe(`The numbers of the sentences the claim is stated in: one, or up to ${CLAIM_SENTENCES_MAX} when it spans them.`),
     subject: z
       .string()
       .describe(
-        'The product THING the fact is about, as the product names it and as specific as possible: a control, a setting, an endpoint, an environment variable, a feature ("ATS checker", "Export my data", "/api/health", "ENCRYPTION_SECRET", "Application Tracker views"). Never the product as a whole, never an aspect such as "location" or "limits". One to five words.',
+        'The product THING the claim is about, as the product names it and as specific as possible: a control, a setting, an endpoint, an environment variable, a feature ("ATS checker", "Export my data", "/api/health", "ENCRYPTION_SECRET", "Application Tracker views"). Never the product as a whole, never an aspect such as "location" or "limits". One to five words.',
       ),
     statement: z
       .string()
-      .describe('The fact as ONE declarative sentence that can be read alone, naming the product thing it is about.'),
+      .describe('The claim as ONE declarative sentence that can be read alone, naming the product thing it is about.'),
     areas: z.array(z.string()).describe('One or more of the document\'s area tags, exactly as the briefing lists them.'),
     testable: z
       .boolean()
       .describe('Whether a test could set the product up, do what the statement describes and see the result it names.'),
-    reason: ClaimUntestableReasonSchema.nullable().describe('Why the fact is not testable; null when it is.'),
+    reason: ClaimUntestableReasonSchema.nullable().describe('Why the claim is not testable; null when it is.'),
   })
   .strict()
 type ExtractedClaimWire = z.infer<typeof ExtractedClaimWireSchema>
@@ -143,12 +139,11 @@ type LedgerSkipWire = z.infer<typeof LedgerSkipWireSchema>
 
 /**
  * What the model writes: the window's claims and skips, nothing about its own
- * coverage. `facts` is the wire key the prompt asks for, kept so cached ledgers
- * and stored sessions keep matching.
+ * coverage.
  */
 export const ClaimLedgerWireSchema = z
   .object({
-    facts: z.array(ExtractedClaimWireSchema),
+    claims: z.array(ExtractedClaimWireSchema),
     skips: z.array(LedgerSkipWireSchema),
   })
   .strict()
@@ -236,9 +231,9 @@ export function extractClaimsItems(doc: DocCandidate, tags: readonly AreaTag[]):
   return windows.map((window) => ({ doc, sentences, window, windows: windows.length, areas }))
 }
 
-/** The work item, as the session index and the transcript record it. Its `facts:` prefix is a stored name, kept so stored sessions keep matching. */
+/** The work item, as the session index and the transcript record it. */
 export function extractClaimsWorkItem(item: Pick<ExtractClaimsItem, 'doc' | 'window'>): string {
-  return `facts:${item.doc.path}:${item.window.from}-${item.window.to}`
+  return `claims:${item.doc.path}:${item.window.from}-${item.window.to}`
 }
 
 /**
@@ -251,8 +246,7 @@ export function extractClaimsWorkItem(item: Pick<ExtractClaimsItem, 'doc' | 'win
 export function extractClaimsCacheKey(item: ExtractClaimsItem, extraParts: readonly string[] = []): string {
   const frontmatter = item.sentences.flatMap((u) => (u.kind === 'frontmatter' ? [`${u.field ?? 'rest'}=${u.text}`] : []))
   return scanCacheKey([
-    // A stored prefix, kept so cached ledgers keep matching.
-    `record-facts-v${EXTRACT_STAGE_VERSION}`,
+    `extract-claims-v${EXTRACT_STAGE_VERSION}`,
     `sentences-v${SENTENCE_SPLITTER_VERSION}`,
     item.doc.path,
     item.doc.contentHash,
@@ -305,7 +299,7 @@ function claimProblems(claim: ExtractedClaimWire, scope: LedgerScope, known: Rea
   const { from, to } = scope.window
   const problems: string[] = []
   if (claim.sentences.length === 0 || claim.sentences.length > CLAIM_SENTENCES_MAX) {
-    problems.push(`cites ${claim.sentences.length} sentences; a fact cites 1 to ${CLAIM_SENTENCES_MAX}`)
+    problems.push(`cites ${claim.sentences.length} sentences; a claim cites 1 to ${CLAIM_SENTENCES_MAX}`)
   }
   const outside = claim.sentences.filter((u) => u < from || u > to)
   if (outside.length > 0) problems.push(`cites sentence ${outside.join(', ')}, outside this window (${from}-${to})`)
@@ -316,7 +310,7 @@ function claimProblems(claim: ExtractedClaimWire, scope: LedgerScope, known: Rea
   else if (unknown.length > 0) {
     problems.push(`names ${unknown.map((a) => `"${a}"`).join(', ')}, not an area of this document (${scope.areas.join(', ')})`)
   }
-  if (claim.testable && claim.reason !== null) problems.push(`is testable and gives a reason it is not; the reason is null for a testable fact`)
+  if (claim.testable && claim.reason !== null) problems.push(`is testable and gives a reason it is not; the reason is null for a testable claim`)
   if (!claim.testable && claim.reason === null) problems.push(`is not testable and gives no reason`)
   return problems
 }
@@ -340,10 +334,10 @@ export function checkLedger(ledger: ClaimLedgerWire, scope: LedgerScope): Ledger
   const problems: string[] = []
   const claims: ExtractedClaimWire[] = []
   const cited = new Set<number>()
-  ledger.facts.forEach((claim, i) => {
+  ledger.claims.forEach((claim, i) => {
     const found = claimProblems(claim, scope, known)
     if (found.length > 0) {
-      problems.push(...found.map((p) => `facts[${i}] ${p}`))
+      problems.push(...found.map((p) => `claims[${i}] ${p}`))
       return
     }
     claims.push(claim)
@@ -360,7 +354,7 @@ export function checkLedger(ledger: ClaimLedgerWire, scope: LedgerScope): Ledger
   })
   const both = [...cited].filter((u) => skippedAs.has(u)).sort((a, b) => a - b)
   if (both.length > 0) {
-    problems.push(`sentence ${sentenceRanges(both)} is both cited by a fact and skipped; a sentence is one or the other`)
+    problems.push(`sentence ${sentenceRanges(both)} is both cited by a claim and skipped; a sentence is one or the other`)
   }
   const uncovered: number[] = []
   const skipped: Partial<Record<SentenceSkipReason, number>> = {}
@@ -384,7 +378,7 @@ export function ledgerRefusal(check: LedgerCheck): string | undefined {
   const parts: string[] = []
   if (check.uncovered.length > 0) {
     parts.push(
-      `${check.uncovered.length} sentence(s) no fact cites and no skip covers: ${sentenceRanges(check.uncovered, REFUSAL_RANGES_MAX)}. Record the facts each states, or skip it with the reason that fits.`,
+      `${check.uncovered.length} sentence(s) no claim cites and no skip covers: ${sentenceRanges(check.uncovered, REFUSAL_RANGES_MAX)}. Extract the claims each states, or skip it with the reason that fits.`,
     )
   }
   if (check.problems.length > 0) {
@@ -401,9 +395,8 @@ const skippedTotal = (skipped: Partial<Record<SentenceSkipReason, number>>): num
 const CHECK_LEDGER = defineToolSpec({
   name: 'check_ledger',
   description:
-    'Check a draft ledger the way the run will: every sentence of your window cited by a fact or inside a skip, each fact citing 1 to 3 sentences of the window and areas the document has, a reason on every fact that is not testable and none on one that is, no sentence both cited and skipped, a note on every "other" skip. Call it on your complete draft before you give the outcome.',
-  // A stored name, kept so stored transcripts keep matching.
-  kind: 'check-fact-ledger',
+    'Check a draft ledger the way the run will: every sentence of your window cited by a claim or inside a skip, each claim citing 1 to 3 sentences of the window and areas the document has, a reason on every claim that is not testable and none on one that is, no sentence both cited and skipped, a note on every "other" skip. Call it on your complete draft before you give the outcome.',
+  kind: 'check-claim-ledger',
   readOnly: true,
   destructive: false,
   display: {
@@ -420,7 +413,7 @@ function checkLedgerTool(scope: LedgerScope): SessionTool {
       const refusal = ledgerRefusal(check)
       if (refusal) return { content: refusal, isError: true }
       return {
-        content: `The ledger is complete: ${check.claims.length} fact(s), ${skippedTotal(check.skipped)} sentence(s) skipped, every sentence from ${scope.window.from} to ${scope.window.to} accounted for. Give it as the outcome.`,
+        content: `The ledger is complete: ${check.claims.length} claim(s), ${skippedTotal(check.skipped)} sentence(s) skipped, every sentence from ${scope.window.from} to ${scope.window.to} accounted for. Give it as the outcome.`,
       }
     },
   })
@@ -438,9 +431,9 @@ const EXTRACT_CLAIMS_SESSION = defineSessionKind({
 
 function presentLedger(ledger: ClaimLedger): KnownDisplayBlock[] {
   const skipped = ledger.skips.reduce((sum, s) => sum + Math.max(0, s.to - s.from + 1), 0)
-  const testable = ledger.facts.filter((f) => f.testable).length
+  const testable = ledger.claims.filter((f) => f.testable).length
   const lines = [
-    `I extracted ${ledger.facts.length} claim${ledger.facts.length === 1 ? '' : 's'}, ${testable} of them testable, and skipped ${skipped} sentence${skipped === 1 ? '' : 's'}`,
+    `I extracted ${ledger.claims.length} claim${ledger.claims.length === 1 ? '' : 's'}, ${testable} of them testable, and skipped ${skipped} sentence${skipped === 1 ? '' : 's'}`,
   ]
   if (ledger.unrecorded.length > 0) lines.push(`I left sentence ${sentenceRanges(ledger.unrecorded, REFUSAL_RANGES_MAX)} unrecorded`)
   return [{ kind: 'facts', lines }]
@@ -479,7 +472,7 @@ export function extractClaimsBriefing(item: ExtractClaimsItem, instructions: rea
     ...instructionsBriefingBlock(instructions),
     `DOCUMENT: ${doc.path}  ·  ${docTitle(doc)}`,
     ...docLifecycleLines(doc, { classify: true }),
-    `AREA TAGS (every fact names one or more, exactly as written): ${item.areas.join(', ')}`,
+    `AREA TAGS (every claim names one or more, exactly as written): ${item.areas.join(', ')}`,
     '',
     'OUTLINE:',
     docOutline(parseDocTree(doc.path, docBody(doc))),
@@ -498,16 +491,16 @@ export function extractClaimsBriefing(item: ExtractClaimsItem, instructions: rea
   }
   lines.push(
     '',
-    `Account for every sentence from ${window.from} to ${window.to}: record the facts it states, or skip it with the reason that fits. Check the ledger with \`check_ledger\`, then give it as the outcome.`,
+    `Account for every sentence from ${window.from} to ${window.to}: extract the claims it states, or skip it with the reason that fits. Check the ledger with \`check_ledger\`, then give it as the outcome.`,
   )
   return lines.join('\n')
 }
 
-export const EXTRACT_CLAIMS_SYSTEM_PROMPT = `You record the FACTS one documentation file states, sentence by sentence. The briefing gives you one WINDOW of one document: its sentences, numbered. A sentence here is a sentence of a paragraph or of a list item (an item's first sentence carries its marker, its later ones are indented under it), or one table row, one code block or part of a long one, a frontmatter title or description, a run of the frontmatter's other lines, or the title a component gives its content. Your outcome is the window's LEDGER: the facts its sentences state, and the sentences you skip.
+export const EXTRACT_CLAIMS_SYSTEM_PROMPT = `You extract the CLAIMS one documentation file states, sentence by sentence. The briefing gives you one WINDOW of one document: its sentences, numbered. A sentence here is a sentence of a paragraph or of a list item (an item's first sentence carries its marker, its later ones are indented under it), or one table row, one code block or part of a long one, a frontmatter title or description, a run of the frontmatter's other lines, or the title a component gives its content. Your outcome is the window's LEDGER: the claims its sentences state, and the sentences you skip.
 
-# What a fact is
+# What a claim is
 
-A fact is one concrete statement another document could state differently:
+A claim is one concrete statement another document could state differently:
   - the name and location of a control: which page, which menu, which tab, which button;
   - a number, a limit, a default, a size, a version;
   - an environment variable, a config key, an endpoint and its method, a header, a command;
@@ -519,25 +512,25 @@ A fact is one concrete statement another document could state differently:
   - what happens on an error, or when something is missing;
   - what is free, and what needs an account, a key or a plan.
 
-A frontmatter description that says something about the product is a fact like any sentence, and so is a design token or a setting the frontmatter declares.
+A frontmatter description that says something about the product is a claim like any sentence, and so is a design token or a setting the frontmatter declares.
 
 # What must be recorded
 
 Three kinds of sentence look skippable and are not:
-  - A sentence that says a list or table is complete, or gives its count ("A complete list of the environment variables you can configure:", "There are six button variants") is a fact: record what it says is complete, or the count.
-  - A list or table that is the INVENTORY of one thing (all the tools, all the variables, all the views, all the providers) yields, beside the fact each of its rows or items states, ONE fact for the inventory as a whole, naming its members ("The MCP server provides these tools: list_resumes, get_resume, create_resume."). It cites the sentence that introduces the list or table, or its first rows. That is how a member another document mentions and this one lacks can be seen.
-  - What a document says it contains or lacks, when it names specific things ("examples for Nginx and Caddy", "contributions welcome for Traefik and Caddy"), is a fact, in its frontmatter description as anywhere else.
+  - A sentence that says a list or table is complete, or gives its count ("A complete list of the environment variables you can configure:", "There are six button variants") is a claim: record what it says is complete, or the count.
+  - A list or table that is the INVENTORY of one thing (all the tools, all the variables, all the views, all the providers) yields, beside the claim each of its rows or items states, ONE claim for the inventory as a whole, naming its members ("The MCP server provides these tools: list_resumes, get_resume, create_resume."). It cites the sentence that introduces the list or table, or its first rows. That is how a member another document mentions and this one lacks can be seen.
+  - What a document says it contains or lacks, when it names specific things ("examples for Nginx and Caddy", "contributions welcome for Traefik and Caddy"), is a claim, in its frontmatter description as anywhere else.
 
 # How to write one
 
   - \`statement\`: ONE declarative sentence that can be read alone. It names the product thing it is about, never "it", "this", "this page", "the above" or "the following". Keep the document's own names and values exactly, and keep its quantifiers and closure words: all, every, only, either, both, never, always, entirely, complete, exactly N. "A failure in either dependency returns HTTP 503" records "either", not "the database or storage fails"; a contradiction often turns on that one word.
-  - \`subject\`: the product THING the fact is about, as the product names it and as specific as possible: a control, a setting, an endpoint, an environment variable, a feature: "ATS checker", "Export my data", "/api/health", "ENCRYPTION_SECRET", "Application Tracker views". Never the product as a whole, and never an aspect of a thing ("location", "limits", "behavior"): the fact's statement says which aspect. One to five words. Facts about the same thing carry the same subject, spelled the same way.
-  - \`sentences\`: the numbers of the sentences the fact is stated in: one, or up to three when it spans them (a list item and the sentence introducing the list).
-  - \`areas\`: the ones the fact belongs to among the document's area tags, exactly as the briefing lists them.
+  - \`subject\`: the product THING the claim is about, as the product names it and as specific as possible: a control, a setting, an endpoint, an environment variable, a feature: "ATS checker", "Export my data", "/api/health", "ENCRYPTION_SECRET", "Application Tracker views". Never the product as a whole, and never an aspect of a thing ("location", "limits", "behavior"): the claim's statement says which aspect. One to five words. Claims about the same thing carry the same subject, spelled the same way.
+  - \`sentences\`: the numbers of the sentences the claim is stated in: one, or up to three when it spans them (a list item and the sentence introducing the list).
+  - \`areas\`: the ones the claim belongs to among the document's area tags, exactly as the briefing lists them.
 
 # Testable
 
-Say for each fact whether an outside observer could check it against the running product: \`testable\` is true when a test could set the product up, do what the statement describes and see the result it names. Otherwise it is false, with the \`reason\`:
+Say for each claim whether an outside observer could check it against the running product: \`testable\` is true when a test could set the product up, do what the statement describes and see the result it names. Otherwise it is false, with the \`reason\`:
   - "hedge": the sentence only says something may or can happen, without saying when;
   - "advice": a recommendation about using the product, not a statement of how it behaves;
   - "example": a sample value or output that illustrates, not a rule;
@@ -545,13 +538,13 @@ Say for each fact whether an outside observer could check it against the running
   - "process": how the team works: releases, contributions, support;
   - "legal": licence terms and legal statements;
   - "not-observable": an internal detail nothing outside the product shows: an implementation choice, an algorithm, a file layout.
-A fact that is not testable is still a fact: another document can still contradict it. \`reason\` is null for a testable fact.
+A claim that is not testable is still a claim: another document can still contradict it. \`reason\` is null for a testable claim.
 
-A sentence that states two facts yields two facts. Every clause that asserts something is a fact of its own: a second sentence, a recommendation ("prefer the named volume from the example Compose file"), a condition, a default, an exception. A fact that keeps one clause of a sentence and drops the rest has lost what another document may contradict. A table row and a list item each need their own decision: a table of 40 rows is 40 sentences, and every row that states a fact yields one. A code block that names commands, variables, keys or endpoints states facts.
+A sentence that states two claims yields two claims. Every clause that asserts something is a claim of its own: a second sentence, a recommendation ("prefer the named volume from the example Compose file"), a condition, a default, an exception. A claim that keeps one clause of a sentence and drops the rest has lost what another document may contradict. A table row and a list item each need their own decision: a table of 40 rows is 40 sentences, and every row that states a claim yields one. A code block that names commands, variables, keys or endpoints states claims.
 
 # Skipping
 
-Skip only sentences that state no such fact. A skip is a range of consecutive sentences, \`from\` to \`to\`, with the reason that fits:
+Skip only sentences that state no such claim. A skip is a range of consecutive sentences, \`from\` to \`to\`, with the reason that fits:
   - "navigation": links onward, "see also", calls to action, a title that only names what follows;
   - "advice": tips and recommendations that say nothing about how the product behaves;
   - "rationale": why something is the way it is, history, motivation;
@@ -563,15 +556,15 @@ Skip only sentences that state no such fact. A skip is a range of consecutive se
 
 # The gate
 
-Every sentence of the window must be cited by at least one fact or lie inside a skip, and no sentence may be both. A fact cites sentences of this window only, and areas the document has. \`check_ledger\` runs exactly the check the run will: call it on your complete draft, fix what it lists, then give the outcome. Sentences outside your window are recorded by other sessions; read another section with \`read_section\` only when a sentence cannot be understood without it.
+Every sentence of the window must be cited by at least one claim or lie inside a skip, and no sentence may be both. A claim cites sentences of this window only, and areas the document has. \`check_ledger\` runs exactly the check the run will: call it on your complete draft, fix what it lists, then give the outcome. Sentences outside your window are recorded by other sessions; read another section with \`read_section\` only when a sentence cannot be understood without it.
 
-Before you give the outcome, re-read each sentence your facts cite and ask what else it says: a second sentence, a recommendation, a condition, a default, an exception or a closure word your facts leave out is a fact still to record.
+Before you give the outcome, re-read each sentence your claims cite and ask what else it says: a second sentence, a recommendation, a condition, a default, an exception or a closure word your claims leave out is a claim still to record.
 
 You have ${EXTRACT_CLAIMS_BUDGET.turns} turns, and one more grant of as many when they run out. Draft the whole ledger in your first turn or two.
 
 # The outcome
 
-One object: { "facts": [{ "sentences": [17], "subject": "Export my data", "statement": "Export my data is under Settings, Account.", "areas": ["core/exports"], "testable": true, "reason": null }], "skips": [{ "from": 1, "to": 3, "why": "navigation" }] }`
+One object: { "claims": [{ "sentences": [17], "subject": "Export my data", "statement": "Export my data is under Settings, Account.", "areas": ["core/exports"], "testable": true, "reason": null }], "skips": [{ "from": 1, "to": 3, "why": "navigation" }] }`
 
 // ---------------------------------------------------------------------------
 // The doc's ledger, folded
@@ -681,8 +674,7 @@ export function claimsFromLedgers(ledgers: readonly DocClaimLedger[], generatedA
 export function docLedgerCounts(ledger: DocClaimLedger): DocLedgerCounts {
   return {
     sentences: ledger.sentences.length,
-    // `facts` is a stored corpus key, kept so earlier corpora keep parsing.
-    facts: ledger.claims.length,
+    claims: ledger.claims.length,
     skipped: ledger.skipped,
     unrecorded: ledger.unrecorded.length,
   }

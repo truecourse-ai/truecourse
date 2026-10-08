@@ -278,7 +278,7 @@ function warmDriver(): { driver: SessionDriver; kinds: string[] } {
             const sentences = [...briefing.matchAll(/^\[(\d+)\]/gm)].map(([, n]) => Number(n));
             input.onEvent({ type: 'tool-result', toolName: 'check_ledger', content: 'complete', isError: false });
             const facts = sentences.map((n) => ({ sentences: [n], subject: `${doc} tokens`, statement: `Unit ${n} of ${doc}.`, areas: [area], testable: true, reason: null }));
-            return { kind: 'outcome', value: { facts, skips: [] } };
+            return { kind: 'outcome', value: { claims: facts, skips: [] } };
           }
           case SETTLE_SUBJECTS_SESSION_KIND: {
             const distinct = [...(input.initialMessages.at(-1) ?? '').matchAll(/^(S\d+) · /gm)].map(([, id]) => id!);

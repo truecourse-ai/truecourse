@@ -29,7 +29,7 @@ const NOTE = 'auth0_id vs auth0_sub for the user identity';
 
 function seedCorpusWithConflict(): void {
   const corpus = {
-    version: 5,
+    version: 6,
     generatedAt: '2026-01-01T00:00:00Z',
     docs: [
       { ref: 'docs/v1.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/users-entity'] },

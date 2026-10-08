@@ -49,7 +49,7 @@ describe('corpus-store', () => {
 
     const read = readCorpus(repo);
     expect(read).not.toBeNull();
-    expect(read!.version).toBe(5);
+    expect(read!.version).toBe(6);
     expect(read!.docs).toEqual(docs);
     expect(read!.areas).toEqual(areas);
     // A written corpus carries no relations field.
@@ -62,7 +62,7 @@ describe('corpus-store', () => {
     fs.writeFileSync(
       corpusFilePath(repo),
       JSON.stringify({
-        version: 5,
+        version: 6,
         generatedAt: '2026-01-01T00:00:00Z',
         docs,
         areas,

@@ -74,7 +74,7 @@ let jobs: StubJobs;
 let context: ContextStore;
 
 const corpus = (): CuratedCorpus => ({
-  version: 5,
+  version: 6,
   generatedAt: '2026-01-01T00:00:00Z',
   docs: [
     { ref: ref(SRC_A, 'one.md'), kind: 'prd', lastTouched: '', areaTags: ['p/c'], sourceId: SRC_A, sourceKind: 'repository' },
@@ -444,7 +444,7 @@ describe('a workspace decision unblocks the generation it freed', () => {
 
   /** Two conflicts in one workspace: SRC_A vs SRC_B, and SRC_C against itself. */
   const twoConflicts = (): CuratedCorpus => ({
-    version: 5,
+    version: 6,
     generatedAt: '2026-01-01T00:00:00Z',
     docs: [
       { ref: ref(SRC_A, 'one.md'), kind: 'prd', lastTouched: '', areaTags: ['p/c'], sourceId: SRC_A, sourceKind: 'repository' },

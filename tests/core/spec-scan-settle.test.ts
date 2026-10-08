@@ -765,7 +765,7 @@ describe('spec-scan.settle-areas — through the run', () => {
 
 describe('spec-scan.settle-areas — the prior corpus through the run', () => {
   const priorCorpus = (ids: string[], docs: Record<string, string[]>) => ({
-    version: 5 as const,
+    version: 6 as const,
     generatedAt: '2026-01-01T00:00:00.000Z',
     docs: Object.entries(docs).map(([ref, areaTags]) => ({ ref, kind: 'spec', lastTouched: '', areaTags })),
     areas: ids.map((id) => ({ id, product: id.split('/')[0]!, concern: id.split('/')[1]!, docRefs: [], conflicts: [] })),

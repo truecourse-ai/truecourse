@@ -128,7 +128,7 @@ describe('splitArea / isProcessArea', () => {
 describe('CuratedCorpusSchema', () => {
   it('parses a minimal corpus (no relations field exists)', () => {
     const parsed = CuratedCorpusSchema.parse({
-      version: 5,
+      version: 6,
       generatedAt: '2026-06-26T00:00:00Z',
       docs: [],
       areas: [],
@@ -138,7 +138,7 @@ describe('CuratedCorpusSchema', () => {
 
   it('an older corpus carrying a relations array still parses; the field is dropped', () => {
     const parsed = CuratedCorpusSchema.parse({
-      version: 5,
+      version: 6,
       generatedAt: '2026-06-26T00:00:00Z',
       docs: [],
       areas: [],
@@ -211,7 +211,7 @@ describe('ConflictSchema (resolution brief)', () => {
 describe('CuratedCorpusSchema (conflict resolution brief)', () => {
   it('parses a corpus whose conflict carries a resolution brief', () => {
     const parsed = CuratedCorpusSchema.parse({
-      version: 5,
+      version: 6,
       generatedAt: '2026-06-26T00:00:00Z',
       docs: [],
       areas: [
@@ -245,19 +245,19 @@ describe('CorpusDocSchema (claim ledger counts)', () => {
   });
 
   it('parses a doc carrying its ledger counts, skipped sentences per reason', () => {
-    const ledger = { sentences: 61, facts: 34, skipped: { navigation: 20, example: 7 }, unrecorded: 0 };
+    const ledger = { sentences: 61, claims: 34, skipped: { navigation: 20, example: 7 }, unrecorded: 0 };
     expect(CorpusDocSchema.parse({ ...doc, ledger }).ledger).toEqual(ledger);
   });
 
   it('rejects a skip reason that is not one of the reasons', () => {
-    const ledger = { sentences: 1, facts: 0, skipped: { boring: 1 }, unrecorded: 0 };
+    const ledger = { sentences: 1, claims: 0, skipped: { boring: 1 }, unrecorded: 0 };
     expect(CorpusDocSchema.safeParse({ ...doc, ledger }).success).toBe(false);
   });
 });
 
 describe('CuratedCorpusSchema (what comparing claims came to)', () => {
   const area = { id: 'core/a', product: 'core', concern: 'a', docRefs: ['docs/a.md'], conflicts: [] };
-  const corpus = { version: 5 as const, generatedAt: '2026-01-01T00:00:00Z', docs: [], areas: [area], skippedDocs: [] };
+  const corpus = { version: 6 as const, generatedAt: '2026-01-01T00:00:00Z', docs: [], areas: [area], skippedDocs: [] };
 
   it('parses a corpus written by any other scan, with no comparison fields', () => {
     const parsed = CuratedCorpusSchema.parse(corpus);
@@ -271,16 +271,16 @@ describe('CuratedCorpusSchema (what comparing claims came to)', () => {
       settledSubjects: 1_100,
       subjectFamilies: 90,
       subjectBatchFamilies: 40,
-      subjectBatchFacts: 320,
-      unplacedFacts: 2,
+      subjectBatchClaims: 320,
+      unplacedClaims: 2,
     };
-    const split = { facts: 749, groups: 210, parts: 3, cutPairs: 57 };
+    const split = { claims: 749, groups: 210, parts: 3, cutPairs: 57 };
     const parsed = CuratedCorpusSchema.parse({
       ...corpus,
-      areas: [{ ...area, comparison: split }, { ...area, id: 'core/b', concern: 'b', comparison: { facts: 12, groups: 3 } }],
+      areas: [{ ...area, comparison: split }, { ...area, id: 'core/b', concern: 'b', comparison: { claims: 12, groups: 3 } }],
       comparison,
     });
     expect(parsed.comparison).toEqual(comparison);
-    expect(parsed.areas.map((a) => a.comparison)).toEqual([split, { facts: 12, groups: 3 }]);
+    expect(parsed.areas.map((a) => a.comparison)).toEqual([split, { claims: 12, groups: 3 }]);
   });
 });

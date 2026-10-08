@@ -23,9 +23,9 @@ const driver = () =>
       await call.emit(toolResult('check_settlement', 'valid'));
       return outcome({ concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] });
     }
-    if (call.kind === 'spec-scan.record-facts') return record(call, () => null);
+    if (call.kind === 'spec-scan.extract-claims') return record(call, () => null);
     if (call.kind === 'spec-scan.settle-subjects') return settle(call);
-    if (call.kind === 'spec-scan.compare-facts') return compare(call);
+    if (call.kind === 'spec-scan.compare-claims') return compare(call);
     return outcome({
       keep: true,
       reason: 'spec',

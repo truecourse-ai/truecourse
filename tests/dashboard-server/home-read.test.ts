@@ -70,7 +70,7 @@ let context: ContextStore;
 
 const corpus = (withConflict = false): CuratedCorpus =>
   ({
-    version: 5,
+    version: 6,
     generatedAt: '2026-01-01T00:00:00Z',
     docs: [
       { ref: REFUNDS, kind: 'prd', lastTouched: '', areaTags: ['acme/payments'], sourceId: SITE, sourceKind: 'site' },

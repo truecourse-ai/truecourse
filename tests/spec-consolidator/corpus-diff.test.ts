@@ -14,7 +14,7 @@ const doc = (ref: string): CuratedCorpus['docs'][number] => ({
 });
 
 const corpus = (docs: string[], areas: Array<{ id: string; docRefs: string[]; conflicts?: [string, string][] }>): CuratedCorpus => ({
-  version: 5,
+  version: 6,
   generatedAt: '2026-01-01T00:00:00Z',
   docs: docs.map(doc),
   areas: areas.map((a) => ({

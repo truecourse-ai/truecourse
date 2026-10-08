@@ -141,9 +141,9 @@ async function keepEverything(call: StubCall) {
   if (call.kind === 'spec-scan.settle-areas') {
     return outcome({ merges: [], renames: [] });
   }
-  if (call.kind === 'spec-scan.record-facts') return record(call, () => null);
+  if (call.kind === 'spec-scan.extract-claims') return record(call, () => null);
   if (call.kind === 'spec-scan.settle-subjects') return settle(call);
-  if (call.kind === 'spec-scan.compare-facts') return compare(call);
+  if (call.kind === 'spec-scan.compare-claims') return compare(call);
   if (call.kind === 'spec-scan.orchestrate') {
     return outcome({ scopeVerdicts: [], instructions: [], findings: [] });
   }

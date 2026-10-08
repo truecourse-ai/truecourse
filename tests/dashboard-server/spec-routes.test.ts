@@ -98,7 +98,7 @@ async function seedWorkspaceCorpus(
 ): Promise<void> {
   const ref = (name: string) => `context/repo-src/docs/${name}`;
   await store.saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', {
-    version: 5,
+    version: 6,
     generatedAt: '2026-01-01T00:00:00Z',
     docs: [
       { ref: ref('v1.md'), kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/appointments'], sourceId: 'repo-src', sourceKind: 'repository' },
@@ -179,7 +179,7 @@ describe('corpus routes (spec-scan redesign)', () => {
     generatedAt = '2026-01-01T00:00:00Z',
   ): Promise<void> => {
     await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', {
-      version: 5,
+      version: 6,
       generatedAt,
       docs: [
         { ref: 'docs/v1.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/appointments'], sourceId: SOURCE },
@@ -260,7 +260,7 @@ describe('corpus routes (spec-scan redesign)', () => {
 
     // A fresh scan drops the excluded doc → the pending signal clears.
     await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', {
-      version: 5,
+      version: 6,
       generatedAt: '2099-01-01T00:00:00Z',
       docs: [
         { ref: 'docs/v1.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/appointments'], sourceId: SOURCE },
@@ -345,7 +345,7 @@ describe('spec docs-content staleness', () => {
   /** A one-doc workspace corpus curated at `generatedAt`. */
   const seed = (generatedAt: string): Promise<void> =>
     saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', {
-      version: 5,
+      version: 6,
       generatedAt,
       docs: [{ ref: DOC, kind: 'spec', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['core/persistence'], sourceId: SOURCE }],
       areas: [{ id: 'core/persistence', product: 'core', concern: 'persistence', docRefs: [DOC], conflicts: [] }],

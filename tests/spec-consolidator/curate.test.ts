@@ -90,9 +90,9 @@ function scanScript(opts: { curate: (call: StubCall) => unknown; conflicts?: Pai
       await call.emit(toolResult('check_settlement', 'valid'));
       return outcome({ concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] });
     }
-    if (call.kind === 'spec-scan.record-facts') return record(call, bodyClaim);
+    if (call.kind === 'spec-scan.extract-claims') return record(call, bodyClaim);
     if (call.kind === 'spec-scan.settle-subjects') return settle(call);
-    if (call.kind === 'spec-scan.compare-facts') {
+    if (call.kind === 'spec-scan.compare-claims') {
       return compare(call, (a, b) => Number(a.id.slice(1)) < Number(b.id.slice(1)) && wanted(a.doc, b.doc), opts.review);
     }
     return outcome(opts.curate(call));
@@ -202,7 +202,7 @@ describe('the scan run', () => {
     const result = await run();
     const read = readCorpus(repo);
     expect(read).not.toBeNull();
-    expect(read!.version).toBe(5);
+    expect(read!.version).toBe(6);
     expect(read!.areas.map((a) => a.id)).toEqual(['core/auth', 'core/users-entity']);
     // The returned in-memory corpus must equal the persisted file (same generatedAt).
     expect(read!.generatedAt).toBe(result.corpus.generatedAt);

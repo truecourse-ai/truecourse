@@ -66,7 +66,7 @@ export interface MaterializedSlice {
 
 /** A corpus that holds nothing — what an empty slice materializes as. */
 const EMPTY_CORPUS: CuratedCorpus = {
-  version: 5,
+  version: 6,
   generatedAt: new Date(0).toISOString(),
   docs: [],
   areas: [],

@@ -292,8 +292,8 @@ describe('settling subjects through the run', () => {
       settledSubjects: 1,
       subjectFamilies: 0,
       subjectBatchFamilies: 0,
-      subjectBatchFacts: 0,
-      unplacedFacts: 0,
+      subjectBatchClaims: 0,
+      unplacedClaims: 0,
     })
     expect(facts).toContainEqual(['subjects', 'subject names: 2 names, 2 of them merged into 1 subject'])
     expect(facts).toContainEqual(['subjects', '5 claims: 2 subject names, 1 settled subject'])

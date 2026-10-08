@@ -39,7 +39,7 @@ describe('guard generate route — open-conflict gate', () => {
 
     await setContextBindings(TEST_ORG, fixture.repoPath, [SOURCE]);
     await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', {
-      version: 5,
+      version: 6,
       generatedAt: '2026-01-01T00:00:00Z',
       docs: [
         { ref: V1, kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['booking/users-entity'], sourceId: SOURCE },
