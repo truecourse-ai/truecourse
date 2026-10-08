@@ -818,5 +818,7 @@ it('briefs the composer with complete case, source, condition and preparation me
   expect(briefing).toContain(`verification: ${JSON.stringify(verification)}`)
   expect(briefing).toContain(`doc: ${DOC}`)
   expect(briefing).toContain(`anchor: ${CLAIMS[0].anchor}`)
-  expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('upstream defects')
+  // A documented failure state is a milestone, never a reason to leave a claim out.
+  expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('Failure states are milestones')
+  expect(FLOWS_SESSION_SYSTEM_PROMPT).not.toContain('no user path reaches')
 })

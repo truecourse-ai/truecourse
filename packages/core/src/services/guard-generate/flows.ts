@@ -90,18 +90,21 @@ A flow is what a USER is trying to achieve, in the order they would do it.
 - Group by GOAL, not by document or section: claims from different documents of the area belong in one flow when the user experiences them as one path.
 
 # Independently provable obligations (enforced by check_flows and final validation)
-Keep normal user journeys separate from implementation inspection, schema checks,
-concurrency guarantees and injected failure/recovery checks. Group only when they
-form an actual dependent path and share the needed verification method. Do not
-make ordinary CRUD depend on proving a transaction implementation or a forced 500.
-Retain every required guarantee, including ones whose verification is unavailable.
-Respect the full verification scope, cases, conditions and preparation metadata below.
+Keep normal user journeys separate from implementation inspection, schema checks
+and concurrency guarantees. Group only when they form an actual dependent path.
+Do not make ordinary CRUD depend on proving a transaction implementation.
 Never merge UI post-save behavior with a protocol POST contract, UI edit/reload with
 unexposed creation timestamps, or a pristine empty ledger with a filtered-empty list.
-Preserve their independent case IDs and source references. Select separate source case IDs for incompatible branches. Claims without cases that still
-mix these boundaries are upstream defects: report them precisely in check_flows;
-do not silently drop clauses, invent case IDs, or broaden proof drivers. A case
-requiring a common transition must keep that transition in its composed path.
+
+# Failure states are milestones
+What a document promises when something goes wrong is a milestone of the flow that
+performs the action: a save that fails and is retried, controls disabled while a
+request is in flight, a load error with its retry, a request answered 400 or 404,
+a conversion that times out. The test reaches these states itself: it can fail or
+delay any request the product makes, send a malformed body, address an id that
+does not exist. Put such a claim in the flow whose action it qualifies, as the
+milestone after the action it qualifies. A claim stays out of every flow only
+when no test could cause its condition at all.
 
 # Reconcile against the EXISTING FLOWS — reinvention is a defect
 When the briefing lists EXISTING FLOWS, they are the corpus as it stands, with proven tests behind them. You are reconciling, not composing from scratch: every existing flow MUST come back as exactly one of
@@ -113,7 +116,7 @@ The EXISTING NO-FLOW DECISIONS are reconciled the same way: a claim that already
 
 # Coverage honesty — the rule you are graded on
 Every case of every claim MUST appear in a milestone selection or a scoped \`noFlowClaims\` selection. Claims without cases are indivisible. No source obligation may be both assigned and marked no-flow. Never silently drop one. A claim MAY appear in more than one flow when it genuinely belongs to both.
-Legitimate \`noFlowClaims\` reasons: the claim is an edge/error condition no user path reaches, it restates another claim, or it describes a static property rather than something a user does. "It didn't fit" is not a reason.
+Legitimate \`noFlowClaims\` reasons: no test could cause the claim's condition, it restates another claim, or it states a build or configuration fact nothing observes through the product (a file path, a setup marker). A value the product returns or shows is observable and belongs in a flow. "It didn't fit" is not a reason, and neither is "an error condition".
 
 # Tools
 - \`read_section\` — open one section of an area doc when the outline alone does not settle how claims relate. The claims themselves are already complete in the briefing.
@@ -156,7 +159,7 @@ export const FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT = promptFingerprint(FLOWS_EPI
  * not make a synthesized flow set wrong; a prompt change that fixes WRONG
  * output bumps its version in the same commit.
  */
-export const FLOWS_STAGE_VERSION = 1
+export const FLOWS_STAGE_VERSION = 2
 export const FLOWS_EPIC_STAGE_VERSION = 1
 
 function sha(text: string): string {
