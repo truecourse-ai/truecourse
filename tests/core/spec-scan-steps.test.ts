@@ -26,10 +26,10 @@ import {
 import { SPEC_SCAN_ORCHESTRATE_SESSION_KIND } from '../../packages/core/src/services/spec-scan/orchestrate'
 import { CURATE_DOC_SESSION_KIND } from '../../packages/core/src/services/spec-scan/curate-doc'
 import { SETTLE_AREAS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-areas'
-import { RECORD_FACTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/record-facts'
+import { EXTRACT_CLAIMS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/extract-claims'
 import { SETTLE_SUBJECTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-subjects'
-import { COMPARE_FACTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/compare-facts'
-import { compare, record, settle } from './spec-scan-facts-stub'
+import { COMPARE_CLAIMS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/compare-claims'
+import { compare, record, settle } from './spec-scan-claims-stub'
 import { readDecisions, writeDecisions, type DecisionsFile } from '../../packages/spec-consolidator/src/index.js'
 import {
   docPathOf,
@@ -99,11 +99,11 @@ async function anyKind(call: StubCall): Promise<DriverResult> {
     case SETTLE_AREAS_SESSION_KIND:
       await call.emit(toolResult('check_settlement', 'valid'))
       return outcome(EMPTY_SETTLEMENT)
-    case RECORD_FACTS_SESSION_KIND:
+    case EXTRACT_CLAIMS_SESSION_KIND:
       return record(call, () => null)
     case SETTLE_SUBJECTS_SESSION_KIND:
       return settle(call)
-    case COMPARE_FACTS_SESSION_KIND:
+    case COMPARE_CLAIMS_SESSION_KIND:
       return compare(call)
     default:
       throw new Error(`unscripted session kind: ${call.kind}`)

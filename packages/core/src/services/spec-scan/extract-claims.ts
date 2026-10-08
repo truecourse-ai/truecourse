@@ -1,9 +1,13 @@
 /**
- * THE FACT RECORD — `spec-scan.record-facts`, one session per WINDOW of one
- * kept prose doc: consecutive sections of its sentences (the doc tree's
- * sentences, packed by `planWindows`). It is the first half of finding conflicts by comparing
- * facts: each session writes the LEDGER of one window, the concrete facts its
- * sentences state and the sentences it skips with a reason.
+ * THE CLAIM EXTRACTION — `spec-scan.record-facts`, one session per WINDOW of
+ * one kept prose doc: consecutive sections of its sentences (the doc tree's
+ * sentences, packed by `planWindows`). It is the first half of finding
+ * conflicts by comparing claims: each session writes the LEDGER of one window,
+ * the concrete claims its sentences state and the sentences it skips with a
+ * reason. The session kind, cache name and key prefix still say "facts": they
+ * are stored names, kept so caches and stored sessions keep matching, and the
+ * model is asked for facts under a `facts` key, the wording its prompt was
+ * tuned with.
  *
  * The session's whole attention is one window of one doc. It is briefed with
  * the doc's ref, title, lifecycle, outline and area tags, and the window's
@@ -13,18 +17,19 @@
  *
  * THE GATE is one function ({@link checkLedger}), run by `check_ledger` on a
  * draft, by `validateOutcome` on the outcome, and again by the run's fold:
- * every sentence of the window is cited by a fact or lies inside a skip; a fact
- * cites 1 to {@link FACT_SENTENCES_MAX} sentences of the window, and one or more of the
- * doc's own area tags as curation wrote them; no sentence is both cited and
- * skipped; a skip for `other` carries a note. A wrapping-up session's outcome
- * is accepted as it stands, and what the gate finds uncovered there is
- * STAMPED into it as `unrecorded`, by the engine, before it is cached: the
- * model's own answer has no such field. An entry the gate refuses never
- * stands: its sentences count as unrecorded unless another entry covers them.
+ * every sentence of the window is cited by a claim or lies inside a skip; a
+ * claim cites 1 to {@link CLAIM_SENTENCES_MAX} sentences of the window, and one
+ * or more of the doc's own area tags as curation wrote them; no sentence is
+ * both cited and skipped; a skip for `other` carries a note. A wrapping-up
+ * session's outcome is accepted as it stands, and what the gate finds
+ * uncovered there is STAMPED into it as `unrecorded`, by the engine, before it
+ * is cached: the model's own answer has no such field. An entry the gate
+ * refuses never stands: its sentences count as unrecorded unless another entry
+ * covers them.
  *
- * A fact carries the doc's RAW area tags; the run canonicalizes them through
+ * A claim carries the doc's RAW area tags; the run canonicalizes them through
  * the settled vocabulary exactly as it does the doc's own tags, so a change in
- * how areas settle never re-records a ledger.
+ * how areas settle never re-extracts a ledger.
  */
 
 import { z } from 'zod'
@@ -37,13 +42,13 @@ import {
   type SessionTool,
 } from '@truecourse/agent-loop'
 import {
-  FactSkipReasonSchema,
+  SentenceSkipReasonSchema,
   docBody,
   normalizeArea,
   type AreaTag,
   type DocCandidate,
   type DocLedgerCounts,
-  type FactSkipReason,
+  type SentenceSkipReason,
   type VocabMap,
 } from '@truecourse/spec-consolidator'
 import {
@@ -72,16 +77,17 @@ import {
   scanCacheKey,
 } from './tools.js'
 
-export const RECORD_FACTS_SESSION_KIND = 'spec-scan.record-facts'
+/** A stored name, kept so stored sessions and their indexes keep matching. */
+export const EXTRACT_CLAIMS_SESSION_KIND = 'spec-scan.record-facts'
 
-/** One entry per doc window. */
-export const RECORD_FACTS_CACHE_NAME = 'consolidator/fact-record'
+/** One entry per doc window. A stored name, kept so cached ledgers keep matching. */
+export const EXTRACT_CLAIMS_CACHE_NAME = 'consolidator/fact-record'
 
 /**
- * THE RECORD STEP'S VERSION, bumped by hand. A prompt change that fixes wrong
+ * THE EXTRACTION'S VERSION, bumped by hand. A prompt change that fixes wrong
  * output bumps it in the same commit; any other prompt edit invalidates nothing.
  */
-export const RECORD_STAGE_VERSION = 3
+export const EXTRACT_STAGE_VERSION = 3
 
 /** Most sentences one window holds. */
 export const RECORD_WINDOW_SENTENCES = 120
@@ -89,8 +95,8 @@ export const RECORD_WINDOW_SENTENCES = 120
 /** Most characters of sentence text one window holds. */
 export const RECORD_WINDOW_CHARS = 24_000
 
-/** Most sentences one fact cites. */
-export const FACT_SENTENCES_MAX = 3
+/** Most sentences one claim cites. */
+export const CLAIM_SENTENCES_MAX = 3
 
 /**
  * The three numbers. A window is read whole from the briefing, so the work is
@@ -101,13 +107,13 @@ export const FACT_SENTENCES_MAX = 3
  * some 10k tokens, and each draft of a ledger over 120 sentences another 5k, so
  * three drafts and their checks sit well under it.
  */
-export const RECORD_FACTS_BUDGET: SessionBudget = { turns: 8, maxResumes: 1, tokenCeiling: 120_000 }
+export const EXTRACT_CLAIMS_BUDGET: SessionBudget = { turns: 8, maxResumes: 1, tokenCeiling: 120_000 }
 
-const RecordedFactWireSchema = z
+const ExtractedClaimWireSchema = z
   .object({
     sentences: z
       .array(z.number().int())
-      .describe(`The numbers of the sentences the fact is stated in: one, or up to ${FACT_SENTENCES_MAX} when it spans them.`),
+      .describe(`The numbers of the sentences the fact is stated in: one, or up to ${CLAIM_SENTENCES_MAX} when it spans them.`),
     subject: z
       .string()
       .describe(
@@ -123,28 +129,32 @@ const RecordedFactWireSchema = z
     reason: ClaimUntestableReasonSchema.nullable().describe('Why the fact is not testable; null when it is.'),
   })
   .strict()
-type RecordedFactWire = z.infer<typeof RecordedFactWireSchema>
+type ExtractedClaimWire = z.infer<typeof ExtractedClaimWireSchema>
 
 const LedgerSkipWireSchema = z
   .object({
     from: z.number().int().describe('The first sentence of the range.'),
     to: z.number().int().describe('The last sentence of the range, inclusive: equal to `from` for one sentence.'),
-    why: FactSkipReasonSchema,
+    why: SentenceSkipReasonSchema,
     note: z.string().optional().describe('What the sentences are. Required when `why` is "other".'),
   })
   .strict()
 type LedgerSkipWire = z.infer<typeof LedgerSkipWireSchema>
 
-/** What the model writes: the window's facts and skips, nothing about its own coverage. */
-export const FactLedgerWireSchema = z
+/**
+ * What the model writes: the window's claims and skips, nothing about its own
+ * coverage. `facts` is the wire key the prompt asks for, kept so cached ledgers
+ * and stored sessions keep matching.
+ */
+export const ClaimLedgerWireSchema = z
   .object({
-    facts: z.array(RecordedFactWireSchema),
+    facts: z.array(ExtractedClaimWireSchema),
     skips: z.array(LedgerSkipWireSchema),
   })
   .strict()
-export type FactLedgerWire = z.infer<typeof FactLedgerWireSchema>
+export type ClaimLedgerWire = z.infer<typeof ClaimLedgerWireSchema>
 
-export const FactLedgerSchema = FactLedgerWireSchema.extend({
+export const ClaimLedgerSchema = ClaimLedgerWireSchema.extend({
   /**
    * The window's sentences the gate found uncovered, ascending. STAMPED by the
    * engine when the outcome is accepted, before it is cached; empty unless the
@@ -152,14 +162,14 @@ export const FactLedgerSchema = FactLedgerWireSchema.extend({
    */
   unrecorded: z.array(z.number().int()),
 }).strict()
-export type FactLedger = z.infer<typeof FactLedgerSchema>
+export type ClaimLedger = z.infer<typeof ClaimLedgerSchema>
 
 // ---------------------------------------------------------------------------
 // The work
 // ---------------------------------------------------------------------------
 
 /** One session's work: one window of one doc. */
-export interface RecordFactsItem {
+export interface ExtractClaimsItem {
   doc: DocCandidate
   /** Every sentence of the doc, numbered. */
   sentences: readonly DocSentence[]
@@ -178,8 +188,8 @@ export function rawAreaTags(tags: readonly AreaTag[]): string[] {
   return [...new Set(tags.map(rawAreaTag))].sort()
 }
 
-/** What files a fact's raw area tag under the corpus's areas. */
-export interface FactAreaContext {
+/** What files a claim's raw area tag under the corpus's areas. */
+export interface ClaimAreaContext {
   /** Each kept doc's tags as its curation verdict wrote them, by ref. */
   rawTags: ReadonlyMap<string, readonly AreaTag[]>
   /** Each doc's area ids in the last scan's corpus, by ref. */
@@ -195,9 +205,9 @@ export interface FactAreaContext {
  * The area ids one raw tag of doc `ref` lands in: the path the doc's own tags
  * take (reconciled with the last scan's, canonicalized, reassigned by the
  * settlement, folded through the settled vocabulary), one tag at a time. A doc
- * a decision pins files every fact under the pinned areas.
+ * a decision pins files every claim under the pinned areas.
  */
-export function factAreaIds(ctx: FactAreaContext, ref: string, raw: string): string[] {
+export function claimAreaIds(ctx: ClaimAreaContext, ref: string, raw: string): string[] {
   const pinned = ctx.pinned.get(ref)
   if (pinned) return [...pinned]
   const tag = (ctx.rawTags.get(ref) ?? []).find((t) => rawAreaTag(t) === raw)
@@ -211,23 +221,23 @@ export function factAreaIds(ctx: FactAreaContext, ref: string, raw: string): str
     .flatMap((t) => normalizeArea(t, ctx.vocab) ?? [])
 }
 
-/** A doc's sentences, and the windows the record step cuts them into. */
+/** A doc's sentences, and the windows the extraction cuts them into. */
 export function recordWindows(doc: DocCandidate): { sentences: readonly DocSentence[]; windows: DocWindow[] } {
   const tree = parseDocTree(doc.path, docBody(doc))
   if (tree.sentences.length === 0) return { sentences: [], windows: [] }
   return { sentences: tree.sentences, windows: planWindows(tree, { maxSentences: RECORD_WINDOW_SENTENCES, maxChars: RECORD_WINDOW_CHARS }) }
 }
 
-/** The record sessions one doc takes: one per window of its sentences. None for a doc with no area tag. */
-export function recordFactsItems(doc: DocCandidate, tags: readonly AreaTag[]): RecordFactsItem[] {
+/** The extraction sessions one doc takes: one per window of its sentences. None for a doc with no area tag. */
+export function extractClaimsItems(doc: DocCandidate, tags: readonly AreaTag[]): ExtractClaimsItem[] {
   const areas = rawAreaTags(tags)
   if (areas.length === 0) return []
   const { sentences, windows } = recordWindows(doc)
   return windows.map((window) => ({ doc, sentences, window, windows: windows.length, areas }))
 }
 
-/** The work item, as the session index and the transcript record it. */
-export function recordFactsWorkItem(item: Pick<RecordFactsItem, 'doc' | 'window'>): string {
+/** The work item, as the session index and the transcript record it. Its `facts:` prefix is a stored name, kept so stored sessions keep matching. */
+export function extractClaimsWorkItem(item: Pick<ExtractClaimsItem, 'doc' | 'window'>): string {
   return `facts:${item.doc.path}:${item.window.from}-${item.window.to}`
 }
 
@@ -238,10 +248,11 @@ export function recordFactsWorkItem(item: Pick<RecordFactsItem, 'doc' | 'window'
  * its raw area tags, the window's sentence range, and the tail (the standing
  * instructions).
  */
-export function recordFactsCacheKey(item: RecordFactsItem, extraParts: readonly string[] = []): string {
+export function extractClaimsCacheKey(item: ExtractClaimsItem, extraParts: readonly string[] = []): string {
   const frontmatter = item.sentences.flatMap((u) => (u.kind === 'frontmatter' ? [`${u.field ?? 'rest'}=${u.text}`] : []))
   return scanCacheKey([
-    `record-facts-v${RECORD_STAGE_VERSION}`,
+    // A stored prefix, kept so cached ledgers keep matching.
+    `record-facts-v${EXTRACT_STAGE_VERSION}`,
     `sentences-v${SENTENCE_SPLITTER_VERSION}`,
     item.doc.path,
     item.doc.contentHash,
@@ -267,12 +278,12 @@ export interface LedgerScope {
 export interface LedgerCheck {
   /** Each entry the gate refuses, and why. */
   problems: string[]
-  /** Window sentences no standing fact cites and no standing skip covers, ascending. */
+  /** Window sentences no standing claim cites and no standing skip covers, ascending. */
   uncovered: number[]
-  /** The facts that stand, in ledger order. */
-  facts: RecordedFactWire[]
-  /** Sentences of standing skips that no standing fact cites, per reason. */
-  skipped: Partial<Record<FactSkipReason, number>>
+  /** The claims that stand, in ledger order. */
+  claims: ExtractedClaimWire[]
+  /** Sentences of standing skips that no standing claim cites, per reason. */
+  skipped: Partial<Record<SentenceSkipReason, number>>
 }
 
 /** `1-3, 5, 7-8`: ascending sentence numbers as ranges, at most `max` of them. */
@@ -290,23 +301,23 @@ export function sentenceRanges(sentences: readonly number[], max = Number.POSITI
   return rest > 0 ? `${ranges.join(', ')}, and ${rest} more` : ranges.join(', ')
 }
 
-function factProblems(fact: RecordedFactWire, scope: LedgerScope, known: ReadonlySet<string>): string[] {
+function claimProblems(claim: ExtractedClaimWire, scope: LedgerScope, known: ReadonlySet<string>): string[] {
   const { from, to } = scope.window
   const problems: string[] = []
-  if (fact.sentences.length === 0 || fact.sentences.length > FACT_SENTENCES_MAX) {
-    problems.push(`cites ${fact.sentences.length} sentences; a fact cites 1 to ${FACT_SENTENCES_MAX}`)
+  if (claim.sentences.length === 0 || claim.sentences.length > CLAIM_SENTENCES_MAX) {
+    problems.push(`cites ${claim.sentences.length} sentences; a fact cites 1 to ${CLAIM_SENTENCES_MAX}`)
   }
-  const outside = fact.sentences.filter((u) => u < from || u > to)
+  const outside = claim.sentences.filter((u) => u < from || u > to)
   if (outside.length > 0) problems.push(`cites sentence ${outside.join(', ')}, outside this window (${from}-${to})`)
-  if (fact.statement.trim() === '') problems.push('has no statement')
-  if (fact.subject.trim() === '') problems.push('has no subject')
-  const unknown = fact.areas.filter((a) => !known.has(a))
-  if (fact.areas.length === 0) problems.push(`names no area; name one or more of ${scope.areas.join(', ')}`)
+  if (claim.statement.trim() === '') problems.push('has no statement')
+  if (claim.subject.trim() === '') problems.push('has no subject')
+  const unknown = claim.areas.filter((a) => !known.has(a))
+  if (claim.areas.length === 0) problems.push(`names no area; name one or more of ${scope.areas.join(', ')}`)
   else if (unknown.length > 0) {
     problems.push(`names ${unknown.map((a) => `"${a}"`).join(', ')}, not an area of this document (${scope.areas.join(', ')})`)
   }
-  if (fact.testable && fact.reason !== null) problems.push(`is testable and gives a reason it is not; the reason is null for a testable fact`)
-  if (!fact.testable && fact.reason === null) problems.push(`is not testable and gives no reason`)
+  if (claim.testable && claim.reason !== null) problems.push(`is testable and gives a reason it is not; the reason is null for a testable fact`)
+  if (!claim.testable && claim.reason === null) problems.push(`is not testable and gives no reason`)
   return problems
 }
 
@@ -324,21 +335,21 @@ function skipProblems(skip: LedgerSkipWire, scope: LedgerScope): string[] {
  * uncovered, and what of it stands: a refused entry covers nothing, and a sentence
  * both cited and skipped counts as cited.
  */
-export function checkLedger(ledger: FactLedgerWire, scope: LedgerScope): LedgerCheck {
+export function checkLedger(ledger: ClaimLedgerWire, scope: LedgerScope): LedgerCheck {
   const known = new Set(scope.areas)
   const problems: string[] = []
-  const facts: RecordedFactWire[] = []
+  const claims: ExtractedClaimWire[] = []
   const cited = new Set<number>()
-  ledger.facts.forEach((fact, i) => {
-    const found = factProblems(fact, scope, known)
+  ledger.facts.forEach((claim, i) => {
+    const found = claimProblems(claim, scope, known)
     if (found.length > 0) {
       problems.push(...found.map((p) => `facts[${i}] ${p}`))
       return
     }
-    facts.push(fact)
-    for (const sentence of fact.sentences) cited.add(sentence)
+    claims.push(claim)
+    for (const sentence of claim.sentences) cited.add(sentence)
   })
-  const skippedAs = new Map<number, FactSkipReason>()
+  const skippedAs = new Map<number, SentenceSkipReason>()
   ledger.skips.forEach((skip, i) => {
     const found = skipProblems(skip, scope)
     if (found.length > 0) {
@@ -352,14 +363,14 @@ export function checkLedger(ledger: FactLedgerWire, scope: LedgerScope): LedgerC
     problems.push(`sentence ${sentenceRanges(both)} is both cited by a fact and skipped; a sentence is one or the other`)
   }
   const uncovered: number[] = []
-  const skipped: Partial<Record<FactSkipReason, number>> = {}
+  const skipped: Partial<Record<SentenceSkipReason, number>> = {}
   for (let sentence = scope.window.from; sentence <= scope.window.to; sentence++) {
     const why = skippedAs.get(sentence)
     if (cited.has(sentence)) continue
     if (why) skipped[why] = (skipped[why] ?? 0) + 1
     else uncovered.push(sentence)
   }
-  return { problems, uncovered, facts, skipped }
+  return { problems, uncovered, claims, skipped }
 }
 
 /** Most problems one refusal lists; the rest are counted. */
@@ -384,13 +395,14 @@ export function ledgerRefusal(check: LedgerCheck): string | undefined {
   return `Ledger refused.\n\n${parts.join('\n\n')}\n\nFix these and check the whole ledger again.`
 }
 
-const skippedTotal = (skipped: Partial<Record<FactSkipReason, number>>): number =>
+const skippedTotal = (skipped: Partial<Record<SentenceSkipReason, number>>): number =>
   Object.values(skipped).reduce((sum, n) => sum + (n ?? 0), 0)
 
 const CHECK_LEDGER = defineToolSpec({
   name: 'check_ledger',
   description:
     'Check a draft ledger the way the run will: every sentence of your window cited by a fact or inside a skip, each fact citing 1 to 3 sentences of the window and areas the document has, a reason on every fact that is not testable and none on one that is, no sentence both cited and skipped, a note on every "other" skip. Call it on your complete draft before you give the outcome.',
+  // A stored name, kept so stored transcripts keep matching.
   kind: 'check-fact-ledger',
   readOnly: true,
   destructive: false,
@@ -398,7 +410,7 @@ const CHECK_LEDGER = defineToolSpec({
     one: 'I checked that every sentence of the window is recorded or skipped',
     many: 'I checked that every sentence of the window is recorded or skipped, {n} passes',
   },
-  inputSchema: FactLedgerWireSchema,
+  inputSchema: ClaimLedgerWireSchema,
 })
 
 function checkLedgerTool(scope: LedgerScope): SessionTool {
@@ -408,7 +420,7 @@ function checkLedgerTool(scope: LedgerScope): SessionTool {
       const refusal = ledgerRefusal(check)
       if (refusal) return { content: refusal, isError: true }
       return {
-        content: `The ledger is complete: ${check.facts.length} fact(s), ${skippedTotal(check.skipped)} sentence(s) skipped, every sentence from ${scope.window.from} to ${scope.window.to} accounted for. Give it as the outcome.`,
+        content: `The ledger is complete: ${check.claims.length} fact(s), ${skippedTotal(check.skipped)} sentence(s) skipped, every sentence from ${scope.window.from} to ${scope.window.to} accounted for. Give it as the outcome.`,
       }
     },
   })
@@ -418,36 +430,36 @@ function checkLedgerTool(scope: LedgerScope): SessionTool {
 // The session
 // ---------------------------------------------------------------------------
 
-const RECORD_FACTS_SESSION = defineSessionKind({
-  kind: RECORD_FACTS_SESSION_KIND,
-  outcomeSchema: FactLedgerSchema,
-  outcomeInputSchema: FactLedgerWireSchema,
+const EXTRACT_CLAIMS_SESSION = defineSessionKind({
+  kind: EXTRACT_CLAIMS_SESSION_KIND,
+  outcomeSchema: ClaimLedgerSchema,
+  outcomeInputSchema: ClaimLedgerWireSchema,
 })
 
-function presentLedger(ledger: FactLedger): KnownDisplayBlock[] {
+function presentLedger(ledger: ClaimLedger): KnownDisplayBlock[] {
   const skipped = ledger.skips.reduce((sum, s) => sum + Math.max(0, s.to - s.from + 1), 0)
   const testable = ledger.facts.filter((f) => f.testable).length
   const lines = [
-    `I recorded ${ledger.facts.length} fact${ledger.facts.length === 1 ? '' : 's'}, ${testable} of them testable, and skipped ${skipped} sentence${skipped === 1 ? '' : 's'}`,
+    `I extracted ${ledger.facts.length} claim${ledger.facts.length === 1 ? '' : 's'}, ${testable} of them testable, and skipped ${skipped} sentence${skipped === 1 ? '' : 's'}`,
   ]
   if (ledger.unrecorded.length > 0) lines.push(`I left sentence ${sentenceRanges(ledger.unrecorded, REFUSAL_RANGES_MAX)} unrecorded`)
   return [{ kind: 'facts', lines }]
 }
 
-export function recordFactsSessionDef(item: RecordFactsItem): SessionDef<FactLedger> {
+export function extractClaimsSessionDef(item: ExtractClaimsItem): SessionDef<ClaimLedger> {
   const scope: LedgerScope = { window: item.window, areas: item.areas }
   return {
-    ...RECORD_FACTS_SESSION,
-    systemPrompt: RECORD_FACTS_SYSTEM_PROMPT,
+    ...EXTRACT_CLAIMS_SESSION,
+    systemPrompt: EXTRACT_CLAIMS_SYSTEM_PROMPT,
     tools: [readSectionTool(buildScanUniverse([item.doc])), checkLedgerTool(scope)],
-    budget: RECORD_FACTS_BUDGET,
+    budget: EXTRACT_CLAIMS_BUDGET,
     display: {
-      title: 'Fact record',
-      intro: `I'm recording what sentences ${item.window.from} to ${item.window.to} of ${item.doc.path} state, one sentence at a time.`,
+      title: 'Claim extraction',
+      intro: `I'm extracting what sentences ${item.window.from} to ${item.window.to} of ${item.doc.path} state, one sentence at a time.`,
     },
     // The gaps are stamped by the engine over whatever the model wrote.
     resolveOutcome: (value) => {
-      const wire = FactLedgerWireSchema.parse(value)
+      const wire = ClaimLedgerWireSchema.parse(value)
       return { ...wire, unrecorded: checkLedger(wire, scope).uncovered }
     },
     // Wrapping up, the ledger is taken as it stands, its gaps stamped on it.
@@ -461,7 +473,7 @@ export function recordFactsSessionDef(item: RecordFactsItem): SessionDef<FactLed
   }
 }
 
-export function recordFactsBriefing(item: RecordFactsItem, instructions: readonly string[] = []): string {
+export function extractClaimsBriefing(item: ExtractClaimsItem, instructions: readonly string[] = []): string {
   const { doc, sentences, window } = item
   const lines = [
     ...instructionsBriefingBlock(instructions),
@@ -491,7 +503,7 @@ export function recordFactsBriefing(item: RecordFactsItem, instructions: readonl
   return lines.join('\n')
 }
 
-export const RECORD_FACTS_SYSTEM_PROMPT = `You record the FACTS one documentation file states, sentence by sentence. The briefing gives you one WINDOW of one document: its sentences, numbered. A sentence here is a sentence of a paragraph or of a list item (an item's first sentence carries its marker, its later ones are indented under it), or one table row, one code block or part of a long one, a frontmatter title or description, a run of the frontmatter's other lines, or the title a component gives its content. Your outcome is the window's LEDGER: the facts its sentences state, and the sentences you skip.
+export const EXTRACT_CLAIMS_SYSTEM_PROMPT = `You record the FACTS one documentation file states, sentence by sentence. The briefing gives you one WINDOW of one document: its sentences, numbered. A sentence here is a sentence of a paragraph or of a list item (an item's first sentence carries its marker, its later ones are indented under it), or one table row, one code block or part of a long one, a frontmatter title or description, a run of the frontmatter's other lines, or the title a component gives its content. Your outcome is the window's LEDGER: the facts its sentences state, and the sentences you skip.
 
 # What a fact is
 
@@ -555,7 +567,7 @@ Every sentence of the window must be cited by at least one fact or lie inside a 
 
 Before you give the outcome, re-read each sentence your facts cite and ask what else it says: a second sentence, a recommendation, a condition, a default, an exception or a closure word your facts leave out is a fact still to record.
 
-You have ${RECORD_FACTS_BUDGET.turns} turns, and one more grant of as many when they run out. Draft the whole ledger in your first turn or two.
+You have ${EXTRACT_CLAIMS_BUDGET.turns} turns, and one more grant of as many when they run out. Draft the whole ledger in your first turn or two.
 
 # The outcome
 
@@ -565,9 +577,9 @@ One object: { "facts": [{ "sentences": [17], "subject": "Export my data", "state
 // The doc's ledger, folded
 // ---------------------------------------------------------------------------
 
-/** One recorded fact as the run keeps it. */
-export interface RecordedFact {
-  /** The doc it is recorded from, by ref. */
+/** One extracted claim as the run keeps it. */
+export interface ExtractedClaim {
+  /** The doc it is extracted from, by ref. */
   doc: string
   /** The sentences it cites, in doc order. */
   sentences: DocSentence[]
@@ -579,15 +591,15 @@ export interface RecordedFact {
   testable: Claim['testable']
 }
 
-/** One doc's facts and skips across its windows, as the run folds them. */
-export interface DocFactLedger {
+/** One doc's claims and skips across its windows, as the run folds them. */
+export interface DocClaimLedger {
   doc: string
   /** Every sentence of the doc. */
   sentences: readonly DocSentence[]
-  facts: RecordedFact[]
+  claims: ExtractedClaim[]
   /** Sentences skipped, per reason. */
-  skipped: Partial<Record<FactSkipReason, number>>
-  /** Sentences the recording left unaccounted for, ascending. */
+  skipped: Partial<Record<SentenceSkipReason, number>>
+  /** Sentences the extraction left unaccounted for, ascending. */
   unrecorded: number[]
   /** Windows whose session failed: their sentences are in none of the lists. */
   failed: DocWindow[]
@@ -599,18 +611,18 @@ export interface DocLedgerInput {
   /** The doc's raw area tags. */
   areas: readonly string[]
   /** Each window's ledger, `null` for one whose session failed. */
-  windows: ReadonlyArray<{ window: DocWindow; ledger: FactLedgerWire | null }>
+  windows: ReadonlyArray<{ window: DocWindow; ledger: ClaimLedgerWire | null }>
   /** The canonical area ids one raw tag of this doc lands in. */
   canonicalAreas: (raw: string) => readonly string[]
 }
 
 /**
  * A doc's ledger from its windows' outcomes, each re-checked by the gate: only
- * what stands is kept, and a fact's raw areas become canonical area ids.
+ * what stands is kept, and a claim's raw areas become canonical area ids.
  */
-export function docFactLedger(input: DocLedgerInput): DocFactLedger {
-  const facts: RecordedFact[] = []
-  const skipped: Partial<Record<FactSkipReason, number>> = {}
+export function docClaimLedger(input: DocLedgerInput): DocClaimLedger {
+  const claims: ExtractedClaim[] = []
+  const skipped: Partial<Record<SentenceSkipReason, number>> = {}
   const unrecorded: number[] = []
   const failed: DocWindow[] = []
   for (const { window, ledger } of [...input.windows].sort((a, b) => a.window.from - b.window.from)) {
@@ -619,46 +631,46 @@ export function docFactLedger(input: DocLedgerInput): DocFactLedger {
       continue
     }
     const check = checkLedger(ledger, { window, areas: input.areas })
-    for (const fact of check.facts) {
-      facts.push({
+    for (const claim of check.claims) {
+      claims.push({
         doc: input.doc,
-        sentences: [...new Set(fact.sentences)].sort((a, b) => a - b).flatMap((n) => input.sentences[n - 1] ?? []),
-        subject: fact.subject.trim(),
-        statement: fact.statement.trim(),
-        areas: [...new Set(fact.areas.flatMap((raw) => input.canonicalAreas(raw)))].sort(),
-        testable: fact.testable || fact.reason === null ? true : { reason: fact.reason },
+        sentences: [...new Set(claim.sentences)].sort((a, b) => a - b).flatMap((n) => input.sentences[n - 1] ?? []),
+        subject: claim.subject.trim(),
+        statement: claim.statement.trim(),
+        areas: [...new Set(claim.areas.flatMap((raw) => input.canonicalAreas(raw)))].sort(),
+        testable: claim.testable || claim.reason === null ? true : { reason: claim.reason },
       })
     }
-    for (const reason of FactSkipReasonSchema.options) {
+    for (const reason of SentenceSkipReasonSchema.options) {
       const n = check.skipped[reason]
       if (n !== undefined) skipped[reason] = (skipped[reason] ?? 0) + n
     }
     unrecorded.push(...check.uncovered)
   }
-  return { doc: input.doc, sentences: input.sentences, facts, skipped, unrecorded, failed }
+  return { doc: input.doc, sentences: input.sentences, claims, skipped, unrecorded, failed }
 }
 
 /**
- * The claims the ledgers hold, as the scan stores them: one per fact, named by
+ * The claims the ledgers hold, as the scan stores them: one per extracted claim, named by
  * its doc and the keys of the sentences it cites, in corpus and doc order.
  */
-export function claimsFromLedgers(ledgers: readonly DocFactLedger[], generatedAt: string): ClaimsFile {
+export function claimsFromLedgers(ledgers: readonly DocClaimLedger[], generatedAt: string): ClaimsFile {
   const claims: Claim[] = []
   const seen = new Map<string, number>()
   for (const ledger of ledgers) {
-    for (const fact of ledger.facts) {
-      const sentences = fact.sentences.map((s) => sentenceKey(s.text, s.repeat))
-      const identity = `${fact.doc}\0${[...sentences].sort().join('\0')}`
+    for (const claim of ledger.claims) {
+      const sentences = claim.sentences.map((s) => sentenceKey(s.text, s.repeat))
+      const identity = `${claim.doc}\0${[...sentences].sort().join('\0')}`
       const repeat = seen.get(identity) ?? 0
       seen.set(identity, repeat + 1)
       claims.push({
-        id: claimId(fact.doc, sentences, repeat),
-        doc: fact.doc,
+        id: claimId(claim.doc, sentences, repeat),
+        doc: claim.doc,
         sentences,
-        subject: fact.subject,
-        statement: fact.statement,
-        areas: fact.areas,
-        testable: fact.testable,
+        subject: claim.subject,
+        statement: claim.statement,
+        areas: claim.areas,
+        testable: claim.testable,
       })
     }
   }
@@ -666,25 +678,26 @@ export function claimsFromLedgers(ledgers: readonly DocFactLedger[], generatedAt
 }
 
 /** What a doc's ledger came to, counted, as the corpus records it. */
-export function docLedgerCounts(ledger: DocFactLedger): DocLedgerCounts {
+export function docLedgerCounts(ledger: DocClaimLedger): DocLedgerCounts {
   return {
     sentences: ledger.sentences.length,
-    facts: ledger.facts.length,
+    // `facts` is a stored corpus key, kept so earlier corpora keep parsing.
+    facts: ledger.claims.length,
     skipped: ledger.skipped,
     unrecorded: ledger.unrecorded.length,
   }
 }
 
-/** A doc's ledger in one line: `61 sentences, 34 facts, 27 skipped`, and what is missing. */
-export function describeDocLedger(ledger: DocFactLedger, windows: number): string {
+/** A doc's ledger in one line: `61 sentences, 34 claims, 27 skipped`, and what is missing. */
+export function describeDocLedger(ledger: DocClaimLedger, windows: number): string {
   const parts = [
     `${ledger.sentences.length} sentence${ledger.sentences.length === 1 ? '' : 's'}`,
-    `${ledger.facts.length} fact${ledger.facts.length === 1 ? '' : 's'}`,
+    `${ledger.claims.length} claim${ledger.claims.length === 1 ? '' : 's'}`,
     `${skippedTotal(ledger.skipped)} skipped`,
   ]
   if (ledger.unrecorded.length > 0) parts.push(`${ledger.unrecorded.length} unrecorded`)
   if (ledger.failed.length > 0) {
-    parts.push(`${ledger.failed.length} of ${windows} window${windows === 1 ? '' : 's'} not recorded, the session failed`)
+    parts.push(`${ledger.failed.length} of ${windows} window${windows === 1 ? '' : 's'} not extracted, the session failed`)
   }
   return parts.join(', ')
 }

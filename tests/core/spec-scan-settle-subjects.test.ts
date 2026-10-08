@@ -1,10 +1,10 @@
 /**
  * THE SUBJECT SETTLING — `spec-scan.settle-subjects`, the barrier between
- * recording facts and comparing them.
+ * extracting claims and comparing them.
  *
  * What is under test:
  * - names equal but for case, spacing and markup are one name before any
- *   session runs, briefed once with their facts counted together;
+ *   session runs, briefed once with their claims counted together;
  * - the parts the names are settled in, and that a part of one name runs no
  *   session;
  * - the gate: a name placed twice, a name placed nowhere, an unknown id, a
@@ -25,8 +25,8 @@ import { LlmStageFailureError } from '@truecourse/shared/llm'
 import { runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run'
 import { CURATE_DOC_SESSION_KIND } from '../../packages/core/src/services/spec-scan/curate-doc'
 import { SETTLE_AREAS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-areas'
-import { RECORD_FACTS_SESSION_KIND, type RecordedFact } from '../../packages/core/src/services/spec-scan/record-facts'
-import { COMPARE_FACTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/compare-facts'
+import { EXTRACT_CLAIMS_SESSION_KIND, type ExtractedClaim } from '../../packages/core/src/services/spec-scan/extract-claims'
+import { COMPARE_CLAIMS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/compare-claims'
 import {
   SETTLE_SUBJECTS_NAMES,
   SETTLE_SUBJECTS_SESSION_KIND,
@@ -47,7 +47,7 @@ import { instructionsFingerprint, scanCacheKey } from '../../packages/core/src/s
 import { writeDecisions, type DecisionsFile } from '../../packages/spec-consolidator/src/index.js'
 import { splitDocSentences } from '@truecourse/shared'
 import { docPathOf, memoryPersistence, outcome, stubDriver, transportFailure, malformedFailure, type StubCall } from './spec-scan-session-stub'
-import { compare, compareBriefing, record, settle, subjectNames, type SentenceFact } from './spec-scan-facts-stub'
+import { compare, compareBriefing, record, settle, subjectNames, type SentenceClaim } from './spec-scan-claims-stub'
 import type { DriverResult } from '../../packages/agent-loop/src/index'
 
 // ---------------------------------------------------------------------------
@@ -55,7 +55,7 @@ import type { DriverResult } from '../../packages/agent-loop/src/index'
 // ---------------------------------------------------------------------------
 
 const UNITS = splitDocSentences('One.\n\nTwo.\n\nThree.\n')
-const fact = (doc: string, subject: string, statement = `${subject} works.`): RecordedFact => ({
+const claim = (doc: string, subject: string, statement = `${subject} works.`): ExtractedClaim => ({
   doc,
   sentences: [UNITS[0]!],
   subject,
@@ -74,24 +74,24 @@ describe('subject names before any session runs', () => {
     expect(subjectKey('ENCRYPTION_SECRET')).not.toBe(subjectKey('ENCRYPTION SECRET'))
   })
 
-  it('count their facts and docs together, and take the spelling most facts use', () => {
+  it('count their claims and docs together, and take the spelling most claims use', () => {
     const names = collectSubjectNames([
-      fact('docs/a.md', 'ATS checker', 'The ATS checker scores a resume.'),
-      fact('docs/b.md', 'ats  checker'),
-      fact('docs/b.md', '`ATS checker`'),
-      fact('docs/c.md', 'ATS checker'),
-      fact('docs/a.md', 'Export my data'),
+      claim('docs/a.md', 'ATS checker', 'The ATS checker scores a resume.'),
+      claim('docs/b.md', 'ats  checker'),
+      claim('docs/b.md', '`ATS checker`'),
+      claim('docs/c.md', 'ATS checker'),
+      claim('docs/a.md', 'Export my data'),
     ])
     expect(names).toEqual([
-      { key: 'ats checker', name: 'ATS checker', facts: 4, docs: 3, sample: 'The ATS checker scores a resume.' },
-      { key: 'export my data', name: 'Export my data', facts: 1, docs: 1, sample: 'Export my data works.' },
+      { key: 'ats checker', name: 'ATS checker', claims: 4, docs: 3, sample: 'The ATS checker scores a resume.' },
+      { key: 'export my data', name: 'Export my data', claims: 1, docs: 1, sample: 'Export my data works.' },
     ])
   })
 })
 
 describe('planSubjectParts', () => {
   const names = (n: number): SubjectName[] =>
-    collectSubjectNames(Array.from({ length: n }, (_, i) => fact('docs/a.md', `setting ${i} of group${i % 50}`)))
+    collectSubjectNames(Array.from({ length: n }, (_, i) => claim('docs/a.md', `setting ${i} of group${i % 50}`)))
 
   it('settles every name at once up to the bound, and plans nothing for a single name', () => {
     const all = names(40)
@@ -117,10 +117,10 @@ const PART: SubjectPart = {
   parts: 1,
   total: 4,
   names: collectSubjectNames([
-    fact('docs/a.md', 'ATS check'),
-    fact('docs/a.md', 'ATS checker'),
-    fact('docs/b.md', 'Export my data'),
-    fact('docs/b.md', 'resume checker'),
+    claim('docs/a.md', 'ATS check'),
+    claim('docs/a.md', 'ATS checker'),
+    claim('docs/b.md', 'Export my data'),
+    claim('docs/b.md', 'resume checker'),
   ]),
 }
 
@@ -169,11 +169,11 @@ describe('the settling gate', () => {
     ])
   })
 
-  it('maps every fact to its settled subject, and an unmerged one to its name as most spelled', () => {
-    const facts = [fact('docs/a.md', 'resume checker'), fact('docs/a.md', 'export my data'), fact('docs/b.md', 'Export my data'), fact('docs/c.md', 'Export my data')]
-    const names = collectSubjectNames(facts)
-    const settled = settledSubjects(facts, names, new Map([['resume checker', 'ATS checker']]))
-    expect(facts.map((f) => settled.get(f))).toEqual(['ATS checker', 'Export my data', 'Export my data', 'Export my data'])
+  it('maps every claim to its settled subject, and an unmerged one to its name as most spelled', () => {
+    const claims = [claim('docs/a.md', 'resume checker'), claim('docs/a.md', 'export my data'), claim('docs/b.md', 'Export my data'), claim('docs/c.md', 'Export my data')]
+    const names = collectSubjectNames(claims)
+    const settled = settledSubjects(claims, names, new Map([['resume checker', 'ATS checker']]))
+    expect(claims.map((c) => settled.get(c))).toEqual(['ATS checker', 'Export my data', 'Export my data', 'Export my data'])
   })
 })
 
@@ -191,9 +191,9 @@ describe('settleSubjectsCacheKey', () => {
     )
   })
 
-  it('moves with a name, a fact count and the instructions, never with a sample or a doc count', () => {
+  it('moves with a name, a claim count and the instructions, never with a sample or a doc count', () => {
     const renamed = { ...PART, names: PART.names.map((n, i) => (i === 0 ? { ...n, name: 'ATS checks' } : n)) }
-    const counted = { ...PART, names: PART.names.map((n, i) => (i === 0 ? { ...n, facts: 2 } : n)) }
+    const counted = { ...PART, names: PART.names.map((n, i) => (i === 0 ? { ...n, claims: 2 } : n)) }
     const resampled = { ...PART, names: PART.names.map((n) => ({ ...n, sample: 'Another statement.', docs: 7 })) }
     expect(key(renamed)).not.toBe(KEY)
     expect(key(counted)).not.toBe(KEY)
@@ -211,8 +211,8 @@ const DOCS: Record<string, string> = {
   'docs/review.md': '# Review\n\nThe resume checker flags missing keywords.\n\nThe `ATS checker` needs an AI provider.\n',
 }
 
-/** Every sentence a fact, its subject the checker it names as written. */
-const checkerFact: SentenceFact = ({ line }) => {
+/** Every sentence a claim, its subject the checker it names as written. */
+const checkerClaim: SentenceClaim = ({ line }) => {
   const named = /(ATS checker|ATS Checker|resume checker|`ATS checker`)/.exec(line)?.[1]
   return named ? { subject: named, statement: line } : null
 }
@@ -252,11 +252,11 @@ async function scan(settleWith: (call: StubCall) => DriverResult | Promise<Drive
         return outcome({ keep: true, reason: 'spec', areas: [{ product: 'core', concern: 'checker' }] })
       case SETTLE_AREAS_SESSION_KIND:
         return outcome({ concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] })
-      case RECORD_FACTS_SESSION_KIND:
-        return record(call, checkerFact)
+      case EXTRACT_CLAIMS_SESSION_KIND:
+        return record(call, checkerClaim)
       case SETTLE_SUBJECTS_SESSION_KIND:
         return settleWith(call)
-      case COMPARE_FACTS_SESSION_KIND:
+      case COMPARE_CLAIMS_SESSION_KIND:
         return compare(call)
       default:
         throw new Error(`unscripted ${call.kind} ${docPathOf(call.briefing)}`)
@@ -276,16 +276,16 @@ async function scan(settleWith: (call: StubCall) => DriverResult | Promise<Drive
 const briefingsOf = (calls: readonly StubCall[], kind: string): string[] => calls.filter((c) => c.kind === kind).map((c) => c.briefing)
 
 describe('settling subjects through the run', () => {
-  it('briefs names equal but for markup once, then compares the facts under their settled subjects', async () => {
+  it('briefs names equal but for markup once, then compares the claims under their settled subjects', async () => {
     const { result, stub, facts } = await scan((call) => settle(call, (name) => (/checker/i.test(name) ? 'ATS checker' : null)))
     const [settleBriefing] = briefingsOf(stub.calls, SETTLE_SUBJECTS_SESSION_KIND)
     // "ATS checker", "ATS Checker" and "`ATS checker`" are one name before the
-    // session runs, spelled as most of its facts spell it.
+    // session runs, spelled as most of its claims spell it.
     expect(subjectNames(settleBriefing!)).toEqual([
-      { id: 'S1', name: 'ATS checker', facts: 4 },
-      { id: 'S2', name: 'resume checker', facts: 1 },
+      { id: 'S1', name: 'ATS checker', claims: 4 },
+      { id: 'S2', name: 'resume checker', claims: 1 },
     ])
-    const compared = briefingsOf(stub.calls, COMPARE_FACTS_SESSION_KIND).flatMap(compareBriefing)
+    const compared = briefingsOf(stub.calls, COMPARE_CLAIMS_SESSION_KIND).flatMap(compareBriefing)
     expect(compared.map((f) => f.subject)).toEqual(Array(5).fill('ATS checker'))
     expect(result.corpus.comparison).toEqual({
       subjectNames: 2,
@@ -296,10 +296,10 @@ describe('settling subjects through the run', () => {
       unplacedFacts: 0,
     })
     expect(facts).toContainEqual(['subjects', 'subject names: 2 names, 2 of them merged into 1 subject'])
-    expect(facts).toContainEqual(['subjects', '5 facts: 2 subject names, 1 settled subject'])
+    expect(facts).toContainEqual(['subjects', '5 claims: 2 subject names, 1 settled subject'])
   })
 
-  it('merges nothing when its session fails: the facts keep their names as written', async () => {
+  it('merges nothing when its session fails: the claims keep their names as written', async () => {
     const { result, facts } = await scan(() => malformedFailure())
     expect(result.corpus.comparison).toMatchObject({ subjectNames: 2, settledSubjects: 2 })
     expect(facts).toContainEqual(['subjects', 'subject names: the session failed, its 2 names stay as written'])

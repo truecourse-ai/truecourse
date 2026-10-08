@@ -85,22 +85,22 @@ import {
   type CorpusReviewOutcome,
 } from '../spec-scan/corpus-review.js';
 import {
-  FactLedgerSchema,
-  RECORD_FACTS_BUDGET,
-  RECORD_FACTS_CACHE_NAME,
-  RECORD_FACTS_SESSION_KIND,
-  RECORD_FACTS_SYSTEM_PROMPT,
-  docFactLedger,
-  factAreaIds,
-  recordFactsBriefing,
-  recordFactsCacheKey,
-  recordFactsItems,
+  ClaimLedgerSchema,
+  EXTRACT_CLAIMS_BUDGET,
+  EXTRACT_CLAIMS_CACHE_NAME,
+  EXTRACT_CLAIMS_SESSION_KIND,
+  EXTRACT_CLAIMS_SYSTEM_PROMPT,
+  docClaimLedger,
+  claimAreaIds,
+  extractClaimsBriefing,
+  extractClaimsCacheKey,
+  extractClaimsItems,
   recordWindows,
   RECORD_WINDOW_CHARS,
-  type FactAreaContext,
-  type FactLedger,
-  type RecordFactsItem,
-} from '../spec-scan/record-facts.js';
+  type ClaimAreaContext,
+  type ClaimLedger,
+  type ExtractClaimsItem,
+} from '../spec-scan/extract-claims.js';
 import {
   SETTLE_SUBJECTS_BUDGET,
   SETTLE_SUBJECTS_CACHE_NAME,
@@ -117,17 +117,17 @@ import {
   type SubjectPart,
 } from '../spec-scan/settle-subjects.js';
 import {
-  COMPARE_BATCH_FACTS,
-  COMPARE_FACTS_BUDGET,
-  COMPARE_FACTS_CACHE_NAME,
-  COMPARE_FACTS_SESSION_KIND,
-  COMPARE_FACTS_SYSTEM_PROMPT,
-  FactComparisonSchema,
-  compareFactsBriefing,
-  compareFactsCacheKey,
+  COMPARE_BATCH_CLAIMS,
+  COMPARE_CLAIMS_BUDGET,
+  COMPARE_CLAIMS_CACHE_NAME,
+  COMPARE_CLAIMS_SESSION_KIND,
+  COMPARE_CLAIMS_SYSTEM_PROMPT,
+  ClaimComparisonSchema,
+  compareClaimsBriefing,
+  compareClaimsCacheKey,
   planCompareBatches,
   type CompareItem,
-} from '../spec-scan/compare-facts.js';
+} from '../spec-scan/compare-claims.js';
 import type { ScanStep } from '../spec-scan/run.js';
 import {
   planGuardWork,
@@ -287,9 +287,9 @@ const STAGE_LABELS: Record<string, string> = {
   [CURATE_DOC_SESSION_KIND]: 'Curating docs',
   [SETTLE_AREAS_SESSION_KIND]: 'Settling areas',
   [CORPUS_REVIEW_SESSION_KIND]: 'Reviewing the corpus',
-  [RECORD_FACTS_SESSION_KIND]: 'Recording facts',
+  [EXTRACT_CLAIMS_SESSION_KIND]: 'Extracting claims',
   [SETTLE_SUBJECTS_SESSION_KIND]: 'Settling subjects',
-  [COMPARE_FACTS_SESSION_KIND]: 'Comparing facts',
+  [COMPARE_CLAIMS_SESSION_KIND]: 'Comparing claims',
   // guard setup (session kinds)
   [RECIPE_REPAIR_SESSION_KIND]: 'Repairing the recipe',
   [DEPENDENCY_CATALOG_SESSION_KIND]: 'Classifying dependencies',
@@ -318,9 +318,9 @@ const EXPECTED_TURNS: Record<string, number> = {
   [CURATE_DOC_SESSION_KIND]: 2,
   [SETTLE_AREAS_SESSION_KIND]: 4,
   [CORPUS_REVIEW_SESSION_KIND]: 15,
-  [RECORD_FACTS_SESSION_KIND]: 4, // a draft, a check, a correction, the outcome
+  [EXTRACT_CLAIMS_SESSION_KIND]: 4, // a draft, a check, a correction, the outcome
   [SETTLE_SUBJECTS_SESSION_KIND]: 3, // a draft checked, a correction, the outcome
-  [COMPARE_FACTS_SESSION_KIND]: 8, // a draft, a few batched reads, a check, a correction, the outcome
+  [COMPARE_CLAIMS_SESSION_KIND]: 8, // a draft, a few batched reads, a check, a correction, the outcome
   // guard setup — provisional, to re-ground on transcript data.
   [RECIPE_REPAIR_SESSION_KIND]: 8,
   [DEPENDENCY_CATALOG_SESSION_KIND]: 6,
@@ -347,9 +347,9 @@ const SESSION_OUTPUT_TOKENS: Record<string, number> = {
   [CURATE_DOC_SESSION_KIND]: 120,
   [SETTLE_AREAS_SESSION_KIND]: 250,
   [CORPUS_REVIEW_SESSION_KIND]: 300,
-  [RECORD_FACTS_SESSION_KIND]: 2_500, // the draft checked and the outcome each carry the whole ledger
+  [EXTRACT_CLAIMS_SESSION_KIND]: 2_500, // the draft checked and the outcome each carry the whole ledger
   [SETTLE_SUBJECTS_SESSION_KIND]: 5_000, // the draft checked and the outcome each name every id of the list
-  [COMPARE_FACTS_SESSION_KIND]: 1_600, // every id once in each draft and the outcome, a review per conflict
+  [COMPARE_CLAIMS_SESSION_KIND]: 1_600, // every id once in each draft and the outcome, a review per conflict
   // guard setup — provisional.
   [RECIPE_REPAIR_SESSION_KIND]: 300,
   [DEPENDENCY_CATALOG_SESSION_KIND]: 500,
@@ -365,13 +365,13 @@ const SESSION_OUTPUT_TOKENS: Record<string, number> = {
   [FIDELITY_SESSION_KIND]: 60, // a verdict + a one-sentence mismatch
 };
 /**
- * Facts a sentence states on average, for the windows not yet recorded: measured
- * on a 72-doc corpus, 3,390 facts over 5,121 sentences.
+ * Claims a sentence states on average, for the windows not yet extracted:
+ * measured on a 72-doc corpus, 3,390 claims over 5,121 sentences.
  */
-const FACTS_PER_UNIT = 0.66;
-/** Briefing characters per subject name and per fact, when no list or batch is known. */
+const CLAIMS_PER_UNIT = 0.66;
+/** Briefing characters per subject name and per claim, when no list or batch is known. */
 const SUBJECT_NAME_LINE_CHARS = 110;
-const FACT_LINE_CHARS = 180;
+const CLAIM_LINE_CHARS = 180;
 
 /** One session kind's work, rolled into the `StageCallEstimate` shape the
  *  dashboard already renders. `calls` = expected TURNS (items × expected
@@ -457,7 +457,7 @@ export async function estimateScanTokens(
     computer?: boolean;
     /**
      * The corpus the last scan wrote, as the run is given it: each doc's prior
-     * tags decide which areas its facts are filed under. Absent, the tree's
+     * tags decide which areas its claims are filed under. Absent, the tree's
      * `corpus.json` is read, as the run reads it.
      */
     previousCorpus?: CuratedCorpus | null;
@@ -630,25 +630,25 @@ export async function estimateScanTokens(
   // is either cached or not needed: only then are the areas the run's areas.
   const upstreamSettled = missCount === 0 && (settlement !== null || !gate);
 
-  // ---- the facts path: record per window, then subjects and batches ---------
+  // ---- the claims path: extract per window, then subjects and batches -------
   // A window's key folds its own doc and that doc's raw tags alone, so the
-  // probed record misses are exact for every doc whose verdict is cached; a
+  // probed extraction misses are exact for every doc whose verdict is cached; a
   // changed doc's windows are planned off its body, the share curation keeps
-  // expected. Settling subjects and comparing batches read every recorded
-  // fact: with every window cached and the upstream settled they are planned
+  // expected. Settling subjects and comparing batches read every extracted
+  // claim: with every window cached and the upstream settled they are planned
   // and probed exactly as the run plans them, and otherwise they cannot be
-  // planned before the recording runs, so they are sized as a range from the
-  // facts known and those the unrecorded sentences are expected to state.
-  const factStages = async (): Promise<StageCallEstimate[]> => {
-    const known: RecordFactsItem[] = keptDocs.flatMap((d) => recordFactsItems(d, keptTags.get(d.path) ?? []));
-    const cachedLedgers = new Map<RecordFactsItem, FactLedger>();
-    const missing: RecordFactsItem[] = [];
+  // planned before the extraction runs, so they are sized as a range from the
+  // claims known and those the unextracted sentences are expected to state.
+  const claimStages = async (): Promise<StageCallEstimate[]> => {
+    const known: ExtractClaimsItem[] = keptDocs.flatMap((d) => extractClaimsItems(d, keptTags.get(d.path) ?? []));
+    const cachedLedgers = new Map<ExtractClaimsItem, ClaimLedger>();
+    const missing: ExtractClaimsItem[] = [];
     for (const item of known) {
       const cached = await probeSessionCache(
         repoRoot,
-        RECORD_FACTS_CACHE_NAME,
-        recordFactsCacheKey(item, instructionParts),
-        FactLedgerSchema,
+        EXTRACT_CLAIMS_CACHE_NAME,
+        extractClaimsCacheKey(item, instructionParts),
+        ClaimLedgerSchema,
       );
       if (cached) cachedLedgers.set(item, cached);
       else missing.push(item);
@@ -658,46 +658,46 @@ export async function estimateScanTokens(
     const changedWindowCount = changedWindows.reduce((n, w) => n + w.windows.length, 0);
     const recordItems = missing.length + Math.round(changedWindowCount * KEEP_RATE);
     const record = sessionKindStage({
-      kind: RECORD_FACTS_SESSION_KIND,
+      kind: EXTRACT_CLAIMS_SESSION_KIND,
       model,
       items: recordItems,
       minItems: missing.length,
       maxItems: missing.length + changedWindowCount,
-      budget: RECORD_FACTS_BUDGET,
-      systemPromptChars: RECORD_FACTS_SYSTEM_PROMPT.length,
+      budget: EXTRACT_CLAIMS_BUDGET,
+      systemPromptChars: EXTRACT_CLAIMS_SYSTEM_PROMPT.length,
       briefingChars:
-        mean(missing.map((item) => recordFactsBriefing(item, instructions).length)) ||
+        mean(missing.map((item) => extractClaimsBriefing(item, instructions).length)) ||
         (recordItems > 0 ? Math.round(RECORD_WINDOW_CHARS / 2) : 0),
       bound: exact
         ? `${missing.length} of ${known.length} doc window${known.length === 1 ? '' : 's'} changed`
         : `~${recordItems} doc windows: the changed docs' windows and those of the docs curation keeps`,
     });
 
-    // The facts the cached windows hold, filed under areas as the run files them.
+    // The claims the cached windows hold, filed under areas as the run files them.
     const previous = opts.previousCorpus === undefined ? readCorpus(repoRoot) : opts.previousCorpus;
     const corpusAreaTags = new Map(grouped.docs.map((d) => [d.ref, d.areaTags]));
-    const factAreas: FactAreaContext = {
+    const claimAreas: ClaimAreaContext = {
       rawTags: keptTags,
       priorTags: new Map(previous?.docs.map((d) => [d.ref, d.areaTags]) ?? []),
       reassignments: applied?.reassignments ?? new Map(),
       vocab: vocabMap,
       pinned: new Map((decisions.manualAreas ?? []).map((m) => [m.doc, corpusAreaTags.get(m.doc) ?? []])),
     };
-    const windowsByDoc = new Map<string, RecordFactsItem[]>();
+    const windowsByDoc = new Map<string, ExtractClaimsItem[]>();
     for (const item of known) windowsByDoc.set(item.doc.path, [...(windowsByDoc.get(item.doc.path) ?? []), item]);
-    const facts = [...windowsByDoc].flatMap(
+    const claims = [...windowsByDoc].flatMap(
       ([ref, items]) =>
-        docFactLedger({
+        docClaimLedger({
           doc: ref,
           sentences: items[0]!.sentences,
           areas: items[0]!.areas,
           windows: items.map((item) => ({ window: item.window, ledger: cachedLedgers.get(item) ?? null })),
-          canonicalAreas: (raw) => factAreaIds(factAreas, ref, raw),
-        }).facts,
+          canonicalAreas: (raw) => claimAreaIds(claimAreas, ref, raw),
+        }).claims,
     );
 
     if (exact && upstreamSettled && missing.length === 0) {
-      const names = collectSubjectNames(facts);
+      const names = collectSubjectNames(claims);
       const parts = planSubjectParts(names);
       const merges = new Map<string, string>();
       const settleMissing: SubjectPart[] = [];
@@ -724,48 +724,48 @@ export async function estimateScanTokens(
         // A settlement still to run decides the subjects, and with them every
         // batch's order and its subject batches: the area batches as the names
         // are written stand in for the count.
-        const areaBatches = planCompareBatches(facts, (f) => f.subject).batches.filter((b) => b.kind === 'area').length;
+        const areaBatches = planCompareBatches(claims, (f) => f.subject).batches.filter((b) => b.kind === 'area').length;
         return [record, settle, compareRange(areaBatches, 'the subjects settle')];
       }
-      const subjectOf = settledSubjects(facts, names, merges);
+      const subjectOf = settledSubjects(claims, names, merges);
       const docsByRef = new Map(keptDocs.map((d) => [d.path, d]));
-      const items: CompareItem[] = planCompareBatches(facts, (f) => subjectOf.get(f) ?? f.subject).batches.map((batch) => ({
+      const items: CompareItem[] = planCompareBatches(claims, (f) => subjectOf.get(f) ?? f.subject).batches.map((batch) => ({
         batch,
-        docs: new Map(batch.facts.flatMap((bf) => {
-          const doc = docsByRef.get(bf.fact.doc);
-          return doc ? [[bf.fact.doc, doc] as const] : [];
+        docs: new Map(batch.claims.flatMap((bf) => {
+          const doc = docsByRef.get(bf.claim.doc);
+          return doc ? [[bf.claim.doc, doc] as const] : [];
         })),
       }));
       const compareMissing: CompareItem[] = [];
       for (const item of items) {
         const cached = await probeSessionCache(
           repoRoot,
-          COMPARE_FACTS_CACHE_NAME,
-          compareFactsCacheKey(item, instructionParts),
-          FactComparisonSchema,
+          COMPARE_CLAIMS_CACHE_NAME,
+          compareClaimsCacheKey(item, instructionParts),
+          ClaimComparisonSchema,
         );
         if (!cached) compareMissing.push(item);
       }
       const compare = sessionKindStage({
-        kind: COMPARE_FACTS_SESSION_KIND,
+        kind: COMPARE_CLAIMS_SESSION_KIND,
         model,
         items: compareMissing.length,
-        budget: COMPARE_FACTS_BUDGET,
-        systemPromptChars: COMPARE_FACTS_SYSTEM_PROMPT.length,
-        briefingChars: mean(compareMissing.map((item) => compareFactsBriefing(item, instructions).length)),
-        bound: `${compareMissing.length} of ${items.length} batch${items.length === 1 ? '' : 'es'} of facts changed`,
+        budget: COMPARE_CLAIMS_BUDGET,
+        systemPromptChars: COMPARE_CLAIMS_SYSTEM_PROMPT.length,
+        briefingChars: mean(compareMissing.map((item) => compareClaimsBriefing(item, instructions).length)),
+        bound: `${compareMissing.length} of ${items.length} batch${items.length === 1 ? '' : 'es'} of claims changed`,
       });
       return [record, settle, compare];
     }
 
-    // Not every window is recorded yet: size what follows from the facts known
+    // Not every window is extracted yet: size what follows from the claims known
     // and those the unrecorded sentences are expected to state.
     const unrecordedUnits =
       missing.reduce((n, item) => n + item.window.to - item.window.from + 1, 0) +
       changedWindows.reduce((n, w) => n + w.sentences.length, 0) * KEEP_RATE;
-    const expectedFacts = facts.length + Math.round(unrecordedUnits * FACTS_PER_UNIT);
-    const slotsPerFact = facts.length > 0 ? facts.reduce((n, f) => n + f.areas.length, 0) / facts.length : 1;
-    const settleParts = expectedFacts > 1 ? Math.ceil(expectedFacts / SETTLE_SUBJECTS_NAMES) : 0;
+    const expectedClaims = claims.length + Math.round(unrecordedUnits * CLAIMS_PER_UNIT);
+    const slotsPerClaim = claims.length > 0 ? claims.reduce((n, f) => n + f.areas.length, 0) / claims.length : 1;
+    const settleParts = expectedClaims > 1 ? Math.ceil(expectedClaims / SETTLE_SUBJECTS_NAMES) : 0;
     const settle = sessionKindStage({
       kind: SETTLE_SUBJECTS_SESSION_KIND,
       model,
@@ -774,29 +774,29 @@ export async function estimateScanTokens(
       maxItems: settleParts,
       budget: SETTLE_SUBJECTS_BUDGET,
       systemPromptChars: SETTLE_SUBJECTS_SYSTEM_PROMPT.length,
-      briefingChars: Math.min(expectedFacts, SETTLE_SUBJECTS_NAMES) * SUBJECT_NAME_LINE_CHARS,
+      briefingChars: Math.min(expectedClaims, SETTLE_SUBJECTS_NAMES) * SUBJECT_NAME_LINE_CHARS,
       bound: 'the subject names are known once every changed doc is recorded',
     });
-    const areaBatches = Math.ceil((expectedFacts * slotsPerFact) / COMPARE_BATCH_FACTS);
+    const areaBatches = Math.ceil((expectedClaims * slotsPerClaim) / COMPARE_BATCH_CLAIMS);
     return [record, settle, compareRange(areaBatches, 'the changed docs are recorded and their subjects settle')];
   };
 
   /**
    * The compare stage before its batches can be planned: the area batches
-   * expected, and up to as many subject batches again (a fact sits in at most
+   * expected, and up to as many subject batches again (a claim sits in at most
    * one subject batch), none of them known to be cached.
    */
   const compareRange = (areaBatches: number, until: string): StageCallEstimate =>
     sessionKindStage({
-      kind: COMPARE_FACTS_SESSION_KIND,
+      kind: COMPARE_CLAIMS_SESSION_KIND,
       model,
       items: areaBatches,
       minItems: 0,
       maxItems: 2 * areaBatches,
-      budget: COMPARE_FACTS_BUDGET,
-      systemPromptChars: COMPARE_FACTS_SYSTEM_PROMPT.length,
-      briefingChars: COMPARE_BATCH_FACTS * FACT_LINE_CHARS,
-      bound: `~${areaBatches} batch${areaBatches === 1 ? '' : 'es'} of facts: they are planned once ${until}`,
+      budget: COMPARE_CLAIMS_BUDGET,
+      systemPromptChars: COMPARE_CLAIMS_SYSTEM_PROMPT.length,
+      briefingChars: COMPARE_BATCH_CLAIMS * CLAIM_LINE_CHARS,
+      bound: `~${areaBatches} batch${areaBatches === 1 ? '' : 'es'} of claims: they are planned once ${until}`,
     });
 
 
@@ -846,7 +846,7 @@ export async function estimateScanTokens(
       briefingChars:
         settleItems > 0 ? settleAreasBriefing(vocab, buildScanUniverse(docs), instructions).length : 0,
     }),
-    ...(await factStages()),
+    ...(await claimStages()),
   ];
 
   const changedDocs = missCount;
@@ -856,7 +856,7 @@ export async function estimateScanTokens(
     orchestrate: [SPEC_SCAN_ORCHESTRATE_SESSION_KIND],
     curate: [CURATE_DOC_SESSION_KIND, CORPUS_REVIEW_SESSION_KIND],
     settle: [SETTLE_AREAS_SESSION_KIND],
-    conflicts: [RECORD_FACTS_SESSION_KIND, SETTLE_SUBJECTS_SESSION_KIND, COMPARE_FACTS_SESSION_KIND],
+    conflicts: [EXTRACT_CLAIMS_SESSION_KIND, SETTLE_SUBJECTS_SESSION_KIND, COMPARE_CLAIMS_SESSION_KIND],
   };
   const included = opts.only ? stages.filter((s) => SCAN_STEP_KINDS[opts.only!].includes(s.stage)) : stages;
   return estimateStageTokens(

@@ -1,20 +1,20 @@
 /**
- * THE FACT COMPARISON — `spec-scan.compare-facts`, one session per batch of
- * recorded facts, the second half of conflict conflicts by comparing facts.
+ * THE CLAIM COMPARISON — `spec-scan.compare-facts`, one session per batch of
+ * extracted claims, the second half of finding conflicts by comparing claims.
  *
  * What is under test:
  * - batch planning: whole areas packed in id order up to the bound, an area
  *   over it split with its parts and cut pairs recorded, subject families
  *   joined by a rare word of their names, subject batches only for families
- *   whose facts sit in different area batches, and the order and ids within a
+ *   whose claims sit in different area batches, and the order and ids within a
  *   batch;
  * - a pointer's evidence: the sentence and the window of words that share the
- *   most with the fact's statement, verbatim;
- * - the gate: a fact placed twice, a fact placed nowhere, a group of one, a
+ *   most with the claim's statement, verbatim;
+ * - the gate: a claim placed twice, a claim placed nowhere, a group of one, a
  *   conflict pair outside its group, a pair that is one sentence; a
- *   wrapping-up outcome is accepted with its unplaced facts stamped;
+ *   wrapping-up outcome is accepted with its unplaced claims stamped;
  * - the cache key moves with each named input and with nothing else;
- * - `read_context` shows a fact's sentence in its document;
+ * - `read_context` shows a claim's sentence in its document;
  * - a pointer's sentence key, and the fold of conflicts that name the same two
  *   sentences: every note kept, the recommendation as confident as the members
  *   that agree with it, the sentence carried through re-anchoring;
@@ -22,7 +22,7 @@
  *   folds into an conflict entry whose verbatim quotes the pointer verifier
  *   anchors where they are; a conflict inside one doc; the same conflict
  *   found by an area batch and a subject batch folds to one; several
- *   conflicts between the same two docs stay several; two fact pairs on
+ *   conflicts between the same two docs stay several; two claim pairs on
  *   the same two sentences fold into one that keeps both notes; a failed
  *   session lands its docs in `notReached`; the checklist carries the new
  *   steps.
@@ -41,34 +41,34 @@ import { StepTracker } from '../../packages/core/src/progress'
 import { runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run'
 import { CURATE_DOC_SESSION_KIND } from '../../packages/core/src/services/spec-scan/curate-doc'
 import { SETTLE_AREAS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-areas'
-import { RECORD_FACTS_SESSION_KIND, type RecordedFact } from '../../packages/core/src/services/spec-scan/record-facts'
+import { EXTRACT_CLAIMS_SESSION_KIND, type ExtractedClaim } from '../../packages/core/src/services/spec-scan/extract-claims'
 import { SETTLE_SUBJECTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-subjects'
 import { buildCorpusConflicts, sentenceKey } from '../../packages/shared/src/spec/conflict-resolution.js'
 import {
-  COMPARE_FACTS_BUDGET,
-  COMPARE_FACTS_SESSION_KIND,
+  COMPARE_CLAIMS_BUDGET,
+  COMPARE_CLAIMS_SESSION_KIND,
   COMPARE_STAGE_VERSION,
   FOLDED_NOTE_SEPARATOR,
   POINTER_QUOTE_WORDS,
   SUBJECT_FAMILY_DF_CAP,
   checkGroups,
-  compareFactsBriefing,
-  compareFactsCacheKey,
-  compareFactsSessionDef,
+  compareClaimsBriefing,
+  compareClaimsCacheKey,
+  compareClaimsSessionDef,
   groupsRefusal,
   evidenceWindow,
-  factPointer,
+  claimPointer,
   foldSameSentences,
   planCompareBatches,
   type CompareBatch,
   type CompareItem,
-  type FactComparisonWire,
-} from '../../packages/core/src/services/spec-scan/compare-facts'
+  type ClaimComparisonWire,
+} from '../../packages/core/src/services/spec-scan/compare-claims'
 import { instructionsFingerprint } from '../../packages/core/src/services/spec-scan/tools'
 import { writeDecisions, type DecisionsFile, type DocCandidate } from '../../packages/spec-consolidator/src/index.js'
 import { splitDocSentences } from '@truecourse/shared'
 import { docPathOf, malformedFailure, memoryPersistence, outcome, stubDriver, type StubCall } from './spec-scan-session-stub'
-import { compare, compareBriefing, record, settle, useTool, type BriefedFact, type SentenceFact } from './spec-scan-facts-stub'
+import { compare, compareBriefing, record, settle, useTool, type BriefedClaim, type SentenceClaim } from './spec-scan-claims-stub'
 
 // ---------------------------------------------------------------------------
 // fixtures
@@ -88,12 +88,12 @@ function doc(ref: string, content: string, over: Partial<DocCandidate> = {}): Do
   }
 }
 
-/** Facts of `body`, one per spec: the sentences it cites, its subject, statement and areas. */
-function factsOf(
+/** Claims of `body`, one per spec: the sentences it cites, its subject, statement and areas. */
+function claimsOf(
   ref: string,
   body: string,
   specs: ReadonlyArray<{ sentences: number[]; subject: string; statement?: string; areas: string[] }>,
-): RecordedFact[] {
+): ExtractedClaim[] {
   const sentences = splitDocSentences(body)
   return specs.map((spec) => ({
     doc: ref,
@@ -106,8 +106,8 @@ function factsOf(
 }
 
 const sentences = (n: number, word: string): string => Array.from({ length: n }, (_, i) => `${word} ${i} holds.`).join('\n\n')
-const ids = (batch: CompareBatch): string[] => batch.facts.map((bf) => `${bf.id} ${bf.fact.doc}#${bf.fact.sentences[0]!.n}`)
-const bySubject = (fact: RecordedFact): string => fact.subject
+const ids = (batch: CompareBatch): string[] => batch.claims.map((bf) => `${bf.id} ${bf.claim.doc}#${bf.claim.sentences[0]!.n}`)
+const bySubject = (claim: ExtractedClaim): string => claim.subject
 
 // ---------------------------------------------------------------------------
 // batch planning
@@ -116,15 +116,15 @@ const bySubject = (fact: RecordedFact): string => fact.subject
 describe('planCompareBatches', () => {
   const A = sentences(6, 'Alpha')
   const B = sentences(6, 'Beta')
-  /** a/x: 3 facts (one also in a/y), a/y: 2, a/z: 4; "Export my data" in a/x and a/z. */
-  const FACTS: RecordedFact[] = [
-    ...factsOf('docs/a.md', A, [
+  /** a/x: 3 claims (one also in a/y), a/y: 2, a/z: 4; "Export my data" in a/x and a/z. */
+  const CLAIMS: ExtractedClaim[] = [
+    ...claimsOf('docs/a.md', A, [
       { sentences: [1], subject: 'Export my data', areas: ['a/x'] },
       { sentences: [2], subject: 'PDF export', areas: ['a/x'] },
       { sentences: [3], subject: 'PDF export', areas: ['a/x', 'a/y'] },
       { sentences: [4], subject: 'Themes', areas: ['a/y'] },
     ]),
-    ...factsOf('docs/b.md', B, [
+    ...claimsOf('docs/b.md', B, [
       { sentences: [1], subject: 'Export my data', areas: ['a/z'] },
       { sentences: [2], subject: 'Webhooks', areas: ['a/z'] },
       { sentences: [3], subject: 'Webhooks', areas: ['a/z'] },
@@ -132,38 +132,38 @@ describe('planCompareBatches', () => {
     ]),
   ]
 
-  it('packs whole areas in id order up to the bound, a fact of two areas counted once', () => {
-    const { batches, splitAreas } = planCompareBatches(FACTS, bySubject, 5)
+  it('packs whole areas in id order up to the bound, a claim of two areas counted once', () => {
+    const { batches, splitAreas } = planCompareBatches(CLAIMS, bySubject, 5)
     const areaBatches = batches.filter((b) => b.kind === 'area')
     expect(areaBatches.map((b) => (b.kind === 'area' ? b.areas : []))).toEqual([['a/x', 'a/y'], ['a/z']])
-    expect(areaBatches.map((b) => b.facts.length)).toEqual([4, 4])
+    expect(areaBatches.map((b) => b.claims.length)).toEqual([4, 4])
     expect(splitAreas.size).toBe(0)
   })
 
   it('orders a batch by settled subject, then doc, then sentence, and numbers it F1 on', () => {
-    const [first] = planCompareBatches(FACTS, bySubject, 5).batches
+    const [first] = planCompareBatches(CLAIMS, bySubject, 5).batches
     expect(ids(first!)).toEqual(['F1 docs/a.md#1', 'F2 docs/a.md#2', 'F3 docs/a.md#3', 'F4 docs/a.md#4'])
-    expect(first!.facts.map((bf) => bf.subject)).toEqual(['Export my data', 'PDF export', 'PDF export', 'Themes'])
+    expect(first!.claims.map((bf) => bf.subject)).toEqual(['Export my data', 'PDF export', 'PDF export', 'Themes'])
   })
 
-  it('adds a subject batch only for a family whose facts sit in different area batches', () => {
-    const plan = planCompareBatches(FACTS, bySubject, 5)
+  it('adds a subject batch only for a family whose claims sit in different area batches', () => {
+    const plan = planCompareBatches(CLAIMS, bySubject, 5)
     const subjectBatches = plan.batches.filter((b) => b.kind === 'subject')
     // "Export my data" spans a/x and a/z; "PDF export" shares its rare word "export", so it comes along.
     expect(subjectBatches.map((b) => (b.kind === 'subject' ? b.subjects : []))).toEqual([['Export my data', 'PDF export']])
     expect(ids(subjectBatches[0]!)).toEqual(['F1 docs/a.md#1', 'F2 docs/b.md#1', 'F3 docs/a.md#2', 'F4 docs/a.md#3'])
     expect(plan).toMatchObject({ subjectFamilies: 1, subjectBatchFamilies: 1, subjectBatchFacts: 4 })
     // Packed into one area batch, nothing spans: no subject batch at all.
-    expect(planCompareBatches(FACTS, bySubject, 20).batches.map((b) => b.kind)).toEqual(['area'])
+    expect(planCompareBatches(CLAIMS, bySubject, 20).batches.map((b) => b.kind)).toEqual(['area'])
   })
 
   it('joins one control named two ways in two areas into one family, and compares them together', () => {
-    const builder = factsOf('docs/builder.md', sentences(4, 'Builder'), [
+    const builder = claimsOf('docs/builder.md', sentences(4, 'Builder'), [
       { sentences: [1], subject: 'Download PDF button', areas: ['core/builder-layout'] },
       { sentences: [2], subject: 'Sidebar', areas: ['core/builder-layout'] },
       { sentences: [3], subject: 'Sidebar', areas: ['core/builder-layout'] },
     ])
-    const exports = factsOf('docs/exports.md', sentences(4, 'Exports'), [
+    const exports = claimsOf('docs/exports.md', sentences(4, 'Exports'), [
       { sentences: [1], subject: 'Download button', areas: ['core/exports'] },
       { sentences: [2], subject: 'Download dialog', areas: ['core/exports'] },
       { sentences: [3], subject: 'Export history', areas: ['core/exports'] },
@@ -186,13 +186,13 @@ describe('planCompareBatches', () => {
       subject: `Panel${String.fromCharCode(97 + i)} settings`,
       areas: [i % 2 === 0 ? 'core/even' : 'core/odd'],
     }))
-    const plan = planCompareBatches(factsOf('docs/settings.md', sentences(SUBJECT_FAMILY_DF_CAP + 1, 'Setting'), many), bySubject, 7)
+    const plan = planCompareBatches(claimsOf('docs/settings.md', sentences(SUBJECT_FAMILY_DF_CAP + 1, 'Setting'), many), bySubject, 7)
     expect(plan.subjectFamilies).toBe(0)
     expect(plan.batches.every((b) => b.kind === 'area')).toBe(true)
   })
 
   it('splits an area over the bound, recording its parts and cut pairs, and compares what the cut separated by subject', () => {
-    const big = factsOf(
+    const big = claimsOf(
       'docs/big.md',
       sentences(9, 'Gamma'),
       Array.from({ length: 9 }, (_, i) => ({
@@ -204,12 +204,12 @@ describe('planCompareBatches', () => {
     )
     const { batches, splitAreas } = planCompareBatches(big, bySubject, 4)
     const parts = batches.filter((b) => b.kind === 'area')
-    expect(parts.every((b) => b.facts.length <= 4 && b.part?.of === 'a/big' && b.part.parts === parts.length)).toBe(true)
-    expect(parts.reduce((n, b) => n + b.facts.length, 0)).toBe(9)
+    expect(parts.every((b) => b.claims.length <= 4 && b.part?.of === 'a/big' && b.part.parts === parts.length)).toBe(true)
+    expect(parts.reduce((n, b) => n + b.claims.length, 0)).toBe(9)
     const split = splitAreas.get('a/big')!
     expect(split.parts).toBe(parts.length)
     expect(split.cutPairs).toBeGreaterThan(0)
-    // The five retention facts cannot fit one part of four: their subject is compared whole on its own.
+    // The five retention claims cannot fit one part of four: their subject is compared whole on its own.
     const subjectBatches = batches.filter((b) => b.kind === 'subject')
     expect(subjectBatches.flatMap((b) => (b.kind === 'subject' ? b.subjects : []))).toContain('Retention window')
     expect(planCompareBatches(big, bySubject, 4)).toEqual({
@@ -247,18 +247,18 @@ Export my data is under Settings, Danger Zone. It runs weekly.
 
 /** F1 export.md#1, F2 privacy.md#1 (Export my data); F3 export.md#2, F4 privacy.md#2 (Export schedule); F5 export.md#2 again. */
 function gateBatch(): CompareBatch {
-  const facts = [
-    ...factsOf('docs/export.md', EXPORT_MD, [
+  const claims = [
+    ...claimsOf('docs/export.md', EXPORT_MD, [
       { sentences: [1], subject: 'Export my data', areas: ['core/exports'] },
       { sentences: [2], subject: 'Export schedule', areas: ['core/exports'] },
       { sentences: [2], subject: 'Export schedule', statement: 'Exports run every night.', areas: ['core/exports'] },
     ]),
-    ...factsOf('docs/privacy.md', PRIVACY_MD, [
+    ...claimsOf('docs/privacy.md', PRIVACY_MD, [
       { sentences: [1], subject: 'Export my data', areas: ['core/exports'] },
       { sentences: [2], subject: 'Export schedule', areas: ['core/exports'] },
     ]),
   ]
-  return planCompareBatches(facts, bySubject).batches[0]!
+  return planCompareBatches(claims, bySubject).batches[0]!
 }
 
 const REVIEW = {
@@ -280,7 +280,7 @@ describe('the comparison gate', () => {
     ])
   })
 
-  const COMPLETE: FactComparisonWire = {
+  const COMPLETE: ClaimComparisonWire = {
     groups: [
       { subject: 'Export my data', facts: ['F1', 'F2'], verdict: 'conflict', conflicts: [conflict('F1', 'F2')] },
       { subject: 'Export schedule', facts: ['F3', 'F4', 'F5'], verdict: 'conflict', conflicts: [conflict('F3', 'F5')], consistent: ['F4'] },
@@ -312,7 +312,7 @@ describe('the comparison gate', () => {
     })
   })
 
-  it('refuses a fact placed twice, and one placed nowhere', () => {
+  it('refuses a claim placed twice, and one placed nowhere', () => {
     const check = checkGroups({ ...COMPLETE, alone: ['F1'], groups: COMPLETE.groups.map((g, i) => (i === 1 ? { ...g, facts: ['F3', 'F5'], consistent: [] } : g)) }, batch)
     expect(check.problems).toEqual(['F1 is placed twice, in groups[0] and in alone; place each fact once'])
     expect(check.unplaced).toEqual(['F4'])
@@ -370,12 +370,12 @@ describe('the comparison gate', () => {
     expect(check.conflicts).toEqual([])
   })
 
-  it('refuses a conflict group that leaves a fact in neither a pair nor "consistent"', () => {
+  it('refuses a conflict group that leaves a claim in neither a pair nor "consistent"', () => {
     // One pair standing for the whole group: F4 is in no pair and is not declared consistent.
     const bundled = checkGroups({ ...COMPLETE, groups: COMPLETE.groups.map((g) => ({ ...g, consistent: [] })) }, batch)
     expect(bundled.problems).toHaveLength(1)
     expect(bundled.problems[0]).toMatch(/^groups\[1\]: F4 is in no pair and not in "consistent"\./)
-    // A fact cannot be both, and "consistent" names only the group's own facts.
+    // A claim cannot be both, and "consistent" names only the group's own claims.
     const confused = checkGroups(
       { ...COMPLETE, groups: COMPLETE.groups.map((g, i) => (i === 1 ? { ...g, consistent: ['F4', 'F3', 'F1'] } : g)) },
       batch,
@@ -386,9 +386,9 @@ describe('the comparison gate', () => {
     ])
   })
 
-  it('stamps the facts a wrapping-up session placed nowhere, and accepts its outcome', () => {
-    const def = compareFactsSessionDef({ batch, docs: new Map() })
-    const partial: FactComparisonWire = { groups: [COMPLETE.groups[0]!], alone: ['F3'] }
+  it('stamps the claims a wrapping-up session placed nowhere, and accepts its outcome', () => {
+    const def = compareClaimsSessionDef({ batch, docs: new Map() })
+    const partial: ClaimComparisonWire = { groups: [COMPLETE.groups[0]!], alone: ['F3'] }
     const resolved = def.resolveOutcome!(partial, [])
     expect(resolved).toEqual({ ...partial, unplaced: ['F4', 'F5'] })
     const outcomeValue = def.outcomeSchema.parse(resolved)
@@ -403,10 +403,10 @@ describe('the comparison gate', () => {
 describe('a pointer\'s evidence', () => {
   it('takes the cited sentence that shares the most words with the statement, not the first one', () => {
     const body = 'You can:\n\n- Export your resume as a PDF.\n- Share a public link.\n'
-    const [fact] = factsOf('docs/export.md', body, [
+    const [claim] = claimsOf('docs/export.md', body, [
       { sentences: [1, 2], subject: 'PDF export', statement: 'A resume can be exported as a PDF.', areas: ['core/exports'] },
     ])
-    expect(factPointer(fact!)).toEqual({
+    expect(claimPointer(claim!)).toEqual({
       doc: 'docs/export.md',
       quote: 'Export your resume as a PDF.',
       sentence: sentenceKey('Export your resume as a PDF.'),
@@ -415,13 +415,13 @@ describe('a pointer\'s evidence', () => {
 
   it('names its sentence by the whole sentence it quotes, never by the sentence\'s number', () => {
     const body = '## Where\n\nExport my data is under Settings, Account. It runs nightly.\n'
-    const [fact] = factsOf('docs/export.md', body, [{ sentences: [2], subject: 'Export schedule', statement: 'Exports run nightly.', areas: ['core/exports'] }])
-    expect(factPointer(fact!).sentence).toBe(sentenceKey('It runs nightly.'))
+    const [claim] = claimsOf('docs/export.md', body, [{ sentences: [2], subject: 'Export schedule', statement: 'Exports run nightly.', areas: ['core/exports'] }])
+    expect(claimPointer(claim!).sentence).toBe(sentenceKey('It runs nightly.'))
     // An edit above the sentence renumbers it and leaves its key.
     const edited = `## Intro\n\nA new first sentence.\n\n${body}`
-    const [moved] = factsOf('docs/export.md', edited, [{ sentences: [3], subject: 'Export schedule', statement: 'Exports run nightly.', areas: ['core/exports'] }])
-    expect(moved!.sentences[0]!.n).not.toBe(fact!.sentences[0]!.n)
-    expect(factPointer(moved!).sentence).toBe(factPointer(fact!).sentence)
+    const [moved] = claimsOf('docs/export.md', edited, [{ sentences: [3], subject: 'Export schedule', statement: 'Exports run nightly.', areas: ['core/exports'] }])
+    expect(moved!.sentences[0]!.n).not.toBe(claim!.sentences[0]!.n)
+    expect(claimPointer(moved!).sentence).toBe(claimPointer(claim!).sentence)
   })
 
   it('takes the window of words that shares the most with the statement, as an exact slice of the sentence', () => {
@@ -440,12 +440,12 @@ describe('a pointer\'s evidence', () => {
       '    healthcheck: { test: curl -f http://localhost:3000/api/health }',
     ]
     const body = `## Compose\n\n\`\`\`yaml\n${lines.join('\n')}\n\`\`\`\n`
-    const [fact] = factsOf('docs/compose.md', body, [
+    const [claim] = claimsOf('docs/compose.md', body, [
       { sentences: [1], subject: '/app/data volume', statement: 'The example Compose file bind-mounts ./data at /app/data.', areas: ['core/self-hosting'] },
     ])
-    const sentence = fact!.sentences[0]!
+    const sentence = claim!.sentences[0]!
     expect(sentence.kind).toBe('code')
-    const pointer = factPointer(fact!)
+    const pointer = claimPointer(claim!)
     expect(sentence.text).toContain(pointer.quote)
     expect(pointer.quote).toContain('./data:/app/data')
     expect(pointer.quote.trim().split(/\s+/).length).toBeLessThanOrEqual(POINTER_QUOTE_WORDS)
@@ -458,10 +458,10 @@ describe('a pointer\'s evidence', () => {
     const words = Array.from({ length: 60 }, (_, i) => `w${i}`).join(' ')
     expect(evidenceWindow(words, new Set(['nothing']))).toBe(words.split(' ').slice(0, POINTER_QUOTE_WORDS).join(' '))
     expect(evidenceWindow('Short and whole.', new Set())).toBe('Short and whole.')
-    const [fact] = factsOf('docs/a.md', 'First line here.\n\nSecond line here.\n', [
+    const [claim] = claimsOf('docs/a.md', 'First line here.\n\nSecond line here.\n', [
       { sentences: [1, 2], subject: 'Lines', statement: 'Nothing in common.', areas: ['core/a'] },
     ])
-    expect(factPointer(fact!).quote).toBe('First line here.')
+    expect(claimPointer(claim!).quote).toBe('First line here.')
   })
 })
 
@@ -515,13 +515,13 @@ describe('conflicts on the same two sentences', () => {
 // the cache key, and the session's tools
 // ---------------------------------------------------------------------------
 
-describe('compareFactsCacheKey', () => {
-  const item = (facts: RecordedFact[], docs: DocCandidate[] = [], subjectOf = bySubject): CompareItem => ({
-    batch: planCompareBatches(facts, subjectOf).batches[0]!,
+describe('compareClaimsCacheKey', () => {
+  const item = (claims: ExtractedClaim[], docs: DocCandidate[] = [], subjectOf = bySubject): CompareItem => ({
+    batch: planCompareBatches(claims, subjectOf).batches[0]!,
     docs: new Map(docs.map((d) => [d.path, d])),
   })
   const base = (over: Partial<{ ref: string; body: string; sentences: number[]; subject: string; statement: string; areas: string[] }> = {}) =>
-    factsOf(over.ref ?? 'docs/export.md', over.body ?? EXPORT_MD, [
+    claimsOf(over.ref ?? 'docs/export.md', over.body ?? EXPORT_MD, [
       {
         sentences: over.sentences ?? [1],
         subject: over.subject ?? 'Export my data',
@@ -530,7 +530,7 @@ describe('compareFactsCacheKey', () => {
       },
       { sentences: [3], subject: 'Export formats', areas: ['core/exports'] },
     ])
-  const key = (it: CompareItem, instructions: string[] = []) => compareFactsCacheKey(it, [instructionsFingerprint(instructions)])
+  const key = (it: CompareItem, instructions: string[] = []) => compareClaimsCacheKey(it, [instructionsFingerprint(instructions)])
   const KEY = key(item(base()))
 
   it('moves with every named input', () => {
@@ -546,11 +546,11 @@ describe('compareFactsCacheKey', () => {
     expect(COMPARE_STAGE_VERSION).toBe(3)
   })
 
-  it('moves with the lifecycle of a doc that has a status, never with an edit no fact cites', () => {
+  it('moves with the lifecycle of a doc that has a status, never with an edit no claim cites', () => {
     const tracked = doc('docs/export.md', `---\nstatus: In Progress\n---\n\n${EXPORT_MD}`)
-    const facts = base({ body: tracked.content! })
-    expect(key(item(facts, [tracked]))).not.toBe(key(item(facts, [{ ...tracked, content: tracked.content!.replace('In Progress', 'Done') }])))
-    // An appended section and a renamed heading change no sentence a fact cites.
+    const claims = base({ body: tracked.content! })
+    expect(key(item(claims, [tracked]))).not.toBe(key(item(claims, [{ ...tracked, content: tracked.content!.replace('In Progress', 'Done') }])))
+    // An appended section and a renamed heading change no sentence a claim cites.
     const edited = EXPORT_MD.replace('## Formats', '## File formats') + '\n## Later\n\nA new sentence.\n'
     expect(key(item(base({ body: edited })))).toBe(KEY)
   })
@@ -560,10 +560,10 @@ describe('the comparison session', () => {
   const exportDoc = doc('docs/export.md', EXPORT_MD)
   const privacyDoc = doc('docs/privacy.md', PRIVACY_MD)
   const batch = gateBatch()
-  const def = compareFactsSessionDef({ batch, docs: new Map([exportDoc, privacyDoc].map((d) => [d.path, d])) })
+  const def = compareClaimsSessionDef({ batch, docs: new Map([exportDoc, privacyDoc].map((d) => [d.path, d])) })
   const ctx = { workItem: '', signal: new AbortController().signal, dispatchChild: () => Promise.reject(new Error('unused')) }
 
-  it('has closed tools only: the sentences of its own facts, and the gate', () => {
+  it('has closed tools only: the sentences of its own claims, and the gate', () => {
     expect(def.computer).toBeUndefined()
     expect(def.tools.map((t) => t.name)).toEqual(['read_context', 'check_groups'])
     expect(def.outcomePrecondition?.tool).toBe('check_groups')
@@ -584,14 +584,14 @@ describe('the comparison session', () => {
       note: 'schedule',
       sections: [side('docs/export.md', 'It runs nightly.', false), side('docs/privacy.md', 'It runs weekly.', false)],
     }
-    const briefing = compareFactsBriefing({ batch, docs: new Map() }, [], [quoted, unquoted])
+    const briefing = compareClaimsBriefing({ batch, docs: new Map() }, [], [quoted, unquoted])
     expect(briefing).toContain(
       '  1. docs/export.md · "Export my data is under Settings, Account."  <->  docs/privacy.md · "Export my data is under Settings, Danger Zone."  : where',
     )
     expect(briefing).toContain('  2. docs/export.md  <->  docs/privacy.md  : schedule')
   })
 
-  it('reads the section around each fact, one block per sentence', async () => {
+  it('reads the section around each claim, one block per sentence', async () => {
     const read = def.tools[0]!
     const result = await read.execute({ facts: ['F1', 'F3', 'F2'] }, ctx)
     expect(result.isError).toBeUndefined()
@@ -639,16 +639,16 @@ function writeDocs(files: Record<string, string>): void {
 }
 
 /** Where Export my data lives, by the words a sentence uses for it; every other sentence states nothing. */
-const exportFact: SentenceFact = ({ line }) =>
+const exportClaim: SentenceClaim = ({ line }) =>
   /Export my data is under/.test(line) ? { subject: 'Export my data', statement: line } : null
 
-/** Two facts conflict when both place Export my data, in different places. */
-const differentPlace = (a: BriefedFact, b: BriefedFact): boolean =>
+/** Two claims conflict when both place Export my data, in different places. */
+const differentPlace = (a: BriefedClaim, b: BriefedClaim): boolean =>
   a.statement !== b.statement && a.id < b.id && /Export my data is under/.test(a.statement)
 
 interface ScanScript {
   tags: Record<string, Array<{ product: string; concern: string }>>
-  factOf?: SentenceFact
+  claimOf?: SentenceClaim
   compareWith?: (call: StubCall) => DriverResult | Promise<DriverResult>
 }
 
@@ -659,11 +659,11 @@ function scanDriver(script: ScanScript) {
         return outcome({ keep: true, reason: 'spec', areas: script.tags[docPathOf(call.briefing)] ?? [] })
       case SETTLE_AREAS_SESSION_KIND:
         return outcome({ concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] })
-      case RECORD_FACTS_SESSION_KIND:
-        return record(call, script.factOf ?? exportFact)
+      case EXTRACT_CLAIMS_SESSION_KIND:
+        return record(call, script.claimOf ?? exportClaim)
       case SETTLE_SUBJECTS_SESSION_KIND:
         return settle(call)
-      case COMPARE_FACTS_SESSION_KIND:
+      case COMPARE_CLAIMS_SESSION_KIND:
         return script.compareWith ? script.compareWith(call) : compare(call, differentPlace)
       default:
         throw new Error(`unscripted ${call.kind}`)
@@ -687,11 +687,11 @@ async function scan(script: ScanScript) {
 const EXPORTS = { product: 'core', concern: 'exports' }
 const USAGE = { inputTokens: 100, outputTokens: 20, cacheReadTokens: 0, cacheCreateTokens: 0, costUsd: 0, costSource: 'unpriced' as const }
 
-describe('a scan that compares facts, from docs to corpus', () => {
+describe('a scan that compares claims, from docs to corpus', () => {
   it('folds a conflict into an conflict entry whose verbatim quotes anchor where they are', async () => {
     writeDocs({ 'docs/export.md': EXPORT_MD, 'docs/privacy.md': PRIVACY_MD })
     const { result, stub, facts } = await scan({ tags: { 'docs/export.md': [EXPORTS], 'docs/privacy.md': [EXPORTS] } })
-    expect(stub.kinds.filter((k) => k === COMPARE_FACTS_SESSION_KIND)).toHaveLength(1)
+    expect(stub.kinds.filter((k) => k === COMPARE_CLAIMS_SESSION_KIND)).toHaveLength(1)
 
     const [area] = result.corpus.areas
     expect(area!.id).toBe('core/exports')
@@ -716,6 +716,7 @@ describe('a scan that compares facts, from docs to corpus', () => {
     expect(conflict.review?.recommendation.action).toBe('fix-doc')
     expect(result.stats.conflictCount).toBe(1)
 
+    // `facts` is the stored corpus key.
     expect(area!.comparison).toEqual({ facts: 2, groups: 1 })
     expect(result.corpus.comparison).toEqual({
       subjectNames: 1,
@@ -725,7 +726,7 @@ describe('a scan that compares facts, from docs to corpus', () => {
       subjectBatchFacts: 0,
       unplacedFacts: 0,
     })
-    expect(facts).toContainEqual(['compare', 'core/exports: 2 facts, 1 group, 1 conflict'])
+    expect(facts).toContainEqual(['compare', 'core/exports: 2 claims, 1 group, 1 conflict'])
     expect(facts).toContainEqual(['conflicts', 'docs/export.md vs docs/privacy.md: docs/export.md and docs/privacy.md disagree on Export my data'])
     expect(facts).toContainEqual(['subjects', '1 subject name, nothing to settle'])
     // No skim signal and no unchecked pairs on this path.
@@ -754,7 +755,7 @@ describe('a scan that compares facts, from docs to corpus', () => {
     const compared: Array<{ kind: string; ids: string[] }> = []
     const { result, facts } = await scan({
       tags: { 'docs/a-bulk.md': [A], 'docs/b-bulk.md': [B], 'docs/export.md': [A], 'docs/shared.md': [A, B], 'docs/privacy.md': [B] },
-      factOf: (sentence, ref) => {
+      claimOf: (sentence, ref) => {
         if (/Export my data is under/.test(sentence.line)) return { subject: 'Export my data', statement: sentence.line }
         const setting = /(Alpha|Beta) setting (\d+)/.exec(sentence.line)
         return setting ? { subject: `${setting[1]} setting ${setting[2]}`, statement: `${ref}: ${sentence.line}` } : null
@@ -766,7 +767,7 @@ describe('a scan that compares facts, from docs to corpus', () => {
         return compare(call, (a, b) => a.doc === 'docs/export.md' && b.doc === 'docs/shared.md')
       },
     })
-    // The shared doc's fact sits in both area batches; only a subject batch holds all three.
+    // The shared doc's claim sits in both area batches; only a subject batch holds all three.
     expect(compared).toEqual([
       { kind: 'area', ids: ['docs/export.md', 'docs/shared.md'] },
       { kind: 'area', ids: ['docs/privacy.md', 'docs/shared.md'] },
@@ -799,7 +800,7 @@ describe('a scan that compares facts, from docs to corpus', () => {
     writeDocs({ 'docs/api.md': API_MD, 'docs/app.md': APP_MD })
     const { result } = await scan({
       tags: { 'docs/api.md': [EXPENSES], 'docs/app.md': [EXPENSES] },
-      factOf: ({ line }) => {
+      claimOf: ({ line }) => {
         const subject = expenseSubject(line)
         return subject ? { subject, statement: line } : null
       },
@@ -820,15 +821,15 @@ describe('a scan that compares facts, from docs to corpus', () => {
     expect(new Set(rows.map((c) => c.id)).size).toBe(3)
   })
 
-  it('folds two fact pairs on the same two sentences into one conflict that keeps both notes', async () => {
+  it('folds two claim pairs on the same two sentences into one conflict that keeps both notes', async () => {
     writeDocs({
       'docs/api.md': '# API\n\n## Expense list\n\nExpenses are listed 20 per page, newest first.\n',
       'docs/app.md': '# App\n\n## Expense list\n\nExpenses are listed 50 per page, oldest first.\n',
     })
     const { result, facts } = await scan({
       tags: { 'docs/api.md': [EXPENSES], 'docs/app.md': [EXPENSES] },
-      // One sentence states two facts, each a point the other doc's sentence contradicts.
-      factOf: ({ line }) =>
+      // One sentence states two claims, each a point the other doc's sentence contradicts.
+      claimOf: ({ line }) =>
         /listed/.test(line)
           ? [
               { subject: 'Expense page size', statement: `${line} (page size)` },
@@ -855,24 +856,24 @@ describe('a scan that compares facts, from docs to corpus', () => {
     expect(area!.notReached).toEqual(['docs/export.md', 'docs/privacy.md'])
     expect(area!.conflicts).toEqual([])
     expect(area!.comparison).toEqual({ facts: 0, groups: 0 })
-    expect(facts).toContainEqual(['compare', 'core/exports: session failed, its 2 facts from 2 docs left uncompared'])
-    expect(result.stats.llmFailures).toEqual([expect.objectContaining({ stage: COMPARE_FACTS_SESSION_KIND, failures: 1 })])
+    expect(facts).toContainEqual(['compare', 'core/exports: session failed, its 2 claims from 2 docs left uncompared'])
+    expect(result.stats.llmFailures).toEqual([expect.objectContaining({ stage: COMPARE_CLAIMS_SESSION_KIND, failures: 1 })])
   })
 
-  it('counts the facts a wrapping-up comparison left unplaced', async () => {
+  it('counts the claims a wrapping-up comparison left unplaced', async () => {
     writeDocs({ 'docs/export.md': EXPORT_MD, 'docs/privacy.md': PRIVACY_MD })
     const { result } = await scan({
       tags: { 'docs/export.md': [EXPORTS], 'docs/privacy.md': [EXPORTS] },
       // The session spends its whole budget, checks, and answers in the wrap-up
-      // with one of its two facts placed.
+      // with one of its two claims placed.
       compareWith: async (call) => {
-        const turns = COMPARE_FACTS_BUDGET.turns * (COMPARE_FACTS_BUDGET.maxResumes + 1)
+        const turns = COMPARE_CLAIMS_BUDGET.turns * (COMPARE_CLAIMS_BUDGET.maxResumes + 1)
         for (let i = 0; i < turns; i++) await call.emit({ type: 'assistant-turn', text: 'grouping', usage: USAGE })
         await useTool(call, 'check_groups', { groups: [], alone: ['F1'] })
         return outcome({ groups: [], alone: ['F1'] })
       },
     })
-    // The wrap-up accepts it, and the fold counts the fact left out.
+    // The wrap-up accepts it, and the fold counts the claim left out.
     expect(result.corpus.comparison).toMatchObject({ unplacedFacts: 1 })
     expect(result.corpus.areas[0]!.comparison).toEqual({ facts: 2, groups: 0 })
   })
@@ -885,10 +886,10 @@ describe('a scan that compares facts, from docs to corpus', () => {
     expect(stub.kinds).toEqual([])
     expect(result.noChanges).toBe(true)
     expect(result.corpus.areas[0]!.conflicts).toHaveLength(1)
-    expect(facts).toContainEqual(['compare', 'core/exports: 2 facts, 1 group, 1 conflict, from cache'])
+    expect(facts).toContainEqual(['compare', 'core/exports: 2 claims, 1 group, 1 conflict, from cache'])
   })
 
-  it('checks off recording, settling subjects and comparing facts, each step with its sessions', async () => {
+  it('checks off extracting claims, settling subjects and comparing claims, each step with its sessions', async () => {
     writeDocs({ 'docs/export.md': EXPORT_MD, 'docs/privacy.md': PRIVACY_MD })
     let steps: ReadonlyArray<{ key: string; label: string; status: string; detail?: string; facts?: string[] }> = []
     const tracker = new StepTracker((payload) => {
@@ -901,20 +902,19 @@ describe('a scan that compares facts, from docs to corpus', () => {
       driver: scanDriver({ tags: { 'docs/export.md': [EXPORTS], 'docs/privacy.md': [EXPORTS] } }).driver,
       transportMode: 'api',
       decisions,
-      conflictMethod: 'facts',
     })
     expect(steps.map((s) => [s.key, s.label, s.status])).toEqual([
       ['discover', 'Discovering docs', 'done'],
       ['tag', 'Tagging doc areas', 'done'],
-      ['record', 'Recording facts', 'done'],
+      ['record', 'Extracting claims', 'done'],
       ['subjects', 'Settling subjects', 'done'],
-      ['compare', 'Comparing facts', 'done'],
+      ['compare', 'Comparing claims', 'done'],
       ['conflicts', 'Finding conflicts', 'done'],
       ['verify', 'Verifying conflicts', 'done'],
     ])
     const step = (key: string) => steps.find((s) => s.key === key)!
     expect(step('subjects').detail).toBe('1 name · 1 subject')
-    expect(step('compare').facts).toEqual(['core/exports: 2 facts, 1 group, 1 conflict'])
+    expect(step('compare').facts).toEqual(['core/exports: 2 claims, 1 group, 1 conflict'])
     expect(step('conflicts').facts).toEqual(['docs/export.md vs docs/privacy.md: docs/export.md and docs/privacy.md disagree on Export my data'])
 
     const [stored] = await listStoredSessionRuns(repo, 'spec-scan')
@@ -923,9 +923,9 @@ describe('a scan that compares facts, from docs to corpus', () => {
     expect(block.items.map((item) => [item.key, item.sessionKinds])).toEqual([
       ['discover', ['spec-scan.orchestrate']],
       ['tag', ['spec-scan.curate-doc', 'spec-scan.settle-areas']],
-      ['record', [RECORD_FACTS_SESSION_KIND]],
+      ['record', [EXTRACT_CLAIMS_SESSION_KIND]],
       ['subjects', [SETTLE_SUBJECTS_SESSION_KIND]],
-      ['compare', [COMPARE_FACTS_SESSION_KIND]],
+      ['compare', [COMPARE_CLAIMS_SESSION_KIND]],
       ['conflicts', []],
       ['verify', []],
     ])

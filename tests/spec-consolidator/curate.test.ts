@@ -29,7 +29,7 @@ import {
   type StubCall,
   type StubScript,
 } from '../core/spec-scan-session-stub';
-import { compare, record, settle, type StubReview, type SentenceFact } from '../core/spec-scan-facts-stub';
+import { compare, record, settle, type StubReview, type SentenceClaim } from '../core/spec-scan-claims-stub';
 import { sentenceKey } from '../../packages/shared/src/spec/conflict-resolution.js';
 
 function doc(p: string, content = `body of ${p}`): DocCandidate {
@@ -46,7 +46,7 @@ function doc(p: string, content = `body of ${p}`): DocCandidate {
 }
 
 // Each kept doc opens with its `body of <path>` line: the one unit the
-// scripted recorder states a fact from, so every doc holds one fact about the
+// scripted extractor states a claim from, so every doc holds one claim about the
 // same subject and the comparer can put any two in conflict.
 const DOCS = [
   doc('docs/users-v1.md', 'body of docs/users-v1.md\n\nUses `userList`, `userQuota`, `authRealm`, `authScope`.\n'),
@@ -70,8 +70,8 @@ const REVIEW: StubReview = {
   recommendation: { action: 'pick-b', rationale: 'users-v2 is the newer doc' },
 };
 
-/** The recorder states one fact per doc, from its opening line, all about one subject. */
-const bodyFact: SentenceFact = ({ line }, doc) => (line === `body of ${doc}` ? { subject: 'the body', statement: line } : null);
+/** The extractor states one claim per doc, from its opening line, all about one subject. */
+const bodyClaim: SentenceClaim = ({ line }, doc) => (line === `body of ${doc}` ? { subject: 'the body', statement: line } : null);
 
 /** Which two docs the comparer puts in conflict. */
 type Pairs = (a: string, b: string) => boolean;
@@ -79,8 +79,8 @@ const everyPair: Pairs = () => true;
 const usersPair: Pairs = (a, b) => [a, b].sort().join() === 'docs/users-v1.md,docs/users-v2.md';
 
 /**
- * The scan's session kinds, scripted. `curate` answers per doc; the recorder
- * states each doc's body as a fact; the comparer puts every pair `conflicts`
+ * The scan's session kinds, scripted. `curate` answers per doc; the extractor
+ * states each doc's body as a claim; the comparer puts every pair `conflicts`
  * names in conflict, carrying `review`; the settlements are always empty.
  */
 function scanScript(opts: { curate: (call: StubCall) => unknown; conflicts?: Pairs; review?: StubReview }): StubScript {
@@ -90,7 +90,7 @@ function scanScript(opts: { curate: (call: StubCall) => unknown; conflicts?: Pai
       await call.emit(toolResult('check_settlement', 'valid'));
       return outcome({ concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] });
     }
-    if (call.kind === 'spec-scan.record-facts') return record(call, bodyFact);
+    if (call.kind === 'spec-scan.record-facts') return record(call, bodyClaim);
     if (call.kind === 'spec-scan.settle-subjects') return settle(call);
     if (call.kind === 'spec-scan.compare-facts') {
       return compare(call, (a, b) => Number(a.id.slice(1)) < Number(b.id.slice(1)) && wanted(a.doc, b.doc), opts.review);

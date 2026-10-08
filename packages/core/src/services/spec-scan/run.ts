@@ -15,13 +15,14 @@
  *     the kept docs, dropping what does not belong (part of the curate step)
  *   → `spec-scan.settle-areas` ≤1 session per corpus (barrier, concurrency 1)
  *   → groupByArea (det)
- *   → the conflict steps: `spec-scan.record-facts` one session per window of
- *       a kept doc's sentences (pool), each doc's ledger collected
- *       → `spec-scan.settle-subjects` one session per part of the facts'
+ *   → the conflict steps: `spec-scan.record-facts` (the claim extraction)
+ *       one session per window of a kept doc's sentences (pool), each doc's
+ *       ledger collected
+ *       → `spec-scan.settle-subjects` one session per part of the claims'
  *       subject names (barrier)
  *       → planCompareBatches (det — area batches, then subject batches)
- *       → `spec-scan.compare-facts` one session per batch (pool), each
- *       conflict it finds handed to the fold
+ *       → `spec-scan.compare-facts` (the claim comparison) one session per
+ *       batch (pool), each conflict it finds handed to the fold
  *   → verify sides + cross-area dedup (det; conflicts that name the same
  *     two sentences folded into one) → assemble → write.
  *
@@ -149,7 +150,7 @@ import {
   type AreaVocabView,
 } from './settle-areas.js'
 import { reconcileDocTagsWithPrior } from './settle-areas.js'
-import type { ReportedConflict } from './compare-facts.js'
+import type { ReportedConflict } from './compare-claims.js'
 import {
   ORCHESTRATE_WORK_ITEM,
   SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
@@ -181,25 +182,25 @@ import {
   type CorpusReviewShard,
 } from './corpus-review.js'
 import {
-  FactLedgerSchema,
-  RECORD_FACTS_CACHE_NAME,
-  RECORD_FACTS_SESSION_KIND,
+  ClaimLedgerSchema,
+  EXTRACT_CLAIMS_CACHE_NAME,
+  EXTRACT_CLAIMS_SESSION_KIND,
   describeDocLedger,
-  docFactLedger,
+  docClaimLedger,
   claimsFromLedgers,
   docLedgerCounts,
-  factAreaIds,
-  recordFactsBriefing,
-  recordFactsCacheKey,
-  recordFactsItems,
-  recordFactsSessionDef,
-  recordFactsWorkItem,
-  type DocFactLedger,
-  type FactAreaContext,
-  type FactLedger,
-  type RecordFactsItem,
-  type RecordedFact,
-} from './record-facts.js'
+  claimAreaIds,
+  extractClaimsBriefing,
+  extractClaimsCacheKey,
+  extractClaimsItems,
+  extractClaimsSessionDef,
+  extractClaimsWorkItem,
+  type DocClaimLedger,
+  type ClaimAreaContext,
+  type ClaimLedger,
+  type ExtractClaimsItem,
+  type ExtractedClaim,
+} from './extract-claims.js'
 import {
   SETTLE_SUBJECTS_CACHE_NAME,
   SETTLE_SUBJECTS_SESSION_KIND,
@@ -217,21 +218,21 @@ import {
   type SubjectSettlement,
 } from './settle-subjects.js'
 import {
-  COMPARE_BATCH_FACTS,
-  COMPARE_FACTS_CACHE_NAME,
-  COMPARE_FACTS_SESSION_KIND,
-  FactComparisonSchema,
+  COMPARE_BATCH_CLAIMS,
+  COMPARE_CLAIMS_CACHE_NAME,
+  COMPARE_CLAIMS_SESSION_KIND,
+  ClaimComparisonSchema,
   checkGroups,
-  compareFactsBriefing,
-  compareFactsCacheKey,
-  compareFactsSessionDef,
-  compareFactsWorkItem,
+  compareClaimsBriefing,
+  compareClaimsCacheKey,
+  compareClaimsSessionDef,
+  compareClaimsWorkItem,
   describeBatch,
   foldSameSentences,
   planCompareBatches,
   type CompareItem,
-  type FactComparison,
-} from './compare-facts.js'
+  type ClaimComparison,
+} from './compare-claims.js'
 
 // ---------------------------------------------------------------------------
 // Single-step mode (`only`)
@@ -247,7 +248,7 @@ export type ScanStep = (typeof SCAN_STEPS)[number]
  * discovery and the prefilter under `discover`, curation and settling under
  * `tag`, the cluster reviews and the conflicts found under `conflicts`, and the
  * deterministic fold (re-anchoring, dedup, auto-apply) under `verify`. A scan
- * that finds conflicts by comparing facts files recording each doc's facts
+ * that finds conflicts by comparing claims files extracting each doc's claims
  * under `record`, settling their subjects under `subjects` and comparing them
  * under `compare`, steps the checklist carries only on such a scan.
  */
@@ -394,11 +395,11 @@ export interface SpecScanSessionsOptions {
   onScope?: (state: 'covered' | 'ran' | 'failed' | 'skipped') => void
   onCurateProgress?: (done: number, total: number) => void
   onSettle?: (state: 'skipped' | 'cached' | 'ran' | 'failed') => void
-  /** The record step's sessions, one per doc window, when conflicts are found by comparing facts. */
+  /** The claim extraction's sessions, one per doc window, when conflicts are found by comparing claims. */
   onRecordProgress?: (done: number, total: number) => void
-  /** The subject settling's sessions, one per part of the subject names, when conflicts are found by comparing facts. */
+  /** The subject settling's sessions, one per part of the subject names, when conflicts are found by comparing claims. */
   onSubjectsProgress?: (done: number, total: number) => void
-  /** The compare step's sessions, one per batch of facts, when conflicts are found by comparing facts. */
+  /** The compare step's sessions, one per batch of claims, when conflicts are found by comparing claims. */
   onCompareProgress?: (done: number, total: number) => void
   /** The conflicts step's sessions: the collision clusters. */
   onConflictProgress?: (done: number, total: number) => void
@@ -439,10 +440,10 @@ export interface SpecScanSessionsResult extends CurateResult {
    */
   stoppedAfter?: ScanStep
   /**
-   * The ledger the record step collected for each doc it recorded, in corpus
-   * order. Present only when conflicts are found by comparing facts.
+   * The ledger the claim extraction collected for each doc it read, in corpus
+   * order. Present only when conflicts are found by comparing claims.
    */
-  factLedgers?: DocFactLedger[]
+  claimLedgers?: DocClaimLedger[]
 }
 
 // ---------------------------------------------------------------------------
@@ -1012,7 +1013,7 @@ export async function runSpecScanSessions(
   let keptProse: DocCandidate[] = []
   const tagsByPath = new Map<string, DocAreaTags>()
   // Each kept doc's tags as its curation verdict wrote them, before any
-  // reconciling or settling: the tags a fact recorded from it carries.
+  // reconciling or settling: the tags a claim extracted from it carries.
   const rawTagsByPath = new Map<string, AreaTag[]>()
   // Seeded with the scope-excluded docs (discovery order), so the corpus's
   // skip list shows them and the dashboard can force-include them back.
@@ -1175,7 +1176,7 @@ export async function runSpecScanSessions(
   )
   const vocabView: AreaVocabView = collectAreaVocab(canonicalByPath)
   let vocabMap: VocabMap = { products: {}, concerns: {} }
-  // The settlement's per-doc concern rewrites, kept for the facts recorded
+  // The settlement's per-doc concern rewrites, kept for the claims extracted
   // from each doc: their tags take the same path as the doc's own.
   let reassignmentsByRef: ReadonlyMap<string, ReadonlyMap<string, string>> = new Map()
   let settleSummary: (ScanSessionKindSummary & { firstError?: string; allTransport: boolean }) | null = null
@@ -1306,11 +1307,11 @@ export async function runSpecScanSessions(
     for (const ref of refs) set.add(ref)
     notReachedByArea.set(areaId, set)
   }
-  // How a fact's raw tag lands in the corpus's areas: the path the doc's own
-  // tags took, one tag at a time. A doc a decision pins files every fact under
+  // How a claim's raw tag lands in the corpus's areas: the path the doc's own
+  // tags took, one tag at a time. A doc a decision pins files every claim under
   // the pinned areas, as the pin replaces the doc's own tags.
   const corpusAreaTags = new Map(grouped.docs.map((d) => [d.ref, d.areaTags]))
-  const factAreas: FactAreaContext = {
+  const claimAreas: ClaimAreaContext = {
     rawTags: rawTagsByPath,
     priorTags: priorTagsByRef,
     reassignments: reassignmentsByRef,
@@ -1319,41 +1320,41 @@ export async function runSpecScanSessions(
   }
 
   /**
-   * The facts path's first half: every kept prose doc with an area tag is
-   * recorded, one session per window of its sentences, and each doc's ledger is
+   * The claims path's first half: every kept prose doc with an area tag has its
+   * claims extracted, one session per window of its sentences, and each doc's ledger is
    * collected from its windows' outcomes. A failed window leaves its sentences out
    * and lands its doc in each of its areas' `notReached`.
    */
-  async function recordFacts(): Promise<{ summary: KindRun; ledgers: DocFactLedger[] }> {
-    const windowsByDoc = new Map<string, RecordFactsItem[]>()
+  async function extractClaims(): Promise<{ summary: KindRun; ledgers: DocClaimLedger[] }> {
+    const windowsByDoc = new Map<string, ExtractClaimsItem[]>()
     if (opts.disableConflictDetection !== true) {
       for (const doc of keptProse) {
         // A conflict in a doc with no area could be filed under none.
         const tags = rawTagsByPath.get(doc.path) ?? []
         if (tags.length === 0) {
-          fact('record', `${doc.path}: not recorded, it has no area tag`)
+          fact('record', `${doc.path}: no claims extracted, it has no area tag`)
           continue
         }
         if ((areaIdsByDoc.get(doc.path) ?? []).length === 0) {
-          fact('record', `${doc.path}: not recorded, it is in no area`)
+          fact('record', `${doc.path}: no claims extracted, it is in no area`)
           continue
         }
-        const items = recordFactsItems(doc, tags)
-        if (items.length === 0) fact('record', `${doc.path}: nothing to record, it has no sentences`)
+        const items = extractClaimsItems(doc, tags)
+        if (items.length === 0) fact('record', `${doc.path}: nothing to extract, it has no sentences`)
         else windowsByDoc.set(doc.path, items)
       }
     }
-    const outcomes = new Map<string, { ledger: FactLedger | null; fromCache: boolean }>()
-    const summary = await runCachedSessionPool<RecordFactsItem, FactLedger>({
+    const outcomes = new Map<string, { ledger: ClaimLedger | null; fromCache: boolean }>()
+    const summary = await runCachedSessionPool<ExtractClaimsItem, ClaimLedger>({
       repoRoot,
-      kind: RECORD_FACTS_SESSION_KIND,
-      cacheName: RECORD_FACTS_CACHE_NAME,
+      kind: EXTRACT_CLAIMS_SESSION_KIND,
+      cacheName: EXTRACT_CLAIMS_CACHE_NAME,
       items: [...windowsByDoc.values()].flat(),
-      workItem: recordFactsWorkItem,
-      cacheKey: (item) => recordFactsCacheKey(item, instructionParts),
-      schema: FactLedgerSchema,
-      session: recordFactsSessionDef,
-      briefing: (item) => recordFactsBriefing(item, instructions),
+      workItem: extractClaimsWorkItem,
+      cacheKey: (item) => extractClaimsCacheKey(item, instructionParts),
+      schema: ClaimLedgerSchema,
+      session: extractClaimsSessionDef,
+      briefing: (item) => extractClaimsBriefing(item, instructions),
       driver: opts.driver,
       persistence: opts.persistence,
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
@@ -1363,9 +1364,9 @@ export async function runSpecScanSessions(
       ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
       ...(opts.now ? { now: opts.now } : {}),
       fold: (item, result) => {
-        // Fail-open per window: a failed session records nothing of it.
+        // Fail-open per window: a failed session extracts nothing of it.
         outcomes.set(
-          recordFactsWorkItem(item),
+          extractClaimsWorkItem(item),
           result.outcome.status === 'completed'
             ? { ledger: result.outcome.output, fromCache: result.outcome.fromCache === true }
             : { ledger: null, fromCache: false },
@@ -1373,13 +1374,13 @@ export async function runSpecScanSessions(
       },
     })
     const ledgers = [...windowsByDoc].map(([ref, items]) => {
-      const windows = items.map((item) => ({ item, outcome: outcomes.get(recordFactsWorkItem(item)) }))
-      const ledger = docFactLedger({
+      const windows = items.map((item) => ({ item, outcome: outcomes.get(extractClaimsWorkItem(item)) }))
+      const ledger = docClaimLedger({
         doc: ref,
         sentences: items[0]!.sentences,
         areas: items[0]!.areas,
         windows: windows.map(({ item, outcome }) => ({ window: item.window, ledger: outcome?.ledger ?? null })),
-        canonicalAreas: (raw) => factAreaIds(factAreas, ref, raw),
+        canonicalAreas: (raw) => claimAreaIds(claimAreas, ref, raw),
       })
       const fromCache = windows.every(({ outcome }) => outcome?.fromCache === true)
       fact('record', `${ref}: ${describeDocLedger(ledger, items.length)}${fromCache ? ', from cache' : ''}`)
@@ -1389,10 +1390,10 @@ export async function runSpecScanSessions(
     return { summary, ledgers }
   }
 
-  // What comparing facts came to, for the corpus: per area, the facts its area
+  // What comparing claims came to, for the corpus: per area, the claims its area
   // batches compared and the groups they formed; for the whole corpus, the
   // subjects and what the batches left unplaced.
-  const comparisonByArea = new Map<string, { facts: Set<RecordedFact>; groups: number }>()
+  const comparisonByArea = new Map<string, { claims: Set<ExtractedClaim>; groups: number }>()
   const splitAreas = new Map<string, { parts: number; cutPairs: number }>()
   let corpusComparison: CorpusComparison | undefined
 
@@ -1419,18 +1420,18 @@ export async function runSpecScanSessions(
   }
 
   /**
-   * The facts path's second half. The facts' subject names are settled (names
+   * The claims path's second half. The claims' subject names are settled (names
    * equal but for case, spacing and markup are one before any session runs;
-   * the rest are settled in parts), the facts are planned into area batches
+   * the rest are settled in parts), the claims are planned into area batches
    * and the subject batches their subject families need, and each batch is
    * compared by one session; every
    * conflict that stands is filed. A failed settling session
-   * merges nothing; a failed comparison lands its facts' docs in the
+   * merges nothing; a failed comparison lands its claims' docs in the
    * notReached of the areas it was comparing.
    */
-  async function compareFactLedgers(ledgers: readonly DocFactLedger[]): Promise<KindRun[]> {
-    const facts = ledgers.flatMap((ledger) => ledger.facts)
-    const names = collectSubjectNames(facts)
+  async function compareClaimLedgers(ledgers: readonly DocClaimLedger[]): Promise<KindRun[]> {
+    const claims = ledgers.flatMap((ledger) => ledger.claims)
+    const names = collectSubjectNames(claims)
     const parts = planSubjectParts(names)
     if (parts.length === 0 && names.length > 0) {
       fact('subjects', `${names.length} subject name${names.length === 1 ? '' : 's'}, nothing to settle`)
@@ -1468,22 +1469,22 @@ export async function runSpecScanSessions(
       },
     })
     assertKindHealthy(settleSummary)
-    const subjectOf = settledSubjects(facts, names, merges)
+    const subjectOf = settledSubjects(claims, names, merges)
     const settledCount = new Set([...subjectOf.values()].map(subjectKey)).size
-    if (facts.length > 0) {
+    if (claims.length > 0) {
       fact(
         'subjects',
-        `${facts.length} fact${facts.length === 1 ? '' : 's'}: ${names.length} subject name${names.length === 1 ? '' : 's'}, ${settledCount} settled subject${settledCount === 1 ? '' : 's'}`,
+        `${claims.length} claim${claims.length === 1 ? '' : 's'}: ${names.length} subject name${names.length === 1 ? '' : 's'}, ${settledCount} settled subject${settledCount === 1 ? '' : 's'}`,
       )
     }
 
-    const plan = planCompareBatches(facts, (f) => subjectOf.get(f) ?? f.subject)
+    const plan = planCompareBatches(claims, (c) => subjectOf.get(c) ?? c.subject)
     for (const [area, split] of plan.splitAreas) {
       splitAreas.set(area, split)
-      const count = facts.filter((f) => f.areas.includes(area)).length
+      const count = claims.filter((c) => c.areas.includes(area)).length
       fact(
         'compare',
-        `${area}: ${count} facts, over the batch bound of ${COMPARE_BATCH_FACTS}, split into ${split.parts} parts, ${split.cutPairs} linked pair${split.cutPairs === 1 ? '' : 's'} cut`,
+        `${area}: ${count} claims, over the batch bound of ${COMPARE_BATCH_CLAIMS}, split into ${split.parts} parts, ${split.cutPairs} linked pair${split.cutPairs === 1 ? '' : 's'} cut`,
       )
     }
     if (plan.subjectFamilies > 0) {
@@ -1496,33 +1497,33 @@ export async function runSpecScanSessions(
     if (subjectBatches > 0) {
       fact(
         'compare',
-        `${plan.subjectBatchFamilies} famil${plan.subjectBatchFamilies === 1 ? 'y' : 'ies'} of subjects spanning area batches, ${plan.subjectBatchFacts} facts, compared again in ${subjectBatches} subject batch${subjectBatches === 1 ? '' : 'es'}`,
+        `${plan.subjectBatchFamilies} famil${plan.subjectBatchFamilies === 1 ? 'y' : 'ies'} of subjects spanning area batches, ${plan.subjectBatchFacts} claims, compared again in ${subjectBatches} subject batch${subjectBatches === 1 ? '' : 'es'}`,
       )
     }
     if (opts.disableConflictDetection !== true) {
-      for (const area of grouped.areas) comparisonByArea.set(area.id, { facts: new Set(), groups: 0 })
+      for (const area of grouped.areas) comparisonByArea.set(area.id, { claims: new Set(), groups: 0 })
     }
 
-    const unplaced = new Set<RecordedFact>()
+    const unplaced = new Set<ExtractedClaim>()
     const items: CompareItem[] = plan.batches.map((batch) => ({
       batch,
       docs: new Map(
-        [...new Set(batch.facts.map((bf) => bf.fact.doc))].flatMap((ref) => {
+        [...new Set(batch.claims.map((bc) => bc.claim.doc))].flatMap((ref) => {
           const doc = universe.byPath.get(ref)
           return doc ? [[ref, doc] as const] : []
         }),
       ),
     }))
-    const compareSummary = await runCachedSessionPool<CompareItem, FactComparison>({
+    const compareSummary = await runCachedSessionPool<CompareItem, ClaimComparison>({
       repoRoot,
-      kind: COMPARE_FACTS_SESSION_KIND,
-      cacheName: COMPARE_FACTS_CACHE_NAME,
+      kind: COMPARE_CLAIMS_SESSION_KIND,
+      cacheName: COMPARE_CLAIMS_CACHE_NAME,
       items,
-      workItem: (item) => compareFactsWorkItem(item.batch),
-      cacheKey: (item) => compareFactsCacheKey(item, instructionParts),
-      schema: FactComparisonSchema,
-      session: compareFactsSessionDef,
-      briefing: (item) => compareFactsBriefing(item, instructions, opts.priorConflicts ?? []),
+      workItem: (item) => compareClaimsWorkItem(item.batch),
+      cacheKey: (item) => compareClaimsCacheKey(item, instructionParts),
+      schema: ClaimComparisonSchema,
+      session: compareClaimsSessionDef,
+      briefing: (item) => compareClaimsBriefing(item, instructions, opts.priorConflicts ?? []),
       driver: opts.driver,
       persistence: opts.persistence,
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
@@ -1534,37 +1535,37 @@ export async function runSpecScanSessions(
       fold: ({ batch }, result) => {
         const label = describeBatch(batch)
         // The areas this batch compared for: its own on an area batch, every
-        // area of its facts on a subject batch.
-        const comparedFor = (fact: RecordedFact): string[] =>
-          batch.kind === 'area' ? fact.areas.filter((a) => batch.areas.includes(a)) : fact.areas
+        // area of its claims on a subject batch.
+        const comparedFor = (claim: ExtractedClaim): string[] =>
+          batch.kind === 'area' ? claim.areas.filter((a) => batch.areas.includes(a)) : claim.areas
         if (result.outcome.status === 'failed') {
-          const docs = new Set(batch.facts.map((bf) => bf.fact.doc))
-          fact('compare', `${label}: session failed, its ${batch.facts.length} facts from ${docs.size} docs left uncompared`)
-          for (const { fact: f } of batch.facts) for (const area of comparedFor(f)) addNotReached(area, [f.doc])
+          const docs = new Set(batch.claims.map((bc) => bc.claim.doc))
+          fact('compare', `${label}: session failed, its ${batch.claims.length} claims from ${docs.size} docs left uncompared`)
+          for (const { claim: c } of batch.claims) for (const area of comparedFor(c)) addNotReached(area, [c.doc])
           return
         }
         // Never trust the transcript: the gate runs again here, and only what
         // it lets stand is folded.
         const check = checkGroups(result.outcome.output, batch)
         if (batch.kind === 'area') {
-          for (const { fact: f } of batch.facts) for (const area of comparedFor(f)) comparisonByArea.get(area)?.facts.add(f)
+          for (const { claim: c } of batch.claims) for (const area of comparedFor(c)) comparisonByArea.get(area)?.claims.add(c)
           for (const group of check.groups) {
-            for (const area of new Set(group.facts.flatMap((bf) => comparedFor(bf.fact)))) {
+            for (const area of new Set(group.claims.flatMap((bc) => comparedFor(bc.claim)))) {
               const entry = comparisonByArea.get(area)
               if (entry) entry.groups += 1
             }
           }
         }
-        const byId = new Map(batch.facts.map((bf) => [bf.id, bf.fact]))
+        const byId = new Map(batch.claims.map((bc) => [bc.id, bc.claim]))
         for (const id of check.unplaced) {
-          const f = byId.get(id)
-          if (f) unplaced.add(f)
+          const c = byId.get(id)
+          if (c) unplaced.add(c)
         }
         const by = result.outcome.fromCache === true ? ', from cache' : ''
         const left = check.unplaced.length > 0 ? `, ${check.unplaced.length} left unplaced` : ''
         fact(
           'compare',
-          `${label}: ${batch.facts.length} facts, ${check.groups.length} group${check.groups.length === 1 ? '' : 's'}, ${check.conflicts.length} conflict${check.conflicts.length === 1 ? '' : 's'}${left}${by}`,
+          `${label}: ${batch.claims.length} claims, ${check.groups.length} group${check.groups.length === 1 ? '' : 's'}, ${check.conflicts.length} conflict${check.conflicts.length === 1 ? '' : 's'}${left}${by}`,
         )
         for (const conflict of check.conflicts) fileConflict(conflict)
       },
@@ -1575,6 +1576,7 @@ export async function runSpecScanSessions(
         settledSubjects: settledCount,
         subjectFamilies: plan.subjectFamilies,
         subjectBatchFamilies: plan.subjectBatchFamilies,
+        // Stored corpus keys, kept so earlier corpora keep parsing.
         subjectBatchFacts: plan.subjectBatchFacts,
         unplacedFacts: unplaced.size,
       }
@@ -1582,10 +1584,10 @@ export async function runSpecScanSessions(
     return [settleSummary, compareSummary]
   }
 
-  const recorded = await recordFacts()
+  const recorded = await extractClaims()
   assertKindHealthy(recorded.summary)
-  const factLedgers: DocFactLedger[] = recorded.ledgers
-  const conflictSummaries: KindRun[] = [recorded.summary, ...(await compareFactLedgers(recorded.ledgers))]
+  const claimLedgers: DocClaimLedger[] = recorded.ledgers
+  const conflictSummaries: KindRun[] = [recorded.summary, ...(await compareClaimLedgers(recorded.ledgers))]
   for (const summary of conflictSummaries) assertKindHealthy(summary)
 
   // Cross-area dedup (det, the rule in @truecourse/shared): the same
@@ -1615,7 +1617,8 @@ export async function runSpecScanSessions(
     const notReached = notReachedByArea.get(a.id)
     const compared = comparisonByArea.get(a.id)
     const comparison: AreaComparison | undefined = compared && {
-      facts: compared.facts.size,
+      // `facts` is a stored corpus key, kept so earlier corpora keep parsing.
+      facts: compared.claims.size,
       groups: compared.groups,
       ...splitAreas.get(a.id),
     }
@@ -1635,10 +1638,10 @@ export async function runSpecScanSessions(
     lastTouched: d.lastTouched,
     areaTags: [],
   }))
-  // A recorded doc carries its ledger's counts; the ledger itself stays in the cache.
-  const ledgerCounts = new Map(factLedgers.map((ledger) => [ledger.doc, docLedgerCounts(ledger)]))
+  // An extracted doc carries its ledger's counts; the ledger itself stays in the cache.
+  const ledgerCounts = new Map(claimLedgers.map((ledger) => [ledger.doc, docLedgerCounts(ledger)]))
   const generatedAt = new Date().toISOString()
-  const claims = claimsFromLedgers(factLedgers, generatedAt)
+  const claims = claimsFromLedgers(claimLedgers, generatedAt)
   const corpus: CuratedCorpus = {
     version: 5,
     generatedAt,
@@ -1728,7 +1731,7 @@ export async function runSpecScanSessions(
     sessions: summaries.map(({ kind, ran, fromCache, failed, spent }) => ({ kind, ran, fromCache, failed, spent })),
     pendingQuestions,
     scanFindings,
-    factLedgers,
+    claimLedgers,
     claims,
   }
 }

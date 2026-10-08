@@ -1,10 +1,10 @@
 /**
- * THE FACT RECORD — `spec-scan.record-facts`, one session per window of a kept
- * doc's sentences, on a scan that finds conflicts by comparing facts.
+ * THE CLAIM EXTRACTION — `spec-scan.record-facts`, one session per window of a
+ * kept doc's sentences, on a scan that finds conflicts by comparing claims.
  *
  * What is under test:
  * - the gate: what it refuses (an uncovered sentence, a sentence both cited and
- *   skipped, a fact outside the window, an area the doc does not have, an
+ *   skipped, a claim outside the window, an area the doc does not have, an
  *   `other` skip with no note), what it accepts, and that a refusal stays
  *   bounded;
  * - the session def: closed tools on the doc alone, the gate enforced on the
@@ -12,11 +12,11 @@
  * - the cache key moves with exactly its named inputs;
  * - window planning, and a doc's ledger folded from its windows;
  * - through the real `runSpecScanSessions` on a scripted driver: the option
- *   runs the record pool, collects each doc's ledger with canonical areas,
+ *   runs the extraction pool, collects each doc's ledger with canonical areas,
  *   counts it into the corpus and the checklist, caches per window, fails
  *   open into `notReached`. What
- *   happens to the ledgers after recording is `spec-scan-settle-subjects` and
- *   `spec-scan-compare-facts`.
+ *   happens to the ledgers after extraction is `spec-scan-settle-subjects` and
+ *   `spec-scan-compare-claims`.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
@@ -32,28 +32,28 @@ import { listStoredSessionRuns } from '../../packages/core/src/lib/sessions-stor
 import { StepTracker } from '../../packages/core/src/progress'
 import { runSpecScanSessions } from '../../packages/core/src/services/spec-scan/run'
 import {
-  FACT_SENTENCES_MAX,
-  FactLedgerWireSchema,
-  RECORD_FACTS_SESSION_KIND,
-  RECORD_STAGE_VERSION,
+  CLAIM_SENTENCES_MAX,
+  ClaimLedgerWireSchema,
+  EXTRACT_CLAIMS_SESSION_KIND,
+  EXTRACT_STAGE_VERSION,
   RECORD_WINDOW_SENTENCES,
   checkLedger,
   claimsFromLedgers,
   describeDocLedger,
-  docFactLedger,
+  docClaimLedger,
   ledgerRefusal,
-  recordFactsCacheKey,
-  recordFactsItems,
-  recordFactsSessionDef,
-  type FactLedger,
-  type FactLedgerWire,
+  extractClaimsCacheKey,
+  extractClaimsItems,
+  extractClaimsSessionDef,
+  type ClaimLedger,
+  type ClaimLedgerWire,
   type LedgerScope,
-  type RecordFactsItem,
-} from '../../packages/core/src/services/spec-scan/record-facts'
+  type ExtractClaimsItem,
+} from '../../packages/core/src/services/spec-scan/extract-claims'
 import { CURATE_DOC_SESSION_KIND } from '../../packages/core/src/services/spec-scan/curate-doc'
 import { SETTLE_AREAS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-areas'
 import { SETTLE_SUBJECTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-subjects'
-import { COMPARE_FACTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/compare-facts'
+import { COMPARE_CLAIMS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/compare-claims'
 import { instructionsFingerprint, scanCacheKey, docLifecycleFingerprint } from '../../packages/core/src/services/spec-scan/tools'
 import { writeDecisions, type DecisionsFile, type DocCandidate } from '../../packages/spec-consolidator/src/index.js'
 import { SENTENCE_SPLITTER_VERSION, claimId, sentenceKey, splitDocSentences } from '@truecourse/shared'
@@ -72,7 +72,7 @@ import type {
 
 const SCOPE: LedgerScope = { window: { index: 1, from: 3, to: 8 }, areas: ['core/auth', 'core/exports'] }
 
-const fact = (sentences: number[], areas: string[] = ['core/exports']): FactLedgerWire['facts'][number] => ({
+const claim = (sentences: number[], areas: string[] = ['core/exports']): ClaimLedgerWire['facts'][number] => ({
   sentences,
   subject: 'Export my data',
   statement: 'Export my data is under Settings, Account.',
@@ -82,22 +82,22 @@ const fact = (sentences: number[], areas: string[] = ['core/exports']): FactLedg
 })
 
 /** A ledger that accounts for every sentence of SCOPE: 3-5 cited, 6-8 skipped. */
-const COMPLETE: FactLedgerWire = {
-  facts: [fact([3]), fact([4, 5], ['core/auth', 'core/exports'])],
+const COMPLETE: ClaimLedgerWire = {
+  facts: [claim([3]), claim([4, 5], ['core/auth', 'core/exports'])],
   skips: [{ from: 6, to: 8, why: 'navigation' }],
 }
 
-describe('the record gate', () => {
+describe('the extraction gate', () => {
   it('accepts a ledger that accounts for every sentence of the window', () => {
     const check = checkLedger(COMPLETE, SCOPE)
-    expect(check).toEqual({ problems: [], uncovered: [], facts: COMPLETE.facts, skipped: { navigation: 3 } })
+    expect(check).toEqual({ problems: [], uncovered: [], claims: COMPLETE.facts, skipped: { navigation: 3 } })
     expect(ledgerRefusal(check)).toBeUndefined()
   })
 
-  it('wants a reason on a fact that is not testable, and none on one that is', () => {
+  it('wants a reason on a claim that is not testable, and none on one that is', () => {
     const check = checkLedger(
       {
-        facts: [{ ...fact([3]), testable: false, reason: null }, { ...fact([4]), testable: true, reason: 'hedge' }, { ...fact([5]), testable: false, reason: 'hedge' }],
+        facts: [{ ...claim([3]), testable: false, reason: null }, { ...claim([4]), testable: true, reason: 'hedge' }, { ...claim([5]), testable: false, reason: 'hedge' }],
         skips: [{ from: 6, to: 8, why: 'navigation' }],
       },
       SCOPE,
@@ -106,11 +106,11 @@ describe('the record gate', () => {
       'facts[0] is not testable and gives no reason',
       'facts[1] is testable and gives a reason it is not; the reason is null for a testable fact',
     ])
-    expect(check.facts).toEqual([{ ...fact([5]), testable: false, reason: 'hedge' }])
+    expect(check.claims).toEqual([{ ...claim([5]), testable: false, reason: 'hedge' }])
   })
 
   it('refuses uncovered sentences, naming them as ranges', () => {
-    const check = checkLedger({ facts: [fact([4])], skips: [] }, SCOPE)
+    const check = checkLedger({ facts: [claim([4])], skips: [] }, SCOPE)
     expect(check.uncovered).toEqual([3, 5, 6, 7, 8])
     expect(ledgerRefusal(check)).toMatch(/5 sentence\(s\) no fact cites and no skip covers: 3, 5-8\./)
   })
@@ -122,23 +122,23 @@ describe('the record gate', () => {
     expect(check.skipped).toEqual({ example: 3 })
   })
 
-  it('refuses a fact citing a sentence outside the window, or too many sentences, or none', () => {
+  it('refuses a claim citing a sentence outside the window, or too many sentences, or none', () => {
     const check = checkLedger(
-      { facts: [fact([3, 9]), fact([3, 4, 5, 6]), fact([])], skips: [{ from: 3, to: 8, why: 'other', note: 'a table of contents' }] },
+      { facts: [claim([3, 9]), claim([3, 4, 5, 6]), claim([])], skips: [{ from: 3, to: 8, why: 'other', note: 'a table of contents' }] },
       SCOPE,
     )
     expect(check.problems).toEqual([
       'facts[0] cites sentence 9, outside this window (3-8)',
-      `facts[1] cites 4 sentences; a fact cites 1 to ${FACT_SENTENCES_MAX}`,
-      `facts[2] cites 0 sentences; a fact cites 1 to ${FACT_SENTENCES_MAX}`,
+      `facts[1] cites 4 sentences; a fact cites 1 to ${CLAIM_SENTENCES_MAX}`,
+      `facts[2] cites 0 sentences; a fact cites 1 to ${CLAIM_SENTENCES_MAX}`,
     ])
-    // A refused fact covers nothing; the skip still covers its sentences.
-    expect(check.facts).toEqual([])
+    // A refused claim covers nothing; the skip still covers its sentences.
+    expect(check.claims).toEqual([])
     expect(check.uncovered).toEqual([])
   })
 
-  it('refuses an area the doc does not have, and a fact with none', () => {
-    const check = checkLedger({ facts: [fact([3], ['core/billing']), fact([4], [])], skips: [{ from: 5, to: 8, why: 'advice' }] }, SCOPE)
+  it('refuses an area the doc does not have, and a claim with none', () => {
+    const check = checkLedger({ facts: [claim([3], ['core/billing']), claim([4], [])], skips: [{ from: 5, to: 8, why: 'advice' }] }, SCOPE)
     expect(check.problems).toEqual([
       'facts[0] names "core/billing", not an area of this document (core/auth, core/exports)',
       'facts[1] names no area; name one or more of core/auth, core/exports',
@@ -148,7 +148,7 @@ describe('the record gate', () => {
 
   it('refuses an "other" skip with no note, and one outside the window', () => {
     const check = checkLedger(
-      { facts: [fact([3])], skips: [{ from: 4, to: 6, why: 'other' }, { from: 7, to: 9, why: 'legal' }] },
+      { facts: [claim([3])], skips: [{ from: 4, to: 6, why: 'other' }, { from: 7, to: 9, why: 'legal' }] },
       SCOPE,
     )
     expect(check.problems).toEqual([
@@ -160,8 +160,8 @@ describe('the record gate', () => {
 
   it('bounds a refusal: at most 40 sentence ranges and 25 problems are listed', () => {
     const scope: LedgerScope = { window: { index: 1, from: 1, to: 300 }, areas: ['core/x'] }
-    const evens = Array.from({ length: 150 }, (_, i) => fact([2 * (i + 1)], ['core/x']))
-    const bad = Array.from({ length: 30 }, () => fact([1], ['core/nope']))
+    const evens = Array.from({ length: 150 }, (_, i) => claim([2 * (i + 1)], ['core/x']))
+    const bad = Array.from({ length: 30 }, () => claim([1], ['core/nope']))
     const refusal = ledgerRefusal(checkLedger({ facts: [...evens, ...bad], skips: [] }, scope))!
     expect(refusal).toMatch(/150 sentence\(s\) no fact cites/)
     expect(refusal).toMatch(/, 79, and 110 more\./)
@@ -217,12 +217,12 @@ Nothing in particular.
 // the session def
 // ---------------------------------------------------------------------------
 
-describe('the record session def', () => {
+describe('the extraction session def', () => {
   const exportDoc = doc('docs/export.md', EXPORT_MD)
-  const item = recordFactsItems(exportDoc, [{ product: 'core', concern: 'exports' }])[0]!
+  const item = extractClaimsItems(exportDoc, [{ product: 'core', concern: 'exports' }])[0]!
 
   it('has closed tools only: the gate, and read_section over the doc itself', async () => {
-    const def = recordFactsSessionDef(item)
+    const def = extractClaimsSessionDef(item)
     expect(def.computer).toBeUndefined()
     expect(def.tools.map((t) => t.name)).toEqual(['read_section', 'check_ledger'])
     expect(def.outcomePrecondition?.tool).toBe('check_ledger')
@@ -233,19 +233,19 @@ describe('the record session def', () => {
   })
 
   it('runs the gate in check_ledger', async () => {
-    const def = recordFactsSessionDef(item)
+    const def = extractClaimsSessionDef(item)
     const check = def.tools[1]!
     const ctx = { workItem: '', signal: new AbortController().signal, dispatchChild: () => Promise.reject(new Error('unused')) }
-    const draft: FactLedgerWire = { facts: [fact([1], ['core/exports'])], skips: [] }
+    const draft: ClaimLedgerWire = { facts: [claim([1], ['core/exports'])], skips: [] }
     expect(await check.execute(draft, ctx)).toMatchObject({ isError: true, content: expect.stringMatching(/2-4\./) })
-    const done: FactLedgerWire = { facts: [fact([1, 2], ['core/exports'])], skips: [{ from: 3, to: 4, why: 'example' }] }
+    const done: ClaimLedgerWire = { facts: [claim([1, 2], ['core/exports'])], skips: [{ from: 3, to: 4, why: 'example' }] }
     expect((await check.execute(done, ctx)).content).toMatch(/^The ledger is complete: 1 fact\(s\), 2 sentence\(s\) skipped/)
   })
 
   it('refuses an incomplete outcome, and wrapping up accepts it with its gaps stamped', () => {
-    const def = recordFactsSessionDef(item)
-    const wire: FactLedgerWire = { facts: [fact([1])], skips: [{ from: 2, to: 2, why: 'other' }] }
-    const outcome = def.resolveOutcome!(wire, []) as FactLedger
+    const def = extractClaimsSessionDef(item)
+    const wire: ClaimLedgerWire = { facts: [claim([1])], skips: [{ from: 2, to: 2, why: 'other' }] }
+    const outcome = def.resolveOutcome!(wire, []) as ClaimLedger
     expect(outcome.unrecorded).toEqual([2, 3, 4])
     expect(def.validateOutcome!(outcome, { wrappingUp: false })).toMatch(/^Ledger refused\./)
     expect(def.validateOutcome!(outcome, { wrappingUp: true })).toBeUndefined()
@@ -253,8 +253,8 @@ describe('the record session def', () => {
   })
 
   it('stamps `unrecorded` itself: the model cannot write it', () => {
-    expect(FactLedgerWireSchema.safeParse({ facts: [], skips: [], unrecorded: [] }).success).toBe(false)
-    const def = recordFactsSessionDef(item)
+    expect(ClaimLedgerWireSchema.safeParse({ facts: [], skips: [], unrecorded: [] }).success).toBe(false)
+    const def = extractClaimsSessionDef(item)
     expect(() => def.resolveOutcome!({ facts: [], skips: [], unrecorded: [] }, [])).toThrow()
   })
 })
@@ -263,19 +263,19 @@ describe('the record session def', () => {
 // cache key — named inputs only
 // ---------------------------------------------------------------------------
 
-describe('recordFactsCacheKey', () => {
+describe('extractClaimsCacheKey', () => {
   const FRONT = `---\ntitle: "Export"\ndescription: "Where exports live."\n---\n\n${EXPORT_MD}`
-  const base = (over: Partial<DocCandidate> = {}, body = FRONT): RecordFactsItem =>
-    recordFactsItems(doc('docs/export.md', body, over), [{ product: 'core', concern: 'exports' }])[0]!
-  const key = (item: RecordFactsItem, instructions: string[] = []): string =>
-    recordFactsCacheKey(item, [instructionsFingerprint(instructions)])
+  const base = (over: Partial<DocCandidate> = {}, body = FRONT): ExtractClaimsItem =>
+    extractClaimsItems(doc('docs/export.md', body, over), [{ product: 'core', concern: 'exports' }])[0]!
+  const key = (item: ExtractClaimsItem, instructions: string[] = []): string =>
+    extractClaimsCacheKey(item, [instructionsFingerprint(instructions)])
   const KEY = key(base())
 
   it('is the named inputs, in order, and nothing else', () => {
     const item = base()
     expect(KEY).toBe(
       scanCacheKey([
-        `record-facts-v${RECORD_STAGE_VERSION}`,
+        `record-facts-v${EXTRACT_STAGE_VERSION}`,
         `sentences-v${SENTENCE_SPLITTER_VERSION}`,
         'docs/export.md',
         'h-docs/export.md',
@@ -304,7 +304,7 @@ describe('recordFactsCacheKey', () => {
   it('does not move with the window ordinal, the window count or the area order', () => {
     const item = base()
     expect(key({ ...item, window: { ...item.window, index: 4 }, windows: 9 })).toBe(KEY)
-    const two = recordFactsItems(doc('docs/export.md', FRONT), [
+    const two = extractClaimsItems(doc('docs/export.md', FRONT), [
       { product: 'core', concern: 'privacy' },
       { product: 'core', concern: 'exports' },
     ])[0]!
@@ -319,18 +319,18 @@ describe('recordFactsCacheKey', () => {
 describe('record windows and the doc ledger', () => {
   it('plans one item per window, and none for a doc with no area tag', () => {
     const many = `# Big\n\n${Array.from({ length: RECORD_WINDOW_SENTENCES + 30 }, (_, i) => `- Item ${i}`).join('\n')}\n`
-    const items = recordFactsItems(doc('docs/big.md', many), [{ product: 'core', concern: 'big' }])
+    const items = extractClaimsItems(doc('docs/big.md', many), [{ product: 'core', concern: 'big' }])
     expect(items.map((i) => [i.window.from, i.window.to, i.windows])).toEqual([
       [1, RECORD_WINDOW_SENTENCES, 2],
       [RECORD_WINDOW_SENTENCES + 1, RECORD_WINDOW_SENTENCES + 30, 2],
     ])
     expect(items[0]!.sentences).toHaveLength(RECORD_WINDOW_SENTENCES + 30)
-    expect(recordFactsItems(doc('docs/big.md', many), [])).toEqual([])
+    expect(extractClaimsItems(doc('docs/big.md', many), [])).toEqual([])
   })
 
-  it('folds windows into one ledger: standing facts with canonical areas, skips, gaps and failures', () => {
+  it('folds windows into one ledger: standing claims with canonical areas, skips, gaps and failures', () => {
     const sentences = splitDocSentences(EXPORT_MD)
-    const ledger = docFactLedger({
+    const ledger = docClaimLedger({
       doc: 'docs/export.md',
       sentences,
       areas: ['core/Data Export'],
@@ -338,12 +338,12 @@ describe('record windows and the doc ledger', () => {
         { window: { index: 2, from: 3, to: 4 }, ledger: null },
         {
           window: { index: 1, from: 1, to: 2 },
-          ledger: { facts: [fact([1], ['core/Data Export']), fact([2], ['core/nope'])], skips: [] },
+          ledger: { facts: [claim([1], ['core/Data Export']), claim([2], ['core/nope'])], skips: [] },
         },
       ],
       canonicalAreas: (raw) => (raw === 'core/Data Export' ? ['core/exports'] : []),
     })
-    expect(ledger.facts).toEqual([
+    expect(ledger.claims).toEqual([
       {
         doc: 'docs/export.md',
         sentences: [sentences[0]],
@@ -355,12 +355,12 @@ describe('record windows and the doc ledger', () => {
     ])
     expect(ledger.unrecorded).toEqual([2])
     expect(ledger.failed).toEqual([{ index: 2, from: 3, to: 4 }])
-    expect(describeDocLedger(ledger, 2)).toBe('4 sentences, 1 fact, 0 skipped, 1 unrecorded, 1 of 2 windows not recorded, the session failed')
+    expect(describeDocLedger(ledger, 2)).toBe('4 sentences, 1 claim, 0 skipped, 1 unrecorded, 1 of 2 windows not extracted, the session failed')
   })
 
   it('turns the ledgers into claims named by their sentence keys, each carrying its testability', () => {
     const sentences = splitDocSentences(EXPORT_MD)
-    const ledger = docFactLedger({
+    const ledger = docClaimLedger({
       doc: 'docs/export.md',
       sentences,
       areas: ['core/exports'],
@@ -368,7 +368,7 @@ describe('record windows and the doc ledger', () => {
         {
           window: { index: 1, from: 1, to: 4 },
           ledger: {
-            facts: [fact([1, 2]), { ...fact([3]), testable: false, reason: 'advice' }],
+            facts: [claim([1, 2]), { ...claim([3]), testable: false, reason: 'advice' }],
             skips: [{ from: 4, to: 4, why: 'navigation' }],
           },
         },
@@ -452,11 +452,11 @@ async function callTool(input: SessionRunInput, name: string, args: unknown): Pr
   return result.content
 }
 
-/** An honest recorder: the window's first sentence skipped as navigation, every other sentence a fact of its own. */
+/** An honest extractor: the window's first sentence skipped as navigation, every other sentence a claim of its own. */
 async function honestRecord(input: SessionRunInput): Promise<DriverResult> {
   const { sentences, areas } = windowOf(input)
   const [first, ...rest] = sentences
-  const ledger: FactLedgerWire = {
+  const ledger: ClaimLedgerWire = {
     facts: rest.map((n) => ({ sentences: [n], subject: `sentence ${n}`, statement: `Sentence ${n} states a fact.`, areas: [areas[0]!], testable: true, reason: null })),
     skips: first === undefined ? [] : [{ from: first, to: first, why: 'navigation' }],
   }
@@ -474,7 +474,7 @@ function scriptedDriver(script: Script): SessionDriver & { runs: Array<{ kind: s
     attribution: { provider: 'test', model: 'scripted' },
     runSession(input) {
       for (const content of input.initialMessages) input.onEvent({ type: 'user-message', content })
-      runs.push({ kind: input.def.kind, ...(input.def.kind === RECORD_FACTS_SESSION_KIND ? { doc: windowOf(input).doc } : {}) })
+      runs.push({ kind: input.def.kind, ...(input.def.kind === EXTRACT_CLAIMS_SESSION_KIND ? { doc: windowOf(input).doc } : {}) })
       const done = (async () => {
         await new Promise((r) => setTimeout(r, 0))
         return script(input.def.kind, input)
@@ -551,15 +551,15 @@ function scanDriver(record: (input: SessionRunInput) => Promise<DriverResult> = 
         },
       }
     }
-    if (kind === RECORD_FACTS_SESSION_KIND) return record(input)
+    if (kind === EXTRACT_CLAIMS_SESSION_KIND) return record(input)
     if (kind === SETTLE_SUBJECTS_SESSION_KIND) {
       // Every subject name distinct.
       const settlement = { same: [], distinct: [...messagesOf(input).join('\n').matchAll(/^(S\d+) · /gm)].map((m) => m[1]!) }
       await callTool(input, 'check_subjects', settlement)
       return { kind: 'outcome', value: settlement }
     }
-    if (kind === COMPARE_FACTS_SESSION_KIND) {
-      // Every fact alone.
+    if (kind === COMPARE_CLAIMS_SESSION_KIND) {
+      // Every claim alone.
       const comparison = { groups: [], alone: [...messagesOf(input).join('\n').matchAll(/^(F\d+) · /gm)].map((m) => m[1]!) }
       await callTool(input, 'check_groups', comparison)
       return { kind: 'outcome', value: comparison }
@@ -587,21 +587,21 @@ async function runScan(opts: {
 // the scan
 // ---------------------------------------------------------------------------
 
-describe('a scan that finds conflicts by comparing facts', () => {
-  it('records every kept doc with an area tag, window by window, and hands the facts on to be compared', async () => {
+describe('a scan that finds conflicts by comparing claims', () => {
+  it('extracts the claims of every kept doc with an area tag, window by window, and hands them on to be compared', async () => {
     const { result, driver, facts } = await runScan({})
-    expect(driver.runs.filter((r) => r.kind === RECORD_FACTS_SESSION_KIND).map((r) => r.doc).sort()).toEqual([
+    expect(driver.runs.filter((r) => r.kind === EXTRACT_CLAIMS_SESSION_KIND).map((r) => r.doc).sort()).toEqual([
       'docs/export.md',
       'docs/privacy.md',
     ])
-    expect(result.sessions.map((s) => s.kind)).toContain(RECORD_FACTS_SESSION_KIND)
+    expect(result.sessions.map((s) => s.kind)).toContain(EXTRACT_CLAIMS_SESSION_KIND)
     expect(result.stats.conflictCount).toBe(0)
     expect(result.corpus.areas.flatMap((a) => a.conflicts)).toEqual([])
 
-    expect(facts).toContainEqual(['record', 'docs/export.md: 4 sentences, 3 facts, 1 skipped'])
-    expect(facts).toContainEqual(['record', 'docs/notes.md: not recorded, it has no area tag'])
-    // Each sentence its own subject, and every fact alone: nothing conflicts.
-    expect(facts).toContainEqual(['compare', 'core/exports: 6 facts, 0 groups, 0 conflicts'])
+    expect(facts).toContainEqual(['record', 'docs/export.md: 4 sentences, 3 claims, 1 skipped'])
+    expect(facts).toContainEqual(['record', 'docs/notes.md: no claims extracted, it has no area tag'])
+    // Each sentence its own subject, and every claim alone: nothing conflicts.
+    expect(facts).toContainEqual(['compare', 'core/exports: 6 claims, 0 groups, 0 conflicts'])
     // "sentence 2", "sentence 3" and "sentence 4" share the word "sentence": one family, all in one area batch.
     expect(result.corpus.comparison).toEqual({
       subjectNames: 3,
@@ -613,18 +613,18 @@ describe('a scan that finds conflicts by comparing facts', () => {
     })
   })
 
-  it('hands on each ledger with its facts filed under the settled areas, and counts it into the corpus', async () => {
+  it('hands on each ledger with its claims filed under the settled areas, and counts it into the corpus', async () => {
     const { result } = await runScan({})
-    const ledgers = result.factLedgers!
+    const ledgers = result.claimLedgers!
     expect(ledgers.map((l) => l.doc)).toEqual(['docs/export.md', 'docs/privacy.md'])
-    // The session cited the raw tag "core/Data Export"; the fact is filed where the doc landed.
+    // The session cited the raw tag "core/Data Export"; the claim is filed where the doc landed.
     const exportLedger = ledgers[0]!
-    expect(exportLedger.facts.map((f) => [f.sentences.map((u) => u.n), f.areas])).toEqual([
+    expect(exportLedger.claims.map((f) => [f.sentences.map((u) => u.n), f.areas])).toEqual([
       [[2], ['core/exports']],
       [[3], ['core/exports']],
       [[4], ['core/exports']],
     ])
-    expect(exportLedger.facts[0]!.sentences[0]!.text).toBe('It runs nightly.')
+    expect(exportLedger.claims[0]!.sentences[0]!.text).toBe('It runs nightly.')
     expect(result.corpus.areas.map((a) => a.id)).toEqual(['core/exports'])
 
     const counts = new Map(result.corpus.docs.map((d) => [d.ref, d.ledger]))
@@ -635,15 +635,14 @@ describe('a scan that finds conflicts by comparing facts', () => {
   it('serves every window from the cache on an unchanged re-run', async () => {
     await runScan({})
     const { result, driver, facts } = await runScan({})
-    expect(driver.runs.filter((r) => r.kind === RECORD_FACTS_SESSION_KIND)).toEqual([])
+    expect(driver.runs.filter((r) => r.kind === EXTRACT_CLAIMS_SESSION_KIND)).toEqual([])
     expect(result.noChanges).toBe(true)
-    expect(facts).toContainEqual(['record', 'docs/export.md: 4 sentences, 3 facts, 1 skipped, from cache'])
-    expect(result.factLedgers!.map((l) => l.facts.length)).toEqual([3, 3])
+    expect(facts).toContainEqual(['record', 'docs/export.md: 4 sentences, 3 claims, 1 skipped, from cache'])
+    expect(result.claimLedgers!.map((l) => l.claims.length)).toEqual([3, 3])
   })
 
   it('fails open: a failed window leaves its doc in its areas\' notReached', async () => {
     const { result, facts } = await runScan({
-      method: 'facts',
       record: async (input) =>
         windowOf(input).doc === 'docs/privacy.md'
           ? { kind: 'failure', failure: { kind: 'malformed', detail: 'nope', retryability: 'none' } }
@@ -652,12 +651,12 @@ describe('a scan that finds conflicts by comparing facts', () => {
     expect(result.corpus.areas.find((a) => a.id === 'core/exports')!.notReached).toEqual(['docs/privacy.md'])
     expect(facts).toContainEqual([
       'record',
-      'docs/privacy.md: 4 sentences, 0 facts, 0 skipped, 1 of 1 window not recorded, the session failed',
+      'docs/privacy.md: 4 sentences, 0 claims, 0 skipped, 1 of 1 window not extracted, the session failed',
     ])
-    expect(result.stats.llmFailures).toEqual([expect.objectContaining({ stage: RECORD_FACTS_SESSION_KIND, failures: 1 })])
+    expect(result.stats.llmFailures).toEqual([expect.objectContaining({ stage: EXTRACT_CLAIMS_SESSION_KIND, failures: 1 })])
   })
 
-  it('checks off a "Recording facts" step with a fact line per doc', async () => {
+  it('checks off an "Extracting claims" step with a fact line per doc', async () => {
     let steps: ReadonlyArray<{ key: string; label: string; status: string; facts?: string[] }> = []
     const tracker = new StepTracker((payload) => {
       if (payload.steps) steps = payload.steps
@@ -680,12 +679,12 @@ describe('a scan that finds conflicts by comparing facts', () => {
       ['verify', 'done'],
     ])
     const record = steps.find((s) => s.key === 'record')!
-    expect(record.label).toBe('Recording facts')
-    // In the order it happened: what is not recorded is known before any session runs.
+    expect(record.label).toBe('Extracting claims')
+    // In the order it happened: what is not extracted is known before any session runs.
     expect(record.facts).toEqual([
-      'docs/notes.md: not recorded, it has no area tag',
-      'docs/export.md: 4 sentences, 3 facts, 1 skipped',
-      'docs/privacy.md: 4 sentences, 3 facts, 1 skipped',
+      'docs/notes.md: no claims extracted, it has no area tag',
+      'docs/export.md: 4 sentences, 3 claims, 1 skipped',
+      'docs/privacy.md: 4 sentences, 3 claims, 1 skipped',
     ])
 
     const [stored] = await listStoredSessionRuns(repo, 'spec-scan')
@@ -694,24 +693,23 @@ describe('a scan that finds conflicts by comparing facts', () => {
     expect(block.items.map((item) => [item.key, item.sessionKinds])).toEqual([
       ['discover', ['spec-scan.orchestrate']],
       ['tag', ['spec-scan.curate-doc', 'spec-scan.settle-areas']],
-      ['record', [RECORD_FACTS_SESSION_KIND]],
+      ['record', [EXTRACT_CLAIMS_SESSION_KIND]],
       ['subjects', [SETTLE_SUBJECTS_SESSION_KIND]],
-      ['compare', [COMPARE_FACTS_SESSION_KIND]],
+      ['compare', [COMPARE_CLAIMS_SESSION_KIND]],
       ['conflicts', []],
       ['verify', []],
     ])
   })
 
-  it('aborts on the one-abort rule when every record session dies of transport', async () => {
+  it('aborts on the one-abort rule when every extraction session dies of transport', async () => {
     const error = await runScan({
-      method: 'facts',
       record: async () => ({
         kind: 'failure',
         failure: { kind: 'transport', detail: 'provider down', class: 'provider', retryability: 'none' },
       }),
     }).catch((e: unknown) => e)
     expect(error).toBeInstanceOf(LlmStageFailureError)
-    expect((error as LlmStageFailureError).tally.stage).toBe(RECORD_FACTS_SESSION_KIND)
+    expect((error as LlmStageFailureError).tally.stage).toBe(EXTRACT_CLAIMS_SESSION_KIND)
   })
 })
 
