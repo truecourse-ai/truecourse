@@ -9,6 +9,12 @@ const DEFAULT_MEASUREMENT_ID = 'G-L6WHW28B6Y';
 const MEASUREMENT_ID =
   (import.meta.env.VITE_GA_MEASUREMENT_ID as string | undefined) || DEFAULT_MEASUREMENT_ID;
 
+/** Google Ads account tag, configured on the same gtag.js as GA. Public by design. */
+const ADS_ID = 'AW-18498468594';
+
+/** The Google Ads "Book appointment" conversion. */
+const ADS_BOOKING_CONVERSION = `${ADS_ID}/xLktCPT3yJQdEPL14PRE`;
+
 declare global {
   interface Window {
     dataLayer: unknown[];
@@ -42,6 +48,7 @@ export function initGA(): void {
   window.gtag('js', new Date());
   // The initial page load is sent by config; route changes are sent below.
   window.gtag('config', MEASUREMENT_ID);
+  window.gtag('config', ADS_ID);
 
   initialized = true;
 }
@@ -53,4 +60,10 @@ export function trackGAPageview(path: string): void {
     page_location: window.location.origin + path,
     page_title: document.title,
   });
+}
+
+/** Reports a booked checkup to Google Ads, so bookings are credited to the ad click. */
+export function trackAdsBooking(): void {
+  if (!initialized) return;
+  window.gtag('event', 'conversion', { send_to: ADS_BOOKING_CONVERSION, value: 1.0, currency: 'USD' });
 }
