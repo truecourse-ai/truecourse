@@ -39,7 +39,7 @@ import {
 import { memorySpecStore } from '../helpers/memory-spec-store';
 import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
 import { outcome, stubDriver, type StubCall } from './spec-scan-session-stub';
-import { compare, record, settle } from './spec-scan-facts-stub';
+import { compare, record, settle } from './spec-scan-claims-stub';
 
 /** The document a universe-mode curate briefing is about. */
 const refOf = (briefing: string): string => /^REF: (.+)$/m.exec(briefing)?.[1] ?? '';

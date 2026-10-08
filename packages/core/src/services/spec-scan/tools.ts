@@ -6,7 +6,7 @@
  * session that dies mid-budget strands no half-curated state.
  *
  * The validator tools (`check_settlement` in settle-areas.ts, `check_groups`
- * in compare-facts.ts) live beside the schemas they validate; this module holds the
+ * in compare-claims.ts) live beside the schemas they validate; this module holds the
  * data tools the session kinds share, plus the one cache-key convention every
  * kind builds with ({@link scanCacheKey}).
  */

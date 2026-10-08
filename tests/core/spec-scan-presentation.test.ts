@@ -26,10 +26,10 @@ import {
   DocVerdictSchema,
   curateDocSessionDef,
 } from '../../packages/core/src/services/spec-scan/curate-doc'
-import { RECORD_FACTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/record-facts'
+import { EXTRACT_CLAIMS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/extract-claims'
 import { SETTLE_SUBJECTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-subjects'
-import { COMPARE_FACTS_SESSION_KIND, presentConflict, type ReportedConflict } from '../../packages/core/src/services/spec-scan/compare-facts'
-import { compare, record as recordFacts, settle } from './spec-scan-facts-stub'
+import { COMPARE_CLAIMS_SESSION_KIND, presentConflict, type ReportedConflict } from '../../packages/core/src/services/spec-scan/compare-claims'
+import { compare, record as extractClaims, settle } from './spec-scan-claims-stub'
 import {
   AreaSettlementSchema,
   settleAreasSessionDef,
@@ -319,9 +319,9 @@ describe('spec scan run record — the checklist block', () => {
         await call.emit(toolResult('check_settlement', 'valid'))
         return outcome({ concernMerges: [], productMerges: [], productVerdicts: [], subdivisions: [] })
       }
-      if (call.kind === RECORD_FACTS_SESSION_KIND) return recordFacts(call, () => null)
+      if (call.kind === EXTRACT_CLAIMS_SESSION_KIND) return extractClaims(call, () => null)
       if (call.kind === SETTLE_SUBJECTS_SESSION_KIND) return settle(call)
-      if (call.kind === COMPARE_FACTS_SESSION_KIND) return compare(call)
+      if (call.kind === COMPARE_CLAIMS_SESSION_KIND) return compare(call)
       return outcome({
         keep: true,
         reason: 'spec',

@@ -52,9 +52,9 @@ import {
 } from '../services/spec-scan/curate-doc.js';
 import { SETTLE_AREAS_SESSION_KIND } from '../services/spec-scan/settle-areas.js';
 import { CORPUS_REVIEW_SESSION_KIND } from '../services/spec-scan/corpus-review.js';
-import { RECORD_FACTS_SESSION_KIND } from '../services/spec-scan/record-facts.js';
+import { EXTRACT_CLAIMS_SESSION_KIND } from '../services/spec-scan/extract-claims.js';
 import { SETTLE_SUBJECTS_SESSION_KIND } from '../services/spec-scan/settle-subjects.js';
-import { COMPARE_FACTS_SESSION_KIND } from '../services/spec-scan/compare-facts.js';
+import { COMPARE_CLAIMS_SESSION_KIND } from '../services/spec-scan/compare-claims.js';
 import {
   createStoredSessionRun,
   type CreateSessionRunOptions,
@@ -118,9 +118,9 @@ import { withEstimatePhase, type EstimatePhase, type StepTracker } from '../prog
 export const CURATE_STEPS = [
   { key: 'discover', label: 'Discovering docs' },
   { key: 'tag', label: 'Tagging doc areas' },
-  { key: 'record', label: 'Recording facts' },
+  { key: 'record', label: 'Extracting claims' },
   { key: 'subjects', label: 'Settling subjects' },
-  { key: 'compare', label: 'Comparing facts' },
+  { key: 'compare', label: 'Comparing claims' },
   { key: 'conflicts', label: 'Finding conflicts' },
   { key: 'verify', label: 'Verifying conflicts' },
 ] as const;
@@ -139,9 +139,9 @@ function curateStepSessionKinds(computer: boolean): Record<string, readonly stri
     tag: computer
       ? [CURATE_DOC_SESSION_KIND, CORPUS_REVIEW_SESSION_KIND, SETTLE_AREAS_SESSION_KIND]
       : [CURATE_DOC_SESSION_KIND, SETTLE_AREAS_SESSION_KIND],
-    record: [RECORD_FACTS_SESSION_KIND],
+    record: [EXTRACT_CLAIMS_SESSION_KIND],
     subjects: [SETTLE_SUBJECTS_SESSION_KIND],
-    compare: [COMPARE_FACTS_SESSION_KIND],
+    compare: [COMPARE_CLAIMS_SESSION_KIND],
     conflicts: [],
     verify: [],
   };
@@ -154,8 +154,9 @@ function curateStepSessionKinds(computer: boolean): Record<string, readonly stri
 // session per doc (and, when the driver can hand a session a computer, a
 // `spec-scan.corpus-review` after curation), at most one
 // `spec-scan.settle-areas` session, then the conflict steps: one
-// `spec-scan.record-facts` per doc window, the `spec-scan.settle-subjects`
-// sessions and one `spec-scan.compare-facts` per batch of facts, under the
+// `spec-scan.record-facts` (claim extraction) per doc window, the
+// `spec-scan.settle-subjects` sessions and one `spec-scan.compare-facts` per
+// batch of claims, under the
 // CURATE_STEPS the progress UI renders.
 // ---------------------------------------------------------------------------
 
@@ -329,7 +330,7 @@ export interface CurateInProcessOptions {
  * The four step keys survive from the one-shot pipeline so the progress UI
  * renders unchanged; what each covers moved: `discover` =
  * discovery + prefilter, `tag` = the curate-doc pool + the settle session,
- * `record`, `subjects` and `compare` = the fact sessions, `conflicts` = the
+ * `record`, `subjects` and `compare` = the claim sessions, `conflicts` = the
  * conflicts they found, filed, `verify` = the deterministic
  * fold (pointer re-anchoring, cross-area dedup, confidence auto-apply).
  */
@@ -513,7 +514,7 @@ export async function curateInProcess(
         onCompareProgress: (done, total) => {
           advance('compare');
           compareBatches = total;
-          tracker?.detail('compare', total > 0 ? `${done}/${total} batch${total === 1 ? '' : 'es'} of facts to compare` : 'no facts to compare');
+          tracker?.detail('compare', total > 0 ? `${done}/${total} batch${total === 1 ? '' : 'es'} of claims to compare` : 'no claims to compare');
         },
       });
     } catch (e) {
@@ -539,9 +540,9 @@ export async function curateInProcess(
         'tag',
         `${result.stats.docsKept} kept · ${result.stats.docsScanned - result.stats.docsKept} skipped · ${result.stats.areaCount} areas`,
       );
-      if (result.factLedgers) {
-        const facts = result.factLedgers.reduce((n, ledger) => n + ledger.facts.length, 0);
-        tracker?.detail('record', `${result.factLedgers.length} docs recorded · ${facts} facts`);
+      if (result.claimLedgers) {
+        const claims = result.claimLedgers.reduce((n, ledger) => n + ledger.claims.length, 0);
+        tracker?.detail('record', `${result.claimLedgers.length} docs read · ${claims} claims`);
       }
       const comparison = result.corpus.comparison;
       if (comparison) {
@@ -551,7 +552,7 @@ export async function curateInProcess(
         );
         tracker?.detail(
           'compare',
-          `${compareBatches} batch${compareBatches === 1 ? '' : 'es'} compared${comparison.unplacedFacts > 0 ? ` · ${comparison.unplacedFacts} facts unplaced` : ''}`,
+          `${compareBatches} batch${compareBatches === 1 ? '' : 'es'} compared${comparison.unplacedFacts > 0 ? ` · ${comparison.unplacedFacts} claims unplaced` : ''}`,
         );
       }
       tracker?.done('conflicts', `${result.stats.areaCount} areas · ${result.stats.conflictCount} conflicts`);

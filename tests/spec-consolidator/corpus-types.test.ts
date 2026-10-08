@@ -237,7 +237,7 @@ describe('CuratedCorpusSchema (conflict resolution brief)', () => {
   });
 });
 
-describe('CorpusDocSchema (fact ledger counts)', () => {
+describe('CorpusDocSchema (claim ledger counts)', () => {
   const doc = { ref: 'docs/a.md', kind: 'spec', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['core/a'] };
 
   it('parses a doc with no ledger counts (older corpora, additive field)', () => {
@@ -255,7 +255,7 @@ describe('CorpusDocSchema (fact ledger counts)', () => {
   });
 });
 
-describe('CuratedCorpusSchema (what comparing facts came to)', () => {
+describe('CuratedCorpusSchema (what comparing claims came to)', () => {
   const area = { id: 'core/a', product: 'core', concern: 'a', docRefs: ['docs/a.md'], conflicts: [] };
   const corpus = { version: 5 as const, generatedAt: '2026-01-01T00:00:00Z', docs: [], areas: [area], skippedDocs: [] };
 

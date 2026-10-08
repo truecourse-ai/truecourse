@@ -1,16 +1,19 @@
 /**
- * THE FACT COMPARISON — `spec-scan.compare-facts`, one session per BATCH of the
- * facts the record step wrote, after their subjects are settled. It is the
- * second half of finding conflicts by comparing facts: the session places every
- * fact of its batch in a group of facts about the same thing, or alone, and
- * judges each group of two or more.
+ * THE CLAIM COMPARISON — `spec-scan.compare-facts`, one session per BATCH of
+ * the claims the extraction wrote, after their subjects are settled. It is the
+ * second half of finding conflicts by comparing claims: the session places
+ * every claim of its batch in a group of claims about the same thing, or
+ * alone, and judges each group of two or more. The session kind, cache name and
+ * key prefix still say "facts": they are stored names, kept so caches and
+ * stored sessions keep matching, and the model is briefed with facts, the
+ * wording its prompt was tuned with.
  *
  * BATCHES ({@link planCompareBatches}, deterministic) are two cuts through the
- * same facts, because one is not enough:
+ * same claims, because one is not enough:
  *
- * - AREA BATCHES: a fact belongs to each of its areas, and areas are packed
- *   whole, in id order, into batches of at most {@link COMPARE_BATCH_FACTS}
- *   facts. An area over the bound is split by `partitionByAffinity`, each part
+ * - AREA BATCHES: a claim belongs to each of its areas, and areas are packed
+ *   whole, in id order, into batches of at most {@link COMPARE_BATCH_CLAIMS}
+ *   claims. An area over the bound is split by `partitionByAffinity`, each part
  *   a batch of its own; the area's parts and cut pairs are recorded.
  * - SUBJECT BATCHES: settled subjects whose NAMES share a rare word form a
  *   SUBJECT FAMILY ("Download PDF button", "Download button", "Download
@@ -18,38 +21,38 @@
  *   disagree. Families are clustered with `clusterByAffinity` over the
  *   distinct settled names (a word in more than
  *   {@link SUBJECT_FAMILY_DF_CAP} names is vocabulary and links nothing),
- *   each held to the bound by its fact count. A family whose facts do not all
+ *   each held to the bound by its claim count. A family whose claims do not all
  *   sit in one area batch is compared on its own: such families are packed
  *   whole, in order, up to the bound, and one over the bound (a single
  *   subject that large) is split the way an area is.
  *
- * Within an area batch the facts are ordered by settled subject, then doc
+ * Within an area batch the claims are ordered by settled subject, then doc
  * ref, then sentence number; within a subject batch by family first, so a
  * family's subjects sit together. They are briefed one line each under
  * batch-local ids `F1`…`Fn`. The
- * session's tools are closed (`read_context` over its own facts' sentences, and
+ * session's tools are closed (`read_context` over its own claims' sentences, and
  * `check_groups`), so it runs on every driver.
  *
  * THE GATE ({@link checkGroups}), run by `check_groups` on a draft, by
  * `validateOutcome` on the outcome and again by the run's fold: every briefed
  * id appears exactly once, in a group or in `alone`; a group holds two or more
- * facts and a verdict; an `agree` group names no conflict; a `conflict` group
- * names at least one pair of its own facts from two different sentences
+ * claims and a verdict; an `agree` group names no conflict; a `conflict` group
+ * names at least one pair of its own claims from two different sentences
  * (different docs, or one doc and no sentence in common), each with a note and a
- * review, and accounts for every other fact of the group, in another pair or
- * as `consistent`, so one pair cannot stand for a group of disagreements. A wrapping-up session's outcome is accepted as it stands, the facts
- * it placed nowhere STAMPED into it as `unplaced` by the engine before it is
- * cached. An entry the gate refuses never stands in the fold.
+ * review, and accounts for every other claim of the group, in another pair or
+ * as `consistent`, so one pair cannot stand for a group of disagreements. A
+ * wrapping-up session's outcome is accepted as it stands, the claims it placed
+ * nowhere STAMPED into it as `unplaced` by the engine before it is cached. An entry the gate refuses never stands in the fold.
  *
  * A conflict that stands is handed to the fold the conflicts step shares: the two
- * facts' docs, one pointer per fact ({@link factPointer}: the sentence and the
+ * claims' docs, one pointer per claim ({@link claimPointer}: the sentence and the
  * window of at most {@link POINTER_QUOTE_WORDS} words that share the most
- * words with the fact's statement, verbatim by construction, and the sentence's
+ * words with the claim's statement, verbatim by construction, and the sentence's
  * sentence key), the note and the review.
  *
  * A conflict is ONE PAIR OF SENTENCES: its identity is the two sentences its
  * pointers name, so the same two docs can hold many conflicts, each with
- * its own verdict. Fact pairs that land on the same two sentences (one pair of
+ * its own verdict. Claim pairs that land on the same two sentences (one pair of
  * sentences that disagrees on two points, or one pair found by an area batch
  * and again by a subject batch) are folded into one conflict by
  * {@link foldSameSentences}, which keeps what each of them said.
@@ -86,14 +89,15 @@ import {
   type ConflictSideLike,
   type DocSentence,
 } from '@truecourse/shared'
-import type { RecordedFact } from './record-facts.js'
+import type { ExtractedClaim } from './extract-claims.js'
 import { subjectKey } from './settle-subjects.js'
 import { docLifecycleFingerprint, docLifecycleLines, instructionsBriefingBlock, scanCacheKey } from './tools.js'
 
-export const COMPARE_FACTS_SESSION_KIND = 'spec-scan.compare-facts'
+/** A stored name, kept so stored sessions and their indexes keep matching. */
+export const COMPARE_CLAIMS_SESSION_KIND = 'spec-scan.compare-facts'
 
-/** One entry per batch. */
-export const COMPARE_FACTS_CACHE_NAME = 'consolidator/fact-compare'
+/** One entry per batch. A stored name, kept so cached comparisons keep matching. */
+export const COMPARE_CLAIMS_CACHE_NAME = 'consolidator/fact-compare'
 
 /**
  * THE COMPARE STEP'S VERSION, bumped by hand. A prompt change that fixes wrong
@@ -102,11 +106,11 @@ export const COMPARE_FACTS_CACHE_NAME = 'consolidator/fact-compare'
 export const COMPARE_STAGE_VERSION = 3
 
 /**
- * Most facts one batch holds. A briefed fact is a line of about 180
+ * Most claims one batch holds. A briefed claim is a line of about 180
  * characters, so 300 of them are some 15k tokens, and the outcome names every
  * id once beside its groups and their conflicts.
  */
-export const COMPARE_BATCH_FACTS = 300
+export const COMPARE_BATCH_CLAIMS = 300
 
 /** Most words a pointer's quote holds, the length every conflict quote is held to. */
 export const POINTER_QUOTE_WORDS = 25
@@ -119,7 +123,7 @@ export const POINTER_QUOTE_WORDS = 25
  * ceiling is a context level: the briefing is about 15k tokens, a few dozen
  * sentences read some 30k more, and each draft of the outcome a few thousand.
  */
-export const COMPARE_FACTS_BUDGET: SessionBudget = { turns: 12, maxResumes: 1, tokenCeiling: 200_000 }
+export const COMPARE_CLAIMS_BUDGET: SessionBudget = { turns: 12, maxResumes: 1, tokenCeiling: 200_000 }
 
 /**
  * A word of a subject NAME in more than this many distinct settled names is
@@ -134,17 +138,17 @@ export const SUBJECT_FAMILY_DF_CAP = 12
 /** Characters of one sentence's surroundings `read_context` shows at most. */
 const CONTEXT_CHARS = 4_000
 
-/** Facts one `read_context` call opens at most. */
-const CONTEXT_FACTS_MAX = 12
+/** Claims one `read_context` call opens at most. */
+const CONTEXT_CLAIMS_MAX = 12
 
 // ---------------------------------------------------------------------------
 // Batches
 // ---------------------------------------------------------------------------
 
-/** One fact of a batch, under its batch-local id. */
-export interface BatchFact {
+/** One claim of a batch, under its batch-local id. */
+export interface BatchClaim {
   id: string
-  fact: RecordedFact
+  claim: ExtractedClaim
   /** Its settled subject. */
   subject: string
 }
@@ -158,8 +162,8 @@ export interface BatchPart {
 }
 
 export type CompareBatch =
-  | { kind: 'area'; index: number; areas: string[]; part?: BatchPart; facts: BatchFact[] }
-  | { kind: 'subject'; index: number; subjects: string[]; part?: BatchPart; facts: BatchFact[] }
+  | { kind: 'area'; index: number; areas: string[]; part?: BatchPart; claims: BatchClaim[] }
+  | { kind: 'subject'; index: number; subjects: string[]; part?: BatchPart; claims: BatchClaim[] }
 
 export interface ComparePlan {
   /** Area batches in area order, then subject batches in family order. */
@@ -170,146 +174,146 @@ export interface ComparePlan {
   subjectFamilies: number
   /** Families, of any size, sent to subject batches. */
   subjectBatchFamilies: number
-  /** Facts that sit in a subject batch. */
+  /** Claims that sit in a subject batch, named for the stored corpus field it fills. */
   subjectBatchFacts: number
 }
 
-/** Where a fact comes from: its doc and the sentences it cites. */
-const originOf = (fact: RecordedFact): string => `${fact.doc}#${fact.sentences.map((u) => u.n).join(',')}`
+/** Where a claim comes from: its doc and the sentences it cites. */
+const originOf = (claim: ExtractedClaim): string => `${claim.doc}#${claim.sentences.map((u) => u.n).join(',')}`
 
 const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
 
 /**
- * A batch's facts in briefing order: family (in a subject batch), settled
+ * A batch's claims in briefing order: family (in a subject batch), settled
  * subject, doc ref, first sentence, then statement and sentences so the order is
  * total. Ids follow the order.
  */
 function orderBatch(
-  facts: Iterable<RecordedFact>,
-  subjectOf: (fact: RecordedFact) => string,
-  familyOf: (fact: RecordedFact) => number = () => 0,
-): BatchFact[] {
-  return [...facts]
-    .map((fact) => ({ fact, subject: subjectOf(fact), key: subjectKey(subjectOf(fact)), family: familyOf(fact) }))
+  claims: Iterable<ExtractedClaim>,
+  subjectOf: (claim: ExtractedClaim) => string,
+  familyOf: (claim: ExtractedClaim) => number = () => 0,
+): BatchClaim[] {
+  return [...claims]
+    .map((claim) => ({ claim, subject: subjectOf(claim), key: subjectKey(subjectOf(claim)), family: familyOf(claim) }))
     .sort(
       (x, y) =>
         x.family - y.family ||
         byText(x.key, y.key) ||
-        byText(x.fact.doc, y.fact.doc) ||
-        (x.fact.sentences[0]?.n ?? 0) - (y.fact.sentences[0]?.n ?? 0) ||
-        byText(x.fact.statement, y.fact.statement) ||
-        byText(originOf(x.fact), originOf(y.fact)),
+        byText(x.claim.doc, y.claim.doc) ||
+        (x.claim.sentences[0]?.n ?? 0) - (y.claim.sentences[0]?.n ?? 0) ||
+        byText(x.claim.statement, y.claim.statement) ||
+        byText(originOf(x.claim), originOf(y.claim)),
     )
-    .map(({ fact, subject }, i) => ({ id: `F${i + 1}`, fact, subject }))
+    .map(({ claim, subject }, i) => ({ id: `F${i + 1}`, claim, subject }))
 }
 
 /**
- * THE BATCH PLAN. Pure and deterministic: the same facts in the same order,
+ * THE BATCH PLAN. Pure and deterministic: the same claims in the same order,
  * with the same settled subjects, always give the same batches and ids.
  */
 export function planCompareBatches(
-  facts: readonly RecordedFact[],
-  subjectOf: (fact: RecordedFact) => string,
-  maxFacts: number = COMPARE_BATCH_FACTS,
+  claims: readonly ExtractedClaim[],
+  subjectOf: (claim: ExtractedClaim) => string,
+  maxClaims: number = COMPARE_BATCH_CLAIMS,
 ): ComparePlan {
-  const split = (list: readonly RecordedFact[]) =>
+  const split = (list: readonly ExtractedClaim[]) =>
     partitionByAffinity(list, {
-      maxSize: maxFacts,
-      text: (fact) => `${subjectOf(fact)} ${fact.statement}`,
+      maxSize: maxClaims,
+      text: (claim) => `${subjectOf(claim)} ${claim.statement}`,
       origin: originOf,
     })
 
   // Area batches: whole areas in id order, an area over the bound in parts.
-  const byArea = new Map<string, RecordedFact[]>()
-  for (const fact of facts) {
-    for (const area of fact.areas) {
+  const byArea = new Map<string, ExtractedClaim[]>()
+  for (const claim of claims) {
+    for (const area of claim.areas) {
       const list = byArea.get(area)
-      if (list) list.push(fact)
-      else byArea.set(area, [fact])
+      if (list) list.push(claim)
+      else byArea.set(area, [claim])
     }
   }
-  const areaSets: Array<{ areas: string[]; facts: ReadonlySet<RecordedFact>; part?: BatchPart }> = []
+  const areaSets: Array<{ areas: string[]; claims: ReadonlySet<ExtractedClaim>; part?: BatchPart }> = []
   const splitAreas = new Map<string, { parts: number; cutPairs: number }>()
-  let open: { areas: string[]; facts: Set<RecordedFact> } | null = null
+  let open: { areas: string[]; claims: Set<ExtractedClaim> } | null = null
   for (const area of [...byArea.keys()].sort(byText)) {
     const list = byArea.get(area)!
-    if (list.length > maxFacts) {
+    if (list.length > maxClaims) {
       if (open) areaSets.push(open)
       open = null
       const { parts, cutPairs } = split(list)
       splitAreas.set(area, { parts: parts.length, cutPairs })
       parts.forEach((part, i) =>
-        areaSets.push({ areas: [area], facts: new Set(part), part: { of: area, index: i + 1, parts: parts.length } }),
+        areaSets.push({ areas: [area], claims: new Set(part), part: { of: area, index: i + 1, parts: parts.length } }),
       )
       continue
     }
     if (open) {
-      const merged = new Set([...open.facts, ...list])
-      if (merged.size <= maxFacts) {
+      const merged = new Set([...open.claims, ...list])
+      if (merged.size <= maxClaims) {
         open.areas.push(area)
-        open.facts = merged
+        open.claims = merged
         continue
       }
       areaSets.push(open)
     }
-    open = { areas: [area], facts: new Set(list) }
+    open = { areas: [area], claims: new Set(list) }
   }
   if (open) areaSets.push(open)
 
   // Subject families: settled subjects whose names share a rare word, each
-  // family held to the bound by its fact count.
-  const bySubject = new Map<string, { subject: string; facts: RecordedFact[] }>()
-  for (const fact of facts) {
-    const subject = subjectOf(fact)
+  // family held to the bound by its claim count.
+  const bySubject = new Map<string, { subject: string; claims: ExtractedClaim[] }>()
+  for (const claim of claims) {
+    const subject = subjectOf(claim)
     const key = subjectKey(subject)
     const entry = bySubject.get(key)
-    if (entry) entry.facts.push(fact)
-    else bySubject.set(key, { subject, facts: [fact] })
+    if (entry) entry.claims.push(claim)
+    else bySubject.set(key, { subject, claims: [claim] })
   }
   const families = clusterByAffinity(
     [...bySubject.keys()].sort(byText).map((key) => ({ key, ...bySubject.get(key)! })),
     {
-      maxSize: maxFacts,
+      maxSize: maxClaims,
       text: (s) => s.subject,
       origin: (s) => s.key,
-      weight: (s) => s.facts.length,
+      weight: (s) => s.claims.length,
       dfCap: SUBJECT_FAMILY_DF_CAP,
     },
   )
-  const familyOf = new Map<RecordedFact, number>()
+  const familyOf = new Map<ExtractedClaim, number>()
   families.forEach((family, i) => {
-    for (const member of family) for (const fact of member.facts) familyOf.set(fact, i)
+    for (const member of family) for (const claim of member.claims) familyOf.set(claim, i)
   })
 
   // Subject batches: the families no one area batch holds whole.
-  const spans = (list: readonly RecordedFact[]): boolean =>
+  const spans = (list: readonly ExtractedClaim[]): boolean =>
     list.length >= 2 &&
     new Set(list.map(originOf)).size >= 2 &&
-    !areaSets.some((set) => list.every((fact) => set.facts.has(fact)))
-  const subjectSets: Array<{ subjects: string[]; facts: RecordedFact[]; part?: BatchPart }> = []
-  let openSubjects: { subjects: string[]; facts: RecordedFact[] } | null = null
+    !areaSets.some((set) => list.every((claim) => set.claims.has(claim)))
+  const subjectSets: Array<{ subjects: string[]; claims: ExtractedClaim[]; part?: BatchPart }> = []
+  let openSubjects: { subjects: string[]; claims: ExtractedClaim[] } | null = null
   let subjectBatchFamilies = 0
   for (const family of families) {
     const subjects = family.map((member) => member.subject)
-    const list = family.flatMap((member) => member.facts)
+    const list = family.flatMap((member) => member.claims)
     if (!spans(list)) continue
     subjectBatchFamilies += 1
-    if (list.length > maxFacts) {
+    if (list.length > maxClaims) {
       if (openSubjects) subjectSets.push(openSubjects)
       openSubjects = null
       const { parts } = split(list)
       parts.forEach((part, i) =>
-        subjectSets.push({ subjects, facts: part, part: { of: subjects.join(', '), index: i + 1, parts: parts.length } }),
+        subjectSets.push({ subjects, claims: part, part: { of: subjects.join(', '), index: i + 1, parts: parts.length } }),
       )
       continue
     }
-    if (openSubjects && openSubjects.facts.length + list.length <= maxFacts) {
+    if (openSubjects && openSubjects.claims.length + list.length <= maxClaims) {
       openSubjects.subjects.push(...subjects)
-      openSubjects.facts.push(...list)
+      openSubjects.claims.push(...list)
       continue
     }
     if (openSubjects) subjectSets.push(openSubjects)
-    openSubjects = { subjects, facts: [...list] }
+    openSubjects = { subjects, claims: [...list] }
   }
   if (openSubjects) subjectSets.push(openSubjects)
 
@@ -319,14 +323,14 @@ export function planCompareBatches(
       index: i + 1,
       areas: set.areas,
       ...(set.part ? { part: set.part } : {}),
-      facts: orderBatch(set.facts, subjectOf),
+      claims: orderBatch(set.claims, subjectOf),
     })),
     ...subjectSets.map((set, i): CompareBatch => ({
       kind: 'subject',
       index: i + 1,
       subjects: set.subjects,
       ...(set.part ? { part: set.part } : {}),
-      facts: orderBatch(set.facts, subjectOf, (fact) => familyOf.get(fact) ?? 0),
+      claims: orderBatch(set.claims, subjectOf, (claim) => familyOf.get(claim) ?? 0),
     })),
   ]
   return {
@@ -334,7 +338,7 @@ export function planCompareBatches(
     splitAreas,
     subjectFamilies: families.filter((family) => family.length >= 2).length,
     subjectBatchFamilies,
-    subjectBatchFacts: subjectSets.reduce((n, set) => n + set.facts.length, 0),
+    subjectBatchFacts: subjectSets.reduce((n, set) => n + set.claims.length, 0),
   }
 }
 
@@ -353,11 +357,11 @@ export function describeBatch(batch: CompareBatch): string {
 }
 
 /** The work item, as the session index and the transcript record it. */
-export function compareFactsWorkItem(batch: Pick<CompareBatch, 'kind' | 'index'>): string {
+export function compareClaimsWorkItem(batch: Pick<CompareBatch, 'kind' | 'index'>): string {
   return `compare:${batch.kind}:${batch.index}`
 }
 
-/** One session's work: a batch, and the docs its facts come from, by ref. */
+/** One session's work: a batch, and the docs its claims come from, by ref. */
 export interface CompareItem {
   batch: CompareBatch
   docs: ReadonlyMap<string, DocCandidate>
@@ -365,7 +369,7 @@ export interface CompareItem {
 
 /** The batch's docs whose lifecycle carries more than a date: the ones the briefing shows. */
 function docsWithStatus(item: CompareItem): DocCandidate[] {
-  const refs = [...new Set(item.batch.facts.map((f) => f.fact.doc))].sort(byText)
+  const refs = [...new Set(item.batch.claims.map((f) => f.claim.doc))].sort(byText)
   return refs.flatMap((ref) => {
     const doc = item.docs.get(ref)
     return doc && docLifecycleLines(doc).length > 1 ? [doc] : []
@@ -374,26 +378,27 @@ function docsWithStatus(item: CompareItem): DocCandidate[] {
 
 const textHash = (text: string): string => createHash('sha256').update(text).digest('hex').slice(0, 16)
 
-/** One fact as the key folds it: doc ref, sentences (number and text hash), settled subject, statement, areas. */
-const factFingerprint = (bf: BatchFact): string =>
+/** One claim as the key folds it: doc ref, sentences (number and text hash), settled subject, statement, areas. */
+const claimFingerprint = (bf: BatchClaim): string =>
   [
-    bf.fact.doc,
-    bf.fact.sentences.map((u) => `${u.n}:${textHash(u.text)}`).join(','),
+    bf.claim.doc,
+    bf.claim.sentences.map((u) => `${u.n}:${textHash(u.text)}`).join(','),
     bf.subject,
-    bf.fact.statement,
-    bf.fact.areas.join(','),
+    bf.claim.statement,
+    bf.claim.areas.join(','),
   ].join('\t')
 
 /**
- * The cache key, over NAMED inputs only: the stage version, every fact of the
+ * The cache key, over NAMED inputs only: the stage version, every claim of the
  * batch in briefing order (its fingerprint), the lifecycle of each batch doc
  * the briefing shows one for, and the tail (the standing instructions). A doc
- * edit that changes no fact of a batch does not re-run it.
+ * edit that changes no claim of a batch does not re-run it.
  */
-export function compareFactsCacheKey(item: CompareItem, extraParts: readonly string[] = []): string {
+export function compareClaimsCacheKey(item: CompareItem, extraParts: readonly string[] = []): string {
   return scanCacheKey([
+    // A stored prefix, kept so cached comparisons keep matching.
     `compare-facts-v${COMPARE_STAGE_VERSION}`,
-    item.batch.facts.map(factFingerprint).join('\n'),
+    item.batch.claims.map(claimFingerprint).join('\n'),
     docsWithStatus(item)
       .map((doc) => `${doc.path}=${docLifecycleFingerprint(doc)}`)
       .join('\n'),
@@ -504,7 +509,7 @@ export function priorConflictsAmong(refs: ReadonlySet<string>, prior: readonly C
 // The outcome and its gate
 // ---------------------------------------------------------------------------
 
-const FactConflictSchema = z
+const ClaimConflictSchema = z
   .object({
     a: z.string().describe('The id of the fact on side a, the side `pick-a` says is right, e.g. "F41".'),
     b: z.string().describe('The id of the fact on side b, from another sentence than side a.'),
@@ -515,13 +520,13 @@ const FactConflictSchema = z
   })
   .strict()
 
-const FactGroupSchema = z
+const ClaimGroupSchema = z
   .object({
     subject: z.string().describe('What the facts of the group are about, in a few words.'),
     facts: z.array(z.string()).describe('The ids of the facts about it, two or more.'),
     verdict: z.enum(['agree', 'conflict']),
     conflicts: z
-      .array(FactConflictSchema)
+      .array(ClaimConflictSchema)
       .describe(
         'For a "conflict" group, one pair for every two of its facts that cannot both be true; empty for an "agree" group.',
       ),
@@ -534,24 +539,28 @@ const FactGroupSchema = z
   })
   .strict()
 
-/** What the model writes: its groups, and the facts no other fact speaks about. */
-export const FactComparisonWireSchema = z
+/**
+ * What the model writes: its groups, and the claims no other claim speaks
+ * about. A group's `facts` is the wire key the prompt asks for, kept so cached
+ * comparisons and stored sessions keep matching.
+ */
+export const ClaimComparisonWireSchema = z
   .object({
-    groups: z.array(FactGroupSchema),
+    groups: z.array(ClaimGroupSchema),
     alone: z.array(z.string()).describe('The id of every fact no group holds, each once.'),
   })
   .strict()
-export type FactComparisonWire = z.infer<typeof FactComparisonWireSchema>
+export type ClaimComparisonWire = z.infer<typeof ClaimComparisonWireSchema>
 
-export const FactComparisonSchema = FactComparisonWireSchema.extend({
+export const ClaimComparisonSchema = ClaimComparisonWireSchema.extend({
   /**
-   * Briefed fact ids the outcome placed nowhere, in id order. STAMPED by the
+   * Briefed claim ids the outcome placed nowhere, in id order. STAMPED by the
    * engine when the outcome is accepted, before it is cached; empty unless the
    * session was wrapping up.
    */
   unplaced: z.array(z.string()),
 }).strict()
-export type FactComparison = z.infer<typeof FactComparisonSchema>
+export type ClaimComparison = z.infer<typeof ClaimComparisonSchema>
 
 /** How many of `wanted` the tokens of `text` hold. */
 const sharedWords = (wanted: ReadonlySet<string>, tokens: ReadonlySet<string>): number => {
@@ -583,18 +592,18 @@ export function evidenceWindow(text: string, wanted: ReadonlySet<string>): strin
 }
 
 /**
- * Where a fact is stated, as a conflict's side: among the sentences it cites,
+ * Where a claim is stated, as a conflict's side: among the sentences it cites,
  * the one sharing the most words with its statement (the first in doc order
  * on a tie), its heading, within it the {@link evidenceWindow} as the quote,
  * and the sentence's {@link sentenceKey}. Deterministic, and verbatim: the quote is
  * a slice of the sentence's text, and the sentence key depends on that text and
  * its repeat alone, never on the sentence's number.
  */
-export function factPointer(fact: RecordedFact): ReportedConflictSide {
-  const wanted = affinityTokens(fact.statement)
+export function claimPointer(claim: ExtractedClaim): ReportedConflictSide {
+  const wanted = affinityTokens(claim.statement)
   let sentence: DocSentence | undefined
   let sentenceScore = -1
-  for (const candidate of fact.sentences) {
+  for (const candidate of claim.sentences) {
     const score = sharedWords(wanted, affinityTokens(candidate.text))
     if (score > sentenceScore) {
       sentence = candidate
@@ -602,24 +611,24 @@ export function factPointer(fact: RecordedFact): ReportedConflictSide {
     }
   }
   return {
-    doc: fact.doc,
-    quote: sentence ? evidenceWindow(sentence.text, wanted) : fact.statement,
-    sentence: sentence ? sentenceKey(sentence.text, sentence.repeat) : sentenceKey(fact.statement),
+    doc: claim.doc,
+    quote: sentence ? evidenceWindow(sentence.text, wanted) : claim.statement,
+    sentence: sentence ? sentenceKey(sentence.text, sentence.repeat) : sentenceKey(claim.statement),
   }
 }
 
-/** Whether two facts are one sentence: one doc, and a sentence both cite. */
-function oneSentence(a: RecordedFact, b: RecordedFact): boolean {
+/** Whether two claims are one sentence: one doc, and a sentence both cite. */
+function oneSentence(a: ExtractedClaim, b: ExtractedClaim): boolean {
   if (a.doc !== b.doc) return false
   const sentences = new Set(a.sentences.map((u) => u.n))
   return b.sentences.some((u) => sentences.has(u.n))
 }
 
-/** A group the gate lets stand: its facts as first placed, two or more. */
+/** A group the gate lets stand: its claims as first placed, two or more. */
 export interface StandingGroup {
   subject: string
   verdict: 'agree' | 'conflict'
-  facts: BatchFact[]
+  claims: BatchClaim[]
 }
 
 export interface GroupsCheck {
@@ -649,18 +658,18 @@ function idRanges(ids: readonly string[], max = Number.POSITIVE_INFINITY): strin
 
 /**
  * THE GATE. What is wrong with a comparison of `batch`, which ids it places
- * nowhere, and what of it stands: a fact counts in the first group or `alone`
- * that places it, a group stands with two or more facts, and a conflict stands
- * only in a `conflict` group, between two of the facts that group lists, from
+ * nowhere, and what of it stands: a claim counts in the first group or `alone`
+ * that places it, a group stands with two or more claims, and a conflict stands
+ * only in a `conflict` group, between two of the claims that group lists, from
  * two different sentences, with a note.
  */
-export function checkGroups(outcome: FactComparisonWire, batch: CompareBatch): GroupsCheck {
-  const byId = new Map(batch.facts.map((bf) => [bf.id, bf]))
+export function checkGroups(outcome: ClaimComparisonWire, batch: CompareBatch): GroupsCheck {
+  const byId = new Map(batch.claims.map((bf) => [bf.id, bf]))
   const problems: string[] = []
   const placedAt = new Map<string, string>()
   const place = (id: string, where: string): boolean => {
     if (!byId.has(id)) {
-      problems.push(`${where} names "${id}", which is not a fact of this batch (F1 to F${batch.facts.length})`)
+      problems.push(`${where} names "${id}", which is not a fact of this batch (F1 to F${batch.claims.length})`)
       return false
     }
     const first = placedAt.get(id)
@@ -676,10 +685,10 @@ export function checkGroups(outcome: FactComparisonWire, batch: CompareBatch): G
   const conflicts: ReportedConflict[] = []
   outcome.groups.forEach((group, i) => {
     const where = `groups[${i}]`
-    const facts = group.facts.filter((id) => place(id, where)).map((id) => byId.get(id)!)
+    const claims = group.facts.filter((id) => place(id, where)).map((id) => byId.get(id)!)
     if (new Set(group.facts).size < 2) problems.push(`${where} holds one fact; a fact with no peer goes in "alone"`)
     if (group.subject.trim() === '') problems.push(`${where} has no subject`)
-    if (facts.length >= 2) groups.push({ subject: group.subject.trim(), verdict: group.verdict, facts })
+    if (claims.length >= 2) groups.push({ subject: group.subject.trim(), verdict: group.verdict, claims })
     if (group.verdict === 'agree') {
       if (group.conflicts.length > 0) problems.push(`${where} agrees and names conflicts; give it the verdict "conflict", or drop them`)
       return
@@ -696,9 +705,9 @@ export function checkGroups(outcome: FactComparisonWire, batch: CompareBatch): G
         return
       }
       if (!a || !b) return
-      if (conflict.a === conflict.b || oneSentence(a.fact, b.fact)) {
+      if (conflict.a === conflict.b || oneSentence(a.claim, b.claim)) {
         problems.push(
-          `${at}: ${conflict.a} and ${conflict.b} are one sentence of ${a.fact.doc}; a conflict is between two sentences (two documents, or two places in one)`,
+          `${at}: ${conflict.a} and ${conflict.b} are one sentence of ${a.claim.doc}; a conflict is between two sentences (two documents, or two places in one)`,
         )
         return
       }
@@ -707,22 +716,22 @@ export function checkGroups(outcome: FactComparisonWire, batch: CompareBatch): G
         return
       }
       const found: ReportedConflict = {
-        docs: [a.fact.doc, b.fact.doc],
+        docs: [a.claim.doc, b.claim.doc],
         note: conflict.note.trim(),
-        sections: [factPointer(a.fact), factPointer(b.fact)],
+        sections: [claimPointer(a.claim), claimPointer(b.claim)],
         review: conflict.review,
       }
-      const oneSentenceProblem = a.fact.doc === b.fact.doc ? sameDocConflictProblem(found) : undefined
+      const oneSentenceProblem = a.claim.doc === b.claim.doc ? sameDocConflictProblem(found) : undefined
       if (oneSentenceProblem) {
-        problems.push(`${at}: ${conflict.a} and ${conflict.b} quote the same sentence of ${a.fact.doc}; a conflict is between two sentences`)
+        problems.push(`${at}: ${conflict.a} and ${conflict.b} quote the same sentence of ${a.claim.doc}; a conflict is between two sentences`)
         return
       }
       conflicts.push(found)
     })
-    // Every fact of a conflict group is accounted for: in a pair, or declared to
+    // Every claim of a conflict group is accounted for: in a pair, or declared to
     // contradict nothing in the group. One pair standing for a whole group, its
-    // note listing five disagreements its two facts do not state, leaves the
-    // other facts in neither.
+    // note listing five disagreements its two claims do not state, leaves the
+    // other claims in neither.
     const paired = new Set(group.conflicts.flatMap((c) => [c.a, c.b]))
     const consistent = group.consistent ?? []
     const strays = consistent.filter((id) => !listed.has(id))
@@ -740,7 +749,7 @@ export function checkGroups(outcome: FactComparisonWire, batch: CompareBatch): G
     }
   })
   for (const id of outcome.alone) place(id, 'alone')
-  const unplaced = batch.facts.map((bf) => bf.id).filter((id) => !placedAt.has(id))
+  const unplaced = batch.claims.map((bf) => bf.id).filter((id) => !placedAt.has(id))
   return { problems, unplaced, groups, conflicts }
 }
 
@@ -769,7 +778,7 @@ export function groupsRefusal(check: GroupsCheck): string | undefined {
 // Conflicts on the same two sentences
 // ---------------------------------------------------------------------------
 
-/** What separates the notes of fact pairs folded into one conflict. */
+/** What separates the notes of claim pairs folded into one conflict. */
 export const FOLDED_NOTE_SEPARATOR = ' · '
 
 /** A conflict as the fold keeps it, whatever else its record carries. */
@@ -867,14 +876,15 @@ const CHECK_GROUPS = defineToolSpec({
   name: 'check_groups',
   description:
     'Check a draft the way the run will: every fact id of the batch placed exactly once, in a group or in "alone"; every group two or more facts with a verdict; every conflict a pair of its own group\'s facts from two different sentences, with a note and a review. Call it on your complete draft before you give the outcome.',
+  // A stored name, kept so stored transcripts keep matching.
   kind: 'check-fact-groups',
   readOnly: true,
   destructive: false,
   display: {
-    one: 'I checked that every fact is placed and every group judged',
-    many: 'I checked that every fact is placed and every group judged, {n} passes',
+    one: 'I checked that every claim is placed and every group judged',
+    many: 'I checked that every claim is placed and every group judged, {n} passes',
   },
-  inputSchema: FactComparisonWireSchema,
+  inputSchema: ClaimComparisonWireSchema,
 })
 
 function checkGroupsTool(batch: CompareBatch): SessionTool {
@@ -884,7 +894,7 @@ function checkGroupsTool(batch: CompareBatch): SessionTool {
       const refusal = groupsRefusal(check)
       if (refusal) return { content: refusal, isError: true }
       return {
-        content: `The draft is complete: ${check.groups.length} group(s), ${check.conflicts.length} conflict(s), ${args.alone.length} fact(s) alone, all ${batch.facts.length} facts placed. Give it as the outcome.`,
+        content: `The draft is complete: ${check.groups.length} group(s), ${check.conflicts.length} conflict(s), ${args.alone.length} fact(s) alone, all ${batch.claims.length} facts placed. Give it as the outcome.`,
       }
     },
   })
@@ -935,45 +945,47 @@ function sentenceContext(sentences: readonly DocSentence[], body: string): { fro
 
 const READ_CONTEXT = defineToolSpec({
   name: 'read_context',
-  description: `Read the sentences some facts of your batch were recorded from, in their document: the section around each, as written. Pass up to ${CONTEXT_FACTS_MAX} fact ids per call; batch them.`,
+  description: `Read the sentences some facts of your batch were recorded from, in their document: the section around each, as written. Pass up to ${CONTEXT_CLAIMS_MAX} fact ids per call; batch them.`,
+  // A stored name, kept so stored transcripts keep matching.
   kind: 'read-fact-context',
   readOnly: true,
   destructive: false,
   display: {
-    one: 'I read the sentence around a fact before judging it',
-    many: 'I read the sentences around facts before judging them, {n} reads',
+    one: 'I read the sentence around a claim before judging it',
+    many: 'I read the sentences around claims before judging them, {n} reads',
   },
+  // `facts` is the key the prompt names the ids by, kept so stored sessions keep matching.
   inputSchema: z
     .object({ facts: z.array(z.string()).describe('Fact ids from the briefing, e.g. ["F41", "F207"].') })
     .strict(),
 })
 
 function readContextTool(item: CompareItem): SessionTool {
-  const byId = new Map(item.batch.facts.map((bf) => [bf.id, bf]))
+  const byId = new Map(item.batch.claims.map((bf) => [bf.id, bf]))
   return READ_CONTEXT.bind({
     async execute(args) {
       const ids = [...new Set(args.facts)]
       if (ids.length === 0) return { content: 'Name at least one fact id.', isError: true }
-      if (ids.length > CONTEXT_FACTS_MAX) {
-        return { content: `${ids.length} facts in one call; open at most ${CONTEXT_FACTS_MAX} per call.`, isError: true }
+      if (ids.length > CONTEXT_CLAIMS_MAX) {
+        return { content: `${ids.length} facts in one call; open at most ${CONTEXT_CLAIMS_MAX} per call.`, isError: true }
       }
       const unknown = ids.filter((id) => !byId.has(id))
       if (unknown.length > 0) {
-        return { content: `${unknown.join(', ')}: not a fact of this batch (F1 to F${item.batch.facts.length}).`, isError: true }
+        return { content: `${unknown.join(', ')}: not a fact of this batch (F1 to F${item.batch.claims.length}).`, isError: true }
       }
-      // Facts of one sentence's surroundings are shown once, under all their ids.
+      // Claims of one sentence's surroundings are shown once, under all their ids.
       const blocks = new Map<string, { ids: string[]; header: string; text: string }>()
       for (const id of ids) {
-        const { fact } = byId.get(id)!
-        const doc = item.docs.get(fact.doc)
+        const { claim } = byId.get(id)!
+        const doc = item.docs.get(claim.doc)
         if (!doc) continue
-        const context = sentenceContext(fact.sentences, docBody(doc))
-        const key = `${fact.doc}:${context.from}-${context.to}`
+        const context = sentenceContext(claim.sentences, docBody(doc))
+        const key = `${claim.doc}:${context.from}-${context.to}`
         const block = blocks.get(key)
         if (block) block.ids.push(id)
         else {
-          const heading = fact.sentences[0]?.heading ?? '(lead)'
-          blocks.set(key, { ids: [id], header: `${fact.doc} · ${heading} · lines ${context.from}-${context.to}`, text: context.text })
+          const heading = claim.sentences[0]?.heading ?? '(lead)'
+          blocks.set(key, { ids: [id], header: `${claim.doc} · ${heading} · lines ${context.from}-${context.to}`, text: context.text })
         }
       }
       return {
@@ -987,40 +999,40 @@ function readContextTool(item: CompareItem): SessionTool {
 // The session
 // ---------------------------------------------------------------------------
 
-const COMPARE_FACTS_SESSION = defineSessionKind({
-  kind: COMPARE_FACTS_SESSION_KIND,
-  outcomeSchema: FactComparisonSchema,
-  outcomeInputSchema: FactComparisonWireSchema,
+const COMPARE_CLAIMS_SESSION = defineSessionKind({
+  kind: COMPARE_CLAIMS_SESSION_KIND,
+  outcomeSchema: ClaimComparisonSchema,
+  outcomeInputSchema: ClaimComparisonWireSchema,
 })
 
-function presentComparison(outcome: FactComparison, batch: CompareBatch): KnownDisplayBlock[] {
+function presentComparison(outcome: ClaimComparison, batch: CompareBatch): KnownDisplayBlock[] {
   const check = checkGroups(outcome, batch)
   const conflicts = check.groups.filter((g) => g.verdict === 'conflict').length
   const lines = [
-    `I placed ${batch.facts.length - outcome.unplaced.length} of ${batch.facts.length} facts: ${check.groups.length} group${check.groups.length === 1 ? '' : 's'}, ${conflicts} in conflict, ${outcome.alone.length} alone`,
+    `I placed ${batch.claims.length - outcome.unplaced.length} of ${batch.claims.length} claims: ${check.groups.length} group${check.groups.length === 1 ? '' : 's'}, ${conflicts} in conflict, ${outcome.alone.length} alone`,
   ]
   if (outcome.unplaced.length > 0) lines.push(`I left ${idRanges(outcome.unplaced, REFUSAL_RANGES_MAX)} unplaced`)
   return [...check.conflicts.map(presentConflict), { kind: 'facts', lines }]
 }
 
-export function compareFactsSessionDef(item: CompareItem): SessionDef<FactComparison> {
+export function compareClaimsSessionDef(item: CompareItem): SessionDef<ClaimComparison> {
   const { batch } = item
   return {
-    ...COMPARE_FACTS_SESSION,
-    systemPrompt: COMPARE_FACTS_SYSTEM_PROMPT,
+    ...COMPARE_CLAIMS_SESSION,
+    systemPrompt: COMPARE_CLAIMS_SYSTEM_PROMPT,
     reasoning: 'high',
     tools: [readContextTool(item), checkGroupsTool(batch)],
-    budget: COMPARE_FACTS_BUDGET,
+    budget: COMPARE_CLAIMS_BUDGET,
     display: {
-      title: 'Fact comparison',
-      intro: `I'm comparing the ${batch.facts.length} facts of ${describeBatch(batch)}, grouping them by what they are about.`,
+      title: 'Claim comparison',
+      intro: `I'm comparing the ${batch.claims.length} claims of ${describeBatch(batch)}, grouping them by what they are about.`,
     },
-    // The facts placed nowhere are stamped by the engine over whatever the model wrote.
+    // The claims placed nowhere are stamped by the engine over whatever the model wrote.
     resolveOutcome: (value) => {
-      const wire = FactComparisonWireSchema.parse(value)
+      const wire = ClaimComparisonWireSchema.parse(value)
       return { ...wire, unplaced: checkGroups(wire, batch).unplaced }
     },
-    // Wrapping up, the outcome is taken as it stands, its unplaced facts stamped on it.
+    // Wrapping up, the outcome is taken as it stands, its unplaced claims stamped on it.
     validateOutcome: (outcome, { wrappingUp }) => (wrappingUp ? undefined : groupsRefusal(checkGroups(outcome, batch))),
     presentOutcome: (outcome) => presentComparison(outcome, batch),
     outcomePrecondition: {
@@ -1031,7 +1043,7 @@ export function compareFactsSessionDef(item: CompareItem): SessionDef<FactCompar
   }
 }
 
-export function compareFactsBriefing(
+export function compareClaimsBriefing(
   item: CompareItem,
   instructions: readonly string[] = [],
   priorConflicts: readonly ConflictLike[] = [],
@@ -1039,7 +1051,7 @@ export function compareFactsBriefing(
   const { batch } = item
   const lines = [
     ...instructionsBriefingBlock(instructions),
-    `YOUR FACTS: the ${batch.facts.length} facts of ${describeBatch(batch)}.`,
+    `YOUR FACTS: the ${batch.claims.length} facts of ${describeBatch(batch)}.`,
     ...(batch.kind === 'subject'
       ? [
           'These subjects have facts in more than one batch of areas, so their facts are compared here together. Subjects whose names share a rare word are listed together: they may be one control or feature named two ways, which is exactly where two documents disagree, so judge them by what their facts say, not by their names.',
@@ -1047,8 +1059,8 @@ export function compareFactsBriefing(
       : []),
     'Each line: id · document · the heading it sits under · [subject] statement.',
     '',
-    ...batch.facts.map(
-      (bf) => `${bf.id} · ${bf.fact.doc} · ${bf.fact.sentences[0]?.heading ?? '(lead)'} · [${bf.subject}] ${bf.fact.statement}`,
+    ...batch.claims.map(
+      (bf) => `${bf.id} · ${bf.claim.doc} · ${bf.claim.sentences[0]?.heading ?? '(lead)'} · [${bf.subject}] ${bf.claim.statement}`,
     ),
   ]
   const lifecycles = docsWithStatus(item)
@@ -1056,7 +1068,7 @@ export function compareFactsBriefing(
     lines.push('', 'DOCUMENTS WITH A STATUS: when each last changed and where it stands.')
     for (const doc of lifecycles) lines.push(`  ${doc.path}`, ...docLifecycleLines(doc, { classify: true }).map((l) => `    ${l}`))
   }
-  const prior = priorConflictsAmong(new Set(batch.facts.map((bf) => bf.fact.doc)), priorConflicts)
+  const prior = priorConflictsAmong(new Set(batch.claims.map((bf) => bf.claim.doc)), priorConflicts)
   if (prior.length > 0) {
     lines.push(
       '',
@@ -1071,12 +1083,12 @@ export function compareFactsBriefing(
   }
   lines.push(
     '',
-    `Place every fact from F1 to F${batch.facts.length}: group the facts about the same thing and judge each group, put every fact with no peer in "alone". Check the draft with \`check_groups\`, then give it as the outcome.`,
+    `Place every fact from F1 to F${batch.claims.length}: group the facts about the same thing and judge each group, put every fact with no peer in "alone". Check the draft with \`check_groups\`, then give it as the outcome.`,
   )
   return lines.join('\n')
 }
 
-export const COMPARE_FACTS_SYSTEM_PROMPT = `You find where a product's documentation CONTRADICTS ITSELF by comparing the FACTS it states. Each fact was recorded from one sentence of one document. The briefing gives you a batch of them, one per line under an id: \`F41 · <document> · <heading> · [<subject>] <statement>\`. Facts are listed by subject, so facts about one thing are usually next to each other.
+export const COMPARE_CLAIMS_SYSTEM_PROMPT = `You find where a product's documentation CONTRADICTS ITSELF by comparing the FACTS it states. Each fact was recorded from one sentence of one document. The briefing gives you a batch of them, one per line under an id: \`F41 · <document> · <heading> · [<subject>] <statement>\`. Facts are listed by subject, so facts about one thing are usually next to each other.
 
 # How to work
 
@@ -1122,7 +1134,7 @@ A conflict is ONE PAIR OF FACTS that cannot both be true. Each fact is one sente
 
 Every fact id of the batch appears EXACTLY ONCE: in one group's \`facts\`, or in \`alone\`. A group holds two or more facts and a verdict. An \`agree\` group names no conflicts. A \`conflict\` group names at least one pair of its facts that disagree, both facts of that group, from two different sentences (two documents, or two places in one), each with a note and a review, and every other fact of the group is in another pair or in \`consistent\`. \`check_groups\` runs exactly this check.
 
-You have ${COMPARE_FACTS_BUDGET.turns} turns, and one more grant of as many when they run out. Draft every group in your first turn or two, then read what you are unsure of.
+You have ${COMPARE_CLAIMS_BUDGET.turns} turns, and one more grant of as many when they run out. Draft every group in your first turn or two, then read what you are unsure of.
 
 # The outcome
 

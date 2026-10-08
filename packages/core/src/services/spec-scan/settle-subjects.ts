@@ -1,14 +1,14 @@
 /**
- * THE SUBJECT SETTLING — `spec-scan.settle-subjects`, a barrier after the fact
- * record. Every recorded fact names its SUBJECT on its own, so one product
- * thing goes by several names ("ATS checker", "resume checker", "ATS check").
- * This step says which names mean the same thing, the way area settling does
- * for area labels, so the comparison can put the facts about one thing side by
- * side however their recorders named it.
+ * THE SUBJECT SETTLING — `spec-scan.settle-subjects`, a barrier after the claim
+ * extraction. Every extracted claim names its SUBJECT on its own, so one
+ * product thing goes by several names ("ATS checker", "resume checker", "ATS
+ * check"). This step says which names mean the same thing, the way area
+ * settling does for area labels, so the comparison can put the claims about
+ * one thing side by side however their extractors named it.
  *
  * Names equal after {@link subjectKey} (case, spacing, markdown markup) are one
  * name before any session runs. The rest are briefed one per line under short
- * ids (`S1`…), each with how many facts and docs use it and one statement as a
+ * ids (`S1`…), each with how many claims and docs use it and one statement as a
  * sample. More names than {@link SETTLE_SUBJECTS_NAMES} are divided with
  * `partitionByAffinity` over the name text, one session per part; a part of
  * one name has nothing to settle and runs no session.
@@ -20,9 +20,10 @@
  * stays where it was placed first, and an entry left with fewer than two names
  * merges nothing. A failed session merges nothing: its names stay as written.
  *
- * The fold ({@link settledSubjects}) maps every fact to its SETTLED SUBJECT:
- * the `subject` its name's `same` entry gives, else the name as its facts
- * most often spell it.
+ * The fold ({@link settledSubjects}) maps every claim to its SETTLED SUBJECT:
+ * the `subject` its name's `same` entry gives, else the name as its claims
+ * most often spell it. The briefing and prompt say "facts", the word the
+ * extraction's prompt asks the model for.
  */
 
 import { z } from 'zod'
@@ -35,7 +36,7 @@ import {
   type SessionTool,
 } from '@truecourse/agent-loop'
 import { partitionByAffinity } from '@truecourse/spec-consolidator'
-import type { RecordedFact } from './record-facts.js'
+import type { ExtractedClaim } from './extract-claims.js'
 import { instructionsBriefingBlock, scanCacheKey } from './tools.js'
 
 export const SETTLE_SUBJECTS_SESSION_KIND = 'spec-scan.settle-subjects'
@@ -85,32 +86,32 @@ export function subjectKey(name: string): string {
     .trim()
 }
 
-/** One distinct subject name, as the facts use it. */
+/** One distinct subject name, as the claims use it. */
 export interface SubjectName {
   key: string
-  /** The spelling most of its facts use; ties go to the first in sort order. */
+  /** The spelling most of its claims use; ties go to the first in sort order. */
   name: string
-  facts: number
+  claims: number
   docs: number
-  /** The statement of its first fact, as a sample. */
+  /** The statement of its first claim, as a sample. */
   sample: string
 }
 
-/** The distinct subject names of `facts` after the deterministic merge, sorted by key. */
-export function collectSubjectNames(facts: readonly RecordedFact[]): SubjectName[] {
-  const byKey = new Map<string, { spellings: Map<string, number>; docs: Set<string>; facts: number; sample: string }>()
-  for (const fact of facts) {
-    const key = subjectKey(fact.subject)
-    const entry = byKey.get(key) ?? { spellings: new Map(), docs: new Set(), facts: 0, sample: fact.statement }
-    entry.spellings.set(fact.subject, (entry.spellings.get(fact.subject) ?? 0) + 1)
-    entry.docs.add(fact.doc)
-    entry.facts += 1
+/** The distinct subject names of `claims` after the deterministic merge, sorted by key. */
+export function collectSubjectNames(claims: readonly ExtractedClaim[]): SubjectName[] {
+  const byKey = new Map<string, { spellings: Map<string, number>; docs: Set<string>; claims: number; sample: string }>()
+  for (const claim of claims) {
+    const key = subjectKey(claim.subject)
+    const entry = byKey.get(key) ?? { spellings: new Map(), docs: new Set(), claims: 0, sample: claim.statement }
+    entry.spellings.set(claim.subject, (entry.spellings.get(claim.subject) ?? 0) + 1)
+    entry.docs.add(claim.doc)
+    entry.claims += 1
     byKey.set(key, entry)
   }
   return [...byKey]
     .map(([key, entry]) => {
       const [name] = [...entry.spellings].sort(([a, n], [b, m]) => m - n || (a < b ? -1 : a > b ? 1 : 0))[0]!
-      return { key, name, facts: entry.facts, docs: entry.docs.size, sample: entry.sample }
+      return { key, name, claims: entry.claims, docs: entry.docs.size, sample: entry.sample }
     })
     .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
 }
@@ -152,13 +153,13 @@ const nameId = (position: number): string => `S${position + 1}`
 
 /**
  * The cache key, over NAMED inputs only: the stage version, the part's names
- * in briefing order (each as its facts spell it and how many facts use it),
+ * in briefing order (each as its claims spell it and how many claims use it),
  * and the tail (the standing instructions).
  */
 export function settleSubjectsCacheKey(part: SubjectPart, extraParts: readonly string[] = []): string {
   return scanCacheKey([
     `settle-subjects-v${SUBJECT_SETTLE_STAGE_VERSION}`,
-    part.names.map((name) => `${name.name}\t${name.facts}`).join('\n'),
+    part.names.map((name) => `${name.name}\t${name.claims}`).join('\n'),
     ...extraParts,
   ])
 }
@@ -257,19 +258,19 @@ export function subjectMerges(part: SubjectPart, settlement: SubjectSettlement):
 }
 
 /**
- * Every fact's settled subject: the subject its name was merged into, else
- * its name as its facts most often spell it.
+ * Every claim's settled subject: the subject its name was merged into, else
+ * its name as its claims most often spell it.
  */
 export function settledSubjects(
-  facts: readonly RecordedFact[],
+  claims: readonly ExtractedClaim[],
   names: readonly SubjectName[],
   merges: ReadonlyMap<string, string>,
-): Map<RecordedFact, string> {
+): Map<ExtractedClaim, string> {
   const spelled = new Map(names.map((name) => [name.key, name.name]))
   return new Map(
-    facts.map((fact) => {
-      const key = subjectKey(fact.subject)
-      return [fact, merges.get(key) ?? spelled.get(key) ?? fact.subject]
+    claims.map((claim) => {
+      const key = subjectKey(claim.subject)
+      return [claim, merges.get(key) ?? spelled.get(key) ?? claim.subject]
     }),
   )
 }
@@ -359,7 +360,7 @@ export function settleSubjectsBriefing(part: SubjectPart, instructions: readonly
     '',
     ...part.names.map(
       (name, i) =>
-        `${nameId(i)} · ${name.name} · ${name.facts} fact${name.facts === 1 ? '' : 's'} in ${name.docs} doc${name.docs === 1 ? '' : 's'} · "${clip(name.sample, SAMPLE_CHARS)}"`,
+        `${nameId(i)} · ${name.name} · ${name.claims} fact${name.claims === 1 ? '' : 's'} in ${name.docs} doc${name.docs === 1 ? '' : 's'} · "${clip(name.sample, SAMPLE_CHARS)}"`,
     ),
     '',
     `Place every id from S1 to S${count} once: in a "same" entry with the other names of the same product thing, or in "distinct". Check the draft with \`check_subjects\`, then give it as the outcome.`,

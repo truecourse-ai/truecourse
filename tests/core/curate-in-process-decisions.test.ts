@@ -14,7 +14,7 @@ import { curateInProcess } from '../../packages/core/src/commands/spec-in-proces
 import type { DecisionsFile } from '../../packages/spec-consolidator/src/index.js';
 import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs';
 import { outcome, stubDriver, toolResult } from './spec-scan-session-stub';
-import { compare, record, settle } from './spec-scan-facts-stub';
+import { compare, record, settle } from './spec-scan-claims-stub';
 
 /** Keep every doc in one area; no provider, no network. */
 const driver = () =>

@@ -220,11 +220,11 @@ export function isProcessArea(id: string): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Why a doc's sentences were skipped when its facts were recorded: the sentences state
- * no concrete fact another doc could state differently. `other` carries a note
- * in the ledger itself.
+ * Why a doc's sentences were skipped when its claims were extracted: the
+ * sentences state no concrete claim another doc could state differently.
+ * `other` carries a note in the ledger itself.
  */
-export const FactSkipReasonSchema = z.enum([
+export const SentenceSkipReasonSchema = z.enum([
   'navigation',
   'advice',
   'rationale',
@@ -234,17 +234,18 @@ export const FactSkipReasonSchema = z.enum([
   'legal',
   'other',
 ]);
-export type FactSkipReason = z.infer<typeof FactSkipReasonSchema>;
+export type SentenceSkipReason = z.infer<typeof SentenceSkipReasonSchema>;
 
 /**
- * What recording a doc's facts came to, counted: its sentences, the facts
- * recorded, the sentences skipped per reason, and the sentences the recording left
- * unaccounted for. The ledger itself stays in the scan's cache.
+ * What extracting a doc's claims came to, counted: its sentences, the claims
+ * extracted, the sentences skipped per reason, and the sentences the extraction
+ * left unaccounted for. The ledger itself stays in the scan's cache.
  */
 export const DocLedgerCountsSchema = z.object({
   sentences: z.number().int().nonnegative(),
+  /** The claims extracted. A stored key, kept so earlier corpora keep parsing. */
   facts: z.number().int().nonnegative(),
-  skipped: z.record(FactSkipReasonSchema, z.number().int().nonnegative()),
+  skipped: z.record(SentenceSkipReasonSchema, z.number().int().nonnegative()),
   unrecorded: z.number().int().nonnegative(),
 });
 export type DocLedgerCounts = z.infer<typeof DocLedgerCountsSchema>;
@@ -270,8 +271,8 @@ export const CorpusDocSchema = z.object({
   sourceId: z.string().optional(),
   sourceKind: z.string().optional(),
   /**
-   * What recording this doc's facts came to, on a scan that finds conflicts
-   * by comparing facts. Absent on any other scan, and on a doc not recorded.
+   * What extracting this doc's claims came to, on a scan that finds conflicts
+   * by comparing claims. Absent on any other scan, and on a doc not read.
    */
   ledger: DocLedgerCountsSchema.optional(),
 });
@@ -356,13 +357,14 @@ export const ConflictSchema = z.object({
 export type Conflict = z.infer<typeof ConflictSchema>;
 
 /**
- * What comparing the recorded facts came to for one area: the area's facts its
- * area batches compared (a failed batch's facts are not counted), and the
+ * What comparing the extracted claims came to for one area: the area's claims
+ * its area batches compared (a failed batch's claims are not counted), and the
  * groups of two or more those batches formed that hold one of them. An area
  * over the batch bound also carries how many parts it was cut into and how
- * many linked pairs of facts the cut separated.
+ * many linked pairs of claims the cut separated.
  */
 export const AreaComparisonSchema = z.object({
+  /** The claims compared. A stored key, kept so earlier corpora keep parsing. */
   facts: z.number().int().nonnegative(),
   groups: z.number().int().nonnegative(),
   parts: z.number().int().positive().optional(),
@@ -371,13 +373,14 @@ export const AreaComparisonSchema = z.object({
 export type AreaComparison = z.infer<typeof AreaComparisonSchema>;
 
 /**
- * What comparing the recorded facts came to for the whole corpus: the distinct
- * subject names the facts use (after names equal but for case, spacing and
+ * What comparing the extracted claims came to for the whole corpus: the distinct
+ * subject names the claims use (after names equal but for case, spacing and
  * markup are merged), the subjects they settled into, the subject families
  * formed (settled subjects joined by a rare word of their names, two or more
- * to a family), the families whose facts span area batches and were compared
- * again in subject batches, the facts those batches held, and the facts a
- * comparison session placed in no group and not alone.
+ * to a family), the families whose claims span area batches and were compared
+ * again in subject batches, the claims those batches held, and the claims a
+ * comparison session placed in no group and not alone. The two `…Facts` keys
+ * are stored names, kept so earlier corpora keep parsing.
  */
 export const CorpusComparisonSchema = z.object({
   subjectNames: z.number().int().nonnegative(),
@@ -406,8 +409,8 @@ export const AreaSchema = z.object({
    */
   notReached: z.array(DocRefSchema).optional(),
   /**
-   * What comparing the recorded facts came to here, on a scan that finds
-   * conflicts by comparing facts. Absent on any other scan.
+   * What comparing the extracted claims came to here, on a scan that finds
+   * conflicts by comparing claims. Absent on any other scan.
    */
   comparison: AreaComparisonSchema.optional(),
 });
@@ -440,8 +443,8 @@ export const CuratedCorpusSchema = z.object({
   /** Docs the relevance filter dropped (path + reason); empty for older corpora. */
   skippedDocs: z.array(SkippedDocSchema).default([]),
   /**
-   * What comparing the recorded facts came to, on a scan that finds conflicts
-   * by comparing facts. Absent on any other scan.
+   * What comparing the extracted claims came to, on a scan that finds conflicts
+   * by comparing claims. Absent on any other scan.
    */
   comparison: CorpusComparisonSchema.optional(),
 });

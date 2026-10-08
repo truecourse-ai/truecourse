@@ -30,9 +30,9 @@ import {
 } from '../../packages/core/src/services/spec-scan/settle-areas.js';
 import { SPEC_SCAN_ORCHESTRATE_SESSION_KIND } from '../../packages/core/src/services/spec-scan/orchestrate.js';
 import { CORPUS_REVIEW_SESSION_KIND } from '../../packages/core/src/services/spec-scan/corpus-review.js';
-import { RECORD_FACTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/record-facts.js';
+import { EXTRACT_CLAIMS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/extract-claims.js';
 import { SETTLE_SUBJECTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/settle-subjects.js';
-import { COMPARE_FACTS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/compare-facts.js';
+import { COMPARE_CLAIMS_SESSION_KIND } from '../../packages/core/src/services/spec-scan/compare-claims.js';
 import { WRAP_UP_TURNS } from '../../packages/agent-loop/src/index.js';
 import type {
   DriverResult,
@@ -270,8 +270,8 @@ function warmDriver(): { driver: SessionDriver; kinds: string[] } {
             };
           case CORPUS_REVIEW_SESSION_KIND:
             return { kind: 'outcome', value: { drops: [] } };
-          case RECORD_FACTS_SESSION_KIND: {
-            // Every unit a fact about its doc's tokens, after the check the outcome needs.
+          case EXTRACT_CLAIMS_SESSION_KIND: {
+            // Every unit a claim about its doc's tokens, after the check the outcome needs.
             const briefing = input.initialMessages.at(-1) ?? '';
             const doc = /^DOCUMENT: (\S+)/m.exec(briefing)![1]!;
             const area = /^AREA TAGS \(.*?\): (.+)$/m.exec(briefing)![1]!.split(', ')[0]!;
@@ -285,7 +285,7 @@ function warmDriver(): { driver: SessionDriver; kinds: string[] } {
             input.onEvent({ type: 'tool-result', toolName: 'check_subjects', content: 'complete', isError: false });
             return { kind: 'outcome', value: { same: [], distinct } };
           }
-          case COMPARE_FACTS_SESSION_KIND: {
+          case COMPARE_CLAIMS_SESSION_KIND: {
             const alone = [...(input.initialMessages.at(-1) ?? '').matchAll(/^(F\d+) · /gm)].map(([, id]) => id!);
             input.onEvent({ type: 'tool-result', toolName: 'check_groups', content: 'complete', isError: false });
             return { kind: 'outcome', value: { groups: [], alone } };
@@ -407,44 +407,44 @@ describe('estimateScanTokens — sessions, not calls', () => {
     expect(warm.subjectLabel).toBe('all 2 docs cached');
   });
 
-  it('on the computer path quotes the corpus review beside the fact sessions, and agrees with the run', async () => {
+  it('on the computer path quotes the corpus review beside the claim sessions, and agrees with the run', async () => {
     writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });
     writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
 
     const cold = await estimateScanTokens(repo, null, { computer: true });
     const kinds = (cold.stages ?? []).map((s) => s.stage);
-    expect(kinds).toEqual(expect.arrayContaining([CURATE_DOC_SESSION_KIND, CORPUS_REVIEW_SESSION_KIND, RECORD_FACTS_SESSION_KIND]));
+    expect(kinds).toEqual(expect.arrayContaining([CURATE_DOC_SESSION_KIND, CORPUS_REVIEW_SESSION_KIND, EXTRACT_CLAIMS_SESSION_KIND]));
     expect((await estimateScanTokens(repo, null, { computer: true, only: 'curate' })).stages?.map((s) => s.stage)).toEqual([
       CURATE_DOC_SESSION_KIND,
       CORPUS_REVIEW_SESSION_KIND,
     ]);
 
     const ran = await warmScan({ computer: true });
-    expect(ran).toEqual(expect.arrayContaining([CORPUS_REVIEW_SESSION_KIND, RECORD_FACTS_SESSION_KIND]));
+    expect(ran).toEqual(expect.arrayContaining([CORPUS_REVIEW_SESSION_KIND, EXTRACT_CLAIMS_SESSION_KIND]));
     expect((await estimateScanTokens(repo, null, { computer: true })).stages).toEqual([]);
   });
 
-  it('quotes recording, settling and comparing, and agrees with the run', async () => {
+  it('quotes extracting, settling and comparing, and agrees with the run', async () => {
     writeDocs({ 'docs/auth.md': AUTH, 'docs/session.md': SESSION_DOC });
     writeDecisions(repo, decisionsFile({ scopeVerdicts: [verdictRow('.'), verdictRow('docs')] }));
 
     const cold = await estimateScanTokens(repo);
     const kinds = (cold.stages ?? []).map((s) => s.stage);
-    expect(kinds).toContain(RECORD_FACTS_SESSION_KIND);
-    expect(kinds).toContain(COMPARE_FACTS_SESSION_KIND);
-    expect(stage(cold, RECORD_FACTS_SESSION_KIND)?.label).toBe('Recording facts');
-    expect(stage(cold, COMPARE_FACTS_SESSION_KIND)?.label).toBe('Comparing facts');
+    expect(kinds).toContain(EXTRACT_CLAIMS_SESSION_KIND);
+    expect(kinds).toContain(COMPARE_CLAIMS_SESSION_KIND);
+    expect(stage(cold, EXTRACT_CLAIMS_SESSION_KIND)?.label).toBe('Extracting claims');
+    expect(stage(cold, COMPARE_CLAIMS_SESSION_KIND)?.label).toBe('Comparing claims');
     // Before any doc is recorded the batches cannot be planned: an honest range, none known cached.
-    expect(stage(cold, COMPARE_FACTS_SESSION_KIND)?.bound).toMatch(/planned once the changed docs are recorded/);
-    expect(items(cold, COMPARE_FACTS_SESSION_KIND)).toBe(0);
+    expect(stage(cold, COMPARE_CLAIMS_SESSION_KIND)?.bound).toMatch(/planned once the changed docs are recorded/);
+    expect(items(cold, COMPARE_CLAIMS_SESSION_KIND)).toBe(0);
     expect(
       (await estimateScanTokens(repo, null, { only: 'conflicts' })).stages?.map((s) => s.stage),
-    ).toEqual(kinds.filter((k) => [RECORD_FACTS_SESSION_KIND, SETTLE_SUBJECTS_SESSION_KIND, COMPARE_FACTS_SESSION_KIND].includes(k)));
+    ).toEqual(kinds.filter((k) => [EXTRACT_CLAIMS_SESSION_KIND, SETTLE_SUBJECTS_SESSION_KIND, COMPARE_CLAIMS_SESSION_KIND].includes(k)));
 
     const ran = await warmScan();
-    expect(ran.filter((k) => k === RECORD_FACTS_SESSION_KIND)).toHaveLength(2);
+    expect(ran.filter((k) => k === EXTRACT_CLAIMS_SESSION_KIND)).toHaveLength(2);
     expect(ran.filter((k) => k === SETTLE_SUBJECTS_SESSION_KIND)).toHaveLength(1);
-    expect(ran.filter((k) => k === COMPARE_FACTS_SESSION_KIND)).toHaveLength(1);
+    expect(ran.filter((k) => k === COMPARE_CLAIMS_SESSION_KIND)).toHaveLength(1);
     // Every window, the settlement and the batch are probed under the run's own keys.
     expect((await estimateScanTokens(repo)).stages).toEqual([]);
 
@@ -452,10 +452,10 @@ describe('estimateScanTokens — sessions, not calls', () => {
     // and what follows the record is a range again.
     writeDocs({ 'docs/session.md': `${SESSION_DOC}\nRefresh tokens last a day.\n` });
     const edited = await estimateScanTokens(repo);
-    expect(items(edited, RECORD_FACTS_SESSION_KIND)).toBe(0);
-    expect(stage(edited, RECORD_FACTS_SESSION_KIND)?.bound).toMatch(/changed docs' windows/);
+    expect(items(edited, EXTRACT_CLAIMS_SESSION_KIND)).toBe(0);
+    expect(stage(edited, EXTRACT_CLAIMS_SESSION_KIND)?.bound).toMatch(/changed docs' windows/);
     expect(stage(edited, SETTLE_SUBJECTS_SESSION_KIND)?.bound).toMatch(/known once every changed doc is recorded/);
-    expect(stage(edited, COMPARE_FACTS_SESSION_KIND)?.callsRange?.low).toBe(0);
+    expect(stage(edited, COMPARE_CLAIMS_SESSION_KIND)?.callsRange?.low).toBe(0);
   });
 
   it('an UNCOVERED universe keeps exactly one stage — the scope orchestrator — even with warm doc caches', async () => {

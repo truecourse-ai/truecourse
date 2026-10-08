@@ -1,14 +1,14 @@
 /**
  * Scripted answers for the sessions of a scan that finds conflicts by
- * comparing facts: a recorder, a subject settler and a comparer that read
+ * comparing claims: an extractor, a subject settler and a comparer that read
  * their briefings the way a model would and answer through the real tools, so
  * the shell's outcome preconditions and the gates run as they do live.
  */
 
 import type { DriverResult } from '../../packages/agent-loop/src/index'
-import type { FactLedgerWire } from '../../packages/core/src/services/spec-scan/record-facts'
+import type { ClaimLedgerWire } from '../../packages/core/src/services/spec-scan/extract-claims'
 import type { SubjectSettlement } from '../../packages/core/src/services/spec-scan/settle-subjects'
-import type { FactComparisonWire } from '../../packages/core/src/services/spec-scan/compare-facts'
+import type { ClaimComparisonWire } from '../../packages/core/src/services/spec-scan/compare-claims'
 import { outcome, type StubCall } from './spec-scan-session-stub'
 
 /** Run one of the session's own tools and put its result on the transcript, as a driver does. */
@@ -28,7 +28,7 @@ export async function useTool(call: StubCall, name: string, args: unknown): Prom
 // record
 // ---------------------------------------------------------------------------
 
-/** One sentence as a record briefing shows it. */
+/** One sentence as an extraction briefing shows it. */
 export interface BriefedSentence {
   n: number
   /** The rest of its line: the sentence's text as presented. */
@@ -43,24 +43,24 @@ export function recordBriefing(briefing: string): { doc: string; areas: string[]
   }
 }
 
-interface StatedFact {
+interface StatedClaim {
   subject: string
   statement: string
   testable?: boolean
-  reason?: FactLedgerWire['facts'][number]['reason']
+  reason?: ClaimLedgerWire['facts'][number]['reason']
 }
 
-/** What a sentence states (one fact, or several), or `null` to skip it. */
-export type SentenceFact = (sentence: BriefedSentence, doc: string) => StatedFact | readonly StatedFact[] | null
+/** What a sentence states (one claim, or several), or `null` to skip it. */
+export type SentenceClaim = (sentence: BriefedSentence, doc: string) => StatedClaim | readonly StatedClaim[] | null
 
-/** A recorder that records what `factOf` says each sentence states, under every area of the doc, and skips the rest. */
-export async function record(call: StubCall, factOf: SentenceFact): Promise<DriverResult> {
+/** An extractor that writes the claims `claimOf` says each sentence states, under every area of the doc, and skips the rest. */
+export async function record(call: StubCall, claimOf: SentenceClaim): Promise<DriverResult> {
   const { doc, areas, sentences } = recordBriefing(call.briefing)
-  const ledger: FactLedgerWire = { facts: [], skips: [] }
+  const ledger: ClaimLedgerWire = { facts: [], skips: [] }
   for (const sentence of sentences) {
-    const stated = factOf(sentence, doc)
+    const stated = claimOf(sentence, doc)
     if (stated === null) ledger.skips.push({ from: sentence.n, to: sentence.n, why: 'other', note: 'nothing to record' })
-    else for (const fact of [stated].flat()) ledger.facts.push({ sentences: [sentence.n], areas, testable: true, reason: null, ...fact })
+    else for (const claim of [stated].flat()) ledger.facts.push({ sentences: [sentence.n], areas, testable: true, reason: null, ...claim })
   }
   await useTool(call, 'check_ledger', ledger)
   return outcome(ledger)
@@ -70,8 +70,8 @@ export async function record(call: StubCall, factOf: SentenceFact): Promise<Driv
 // settle subjects
 // ---------------------------------------------------------------------------
 
-export function subjectNames(briefing: string): Array<{ id: string; name: string; facts: number }> {
-  return [...briefing.matchAll(/^(S\d+) · (.*?) · (\d+) facts? in/gm)].map((m) => ({ id: m[1]!, name: m[2]!, facts: Number(m[3]) }))
+export function subjectNames(briefing: string): Array<{ id: string; name: string; claims: number }> {
+  return [...briefing.matchAll(/^(S\d+) · (.*?) · (\d+) facts? in/gm)].map((m) => ({ id: m[1]!, name: m[2]!, claims: Number(m[3]) }))
 }
 
 /** A settler that merges the names `sameAs` maps to one subject, and keeps every other name distinct. */
@@ -96,7 +96,7 @@ export async function settle(call: StubCall, sameAs: (name: string) => string | 
 // compare
 // ---------------------------------------------------------------------------
 
-export interface BriefedFact {
+export interface BriefedClaim {
   id: string
   doc: string
   heading: string
@@ -104,7 +104,7 @@ export interface BriefedFact {
   statement: string
 }
 
-export function compareBriefing(briefing: string): BriefedFact[] {
+export function compareBriefing(briefing: string): BriefedClaim[] {
   return [...briefing.matchAll(/^(F\d+) · (\S+) · (.*?) · \[(.*?)\] (.*)$/gm)].map((m) => ({
     id: m[1]!,
     doc: m[2]!,
@@ -131,19 +131,19 @@ export const REVIEW: StubReview = {
 }
 
 /**
- * A comparer that groups the facts briefed under one subject, and judges a
- * group in conflict when `conflicting` names a pair of its facts (side a
- * first), each conflict carrying `review`; every other fact is alone.
+ * A comparer that groups the claims briefed under one subject, and judges a
+ * group in conflict when `conflicting` names a pair of its claims (side a
+ * first), each conflict carrying `review`; every other claim is alone.
  */
 export async function compare(
   call: StubCall,
-  conflicting: (a: BriefedFact, b: BriefedFact) => boolean = () => false,
+  conflicting: (a: BriefedClaim, b: BriefedClaim) => boolean = () => false,
   review: StubReview = REVIEW,
 ): Promise<DriverResult> {
-  const facts = compareBriefing(call.briefing)
-  const bySubject = new Map<string, BriefedFact[]>()
-  for (const fact of facts) bySubject.set(fact.subject, [...(bySubject.get(fact.subject) ?? []), fact])
-  const comparison: FactComparisonWire = { groups: [], alone: [] }
+  const claims = compareBriefing(call.briefing)
+  const bySubject = new Map<string, BriefedClaim[]>()
+  for (const claim of claims) bySubject.set(claim.subject, [...(bySubject.get(claim.subject) ?? []), claim])
+  const comparison: ClaimComparisonWire = { groups: [], alone: [] }
   for (const [subject, group] of bySubject) {
     if (group.length < 2) {
       comparison.alone.push(group[0]!.id)
