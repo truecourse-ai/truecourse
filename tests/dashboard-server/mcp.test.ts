@@ -421,7 +421,7 @@ describe('write tools', () => {
 
   const corpus = (): CuratedCorpus =>
     ({
-      version: 5,
+      version: 6,
       generatedAt: '2026-01-01T00:00:00Z',
       docs: [
         { ref: A, kind: 'prd', lastTouched: '', areaTags: ['p/c'], sourceId: SRC_A, sourceKind: 'repository' },

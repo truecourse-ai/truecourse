@@ -206,7 +206,7 @@ function corpusOf(docPaths: string[]): CuratedCorpus {
     sourceKind: 'repository',
   }));
   return {
-    version: 5,
+    version: 6,
     generatedAt: '2026-02-01T00:00:00.000Z',
     docs,
     areas: [

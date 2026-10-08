@@ -1,12 +1,9 @@
 /**
- * THE CLAIM COMPARISON — `spec-scan.compare-facts`, one session per BATCH of
+ * THE CLAIM COMPARISON — `spec-scan.compare-claims`, one session per BATCH of
  * the claims the extraction wrote, after their subjects are settled. It is the
  * second half of finding conflicts by comparing claims: the session places
  * every claim of its batch in a group of claims about the same thing, or
- * alone, and judges each group of two or more. The session kind, cache name and
- * key prefix still say "facts": they are stored names, kept so caches and
- * stored sessions keep matching, and the model is briefed with facts, the
- * wording its prompt was tuned with.
+ * alone, and judges each group of two or more.
  *
  * BATCHES ({@link planCompareBatches}, deterministic) are two cuts through the
  * same claims, because one is not enough:
@@ -93,11 +90,10 @@ import type { ExtractedClaim } from './extract-claims.js'
 import { subjectKey } from './settle-subjects.js'
 import { docLifecycleFingerprint, docLifecycleLines, instructionsBriefingBlock, scanCacheKey } from './tools.js'
 
-/** A stored name, kept so stored sessions and their indexes keep matching. */
-export const COMPARE_CLAIMS_SESSION_KIND = 'spec-scan.compare-facts'
+export const COMPARE_CLAIMS_SESSION_KIND = 'spec-scan.compare-claims'
 
-/** One entry per batch. A stored name, kept so cached comparisons keep matching. */
-export const COMPARE_CLAIMS_CACHE_NAME = 'consolidator/fact-compare'
+/** One entry per batch. */
+export const COMPARE_CLAIMS_CACHE_NAME = 'consolidator/claim-compare'
 
 /**
  * THE COMPARE STEP'S VERSION, bumped by hand. A prompt change that fixes wrong
@@ -175,7 +171,7 @@ export interface ComparePlan {
   /** Families, of any size, sent to subject batches. */
   subjectBatchFamilies: number
   /** Claims that sit in a subject batch, named for the stored corpus field it fills. */
-  subjectBatchFacts: number
+  subjectBatchClaims: number
 }
 
 /** Where a claim comes from: its doc and the sentences it cites. */
@@ -338,7 +334,7 @@ export function planCompareBatches(
     splitAreas,
     subjectFamilies: families.filter((family) => family.length >= 2).length,
     subjectBatchFamilies,
-    subjectBatchFacts: subjectSets.reduce((n, set) => n + set.claims.length, 0),
+    subjectBatchClaims: subjectSets.reduce((n, set) => n + set.claims.length, 0),
   }
 }
 
@@ -396,8 +392,7 @@ const claimFingerprint = (bf: BatchClaim): string =>
  */
 export function compareClaimsCacheKey(item: CompareItem, extraParts: readonly string[] = []): string {
   return scanCacheKey([
-    // A stored prefix, kept so cached comparisons keep matching.
-    `compare-facts-v${COMPARE_STAGE_VERSION}`,
+    `compare-claims-v${COMPARE_STAGE_VERSION}`,
     item.batch.claims.map(claimFingerprint).join('\n'),
     docsWithStatus(item)
       .map((doc) => `${doc.path}=${docLifecycleFingerprint(doc)}`)
@@ -511,43 +506,42 @@ export function priorConflictsAmong(refs: ReadonlySet<string>, prior: readonly C
 
 const ClaimConflictSchema = z
   .object({
-    a: z.string().describe('The id of the fact on side a, the side `pick-a` says is right, e.g. "F41".'),
-    b: z.string().describe('The id of the fact on side b, from another sentence than side a.'),
+    a: z.string().describe('The id of the claim on side a, the side `pick-a` says is right, e.g. "F41".'),
+    b: z.string().describe('The id of the claim on side b, from another sentence than side a.'),
     note: z
       .string()
-      .describe('What THESE two facts disagree on, naming each document by its filename (for one document, its two sections). Nothing the two facts do not themselves state.'),
+      .describe('What THESE two claims disagree on, naming each document by its filename (for one document, its two sections). Nothing the two claims do not themselves state.'),
     review: ConflictReviewSchema,
   })
   .strict()
 
 const ClaimGroupSchema = z
   .object({
-    subject: z.string().describe('What the facts of the group are about, in a few words.'),
-    facts: z.array(z.string()).describe('The ids of the facts about it, two or more.'),
+    subject: z.string().describe('What the claims of the group are about, in a few words.'),
+    claims: z.array(z.string()).describe('The ids of the claims about it, two or more.'),
     verdict: z.enum(['agree', 'conflict']),
     conflicts: z
       .array(ClaimConflictSchema)
       .describe(
-        'For a "conflict" group, one pair for every two of its facts that cannot both be true; empty for an "agree" group.',
+        'For a "conflict" group, one pair for every two of its claims that cannot both be true; empty for an "agree" group.',
       ),
     consistent: z
       .array(z.string())
       .optional()
       .describe(
-        'For a "conflict" group: the ids of its facts that contradict NO other fact of the group. Every fact of the group is in a pair or here.',
+        'For a "conflict" group: the ids of its claims that contradict NO other claim of the group. Every claim of the group is in a pair or here.',
       ),
   })
   .strict()
 
 /**
  * What the model writes: its groups, and the claims no other claim speaks
- * about. A group's `facts` is the wire key the prompt asks for, kept so cached
- * comparisons and stored sessions keep matching.
+ * about.
  */
 export const ClaimComparisonWireSchema = z
   .object({
     groups: z.array(ClaimGroupSchema),
-    alone: z.array(z.string()).describe('The id of every fact no group holds, each once.'),
+    alone: z.array(z.string()).describe('The id of every claim no group holds, each once.'),
   })
   .strict()
 export type ClaimComparisonWire = z.infer<typeof ClaimComparisonWireSchema>
@@ -669,12 +663,12 @@ export function checkGroups(outcome: ClaimComparisonWire, batch: CompareBatch): 
   const placedAt = new Map<string, string>()
   const place = (id: string, where: string): boolean => {
     if (!byId.has(id)) {
-      problems.push(`${where} names "${id}", which is not a fact of this batch (F1 to F${batch.claims.length})`)
+      problems.push(`${where} names "${id}", which is not a claim of this batch (F1 to F${batch.claims.length})`)
       return false
     }
     const first = placedAt.get(id)
     if (first !== undefined) {
-      problems.push(`${id} is placed twice, in ${first} and in ${where}; place each fact once`)
+      problems.push(`${id} is placed twice, in ${first} and in ${where}; place each claim once`)
       return false
     }
     placedAt.set(id, where)
@@ -685,23 +679,23 @@ export function checkGroups(outcome: ClaimComparisonWire, batch: CompareBatch): 
   const conflicts: ReportedConflict[] = []
   outcome.groups.forEach((group, i) => {
     const where = `groups[${i}]`
-    const claims = group.facts.filter((id) => place(id, where)).map((id) => byId.get(id)!)
-    if (new Set(group.facts).size < 2) problems.push(`${where} holds one fact; a fact with no peer goes in "alone"`)
+    const claims = group.claims.filter((id) => place(id, where)).map((id) => byId.get(id)!)
+    if (new Set(group.claims).size < 2) problems.push(`${where} holds one claim; a claim with no peer goes in "alone"`)
     if (group.subject.trim() === '') problems.push(`${where} has no subject`)
     if (claims.length >= 2) groups.push({ subject: group.subject.trim(), verdict: group.verdict, claims })
     if (group.verdict === 'agree') {
       if (group.conflicts.length > 0) problems.push(`${where} agrees and names conflicts; give it the verdict "conflict", or drop them`)
       return
     }
-    if (group.conflicts.length === 0) problems.push(`${where} is a conflict and names no pair of facts that cannot both be true`)
-    const listed = new Set(group.facts)
+    if (group.conflicts.length === 0) problems.push(`${where} is a conflict and names no pair of claims that cannot both be true`)
+    const listed = new Set(group.claims)
     group.conflicts.forEach((conflict, j) => {
       const at = `${where}.conflicts[${j}]`
       const a = byId.get(conflict.a)
       const b = byId.get(conflict.b)
       const outside = [conflict.a, conflict.b].filter((id) => !listed.has(id))
       if (outside.length > 0) {
-        problems.push(`${at} pairs ${outside.join(' and ')}, not in this group; a conflict is between two facts of its group`)
+        problems.push(`${at} pairs ${outside.join(' and ')}, not in this group; a conflict is between two claims of its group`)
         return
       }
       if (!a || !b) return
@@ -738,13 +732,13 @@ export function checkGroups(outcome: ClaimComparisonWire, batch: CompareBatch): 
     if (strays.length > 0) problems.push(`${where}.consistent names ${strays.join(', ')}, not in this group`)
     const both = consistent.filter((id) => paired.has(id))
     if (both.length > 0) {
-      problems.push(`${where}: ${both.join(', ')} ${both.length === 1 ? 'is' : 'are'} in a pair and in "consistent"; a fact that contradicts another is not consistent`)
+      problems.push(`${where}: ${both.join(', ')} ${both.length === 1 ? 'is' : 'are'} in a pair and in "consistent"; a claim that contradicts another is not consistent`)
     }
     const accounted = new Set([...paired, ...consistent])
-    const unjudged = group.conflicts.length === 0 ? [] : group.facts.filter((id) => byId.has(id) && !accounted.has(id))
+    const unjudged = group.conflicts.length === 0 ? [] : group.claims.filter((id) => byId.has(id) && !accounted.has(id))
     if (unjudged.length > 0) {
       problems.push(
-        `${where}: ${idRanges(unjudged, REFUSAL_RANGES_MAX)} ${unjudged.length === 1 ? 'is' : 'are'} in no pair and not in "consistent". For each, name the pair with the fact of this group it contradicts, or list it in "consistent" when it contradicts none. One pair does not stand for a group: a note may say only what its own two facts state.`,
+        `${where}: ${idRanges(unjudged, REFUSAL_RANGES_MAX)} ${unjudged.length === 1 ? 'is' : 'are'} in no pair and not in "consistent". For each, name the pair with the claim of this group it contradicts, or list it in "consistent" when it contradicts none. One pair does not stand for a group: a note may say only what its own two claims state.`,
       )
     }
   })
@@ -763,7 +757,7 @@ export function groupsRefusal(check: GroupsCheck): string | undefined {
   const parts: string[] = []
   if (check.unplaced.length > 0) {
     parts.push(
-      `${check.unplaced.length} fact(s) placed nowhere: ${idRanges(check.unplaced, REFUSAL_RANGES_MAX)}. Put each in the group of facts about the same thing, or in "alone".`,
+      `${check.unplaced.length} claim(s) placed nowhere: ${idRanges(check.unplaced, REFUSAL_RANGES_MAX)}. Put each in the group of claims about the same thing, or in "alone".`,
     )
   }
   if (check.problems.length > 0) {
@@ -875,9 +869,8 @@ export function foldSameSentences<F extends FoldableConflict>(members: readonly 
 const CHECK_GROUPS = defineToolSpec({
   name: 'check_groups',
   description:
-    'Check a draft the way the run will: every fact id of the batch placed exactly once, in a group or in "alone"; every group two or more facts with a verdict; every conflict a pair of its own group\'s facts from two different sentences, with a note and a review. Call it on your complete draft before you give the outcome.',
-  // A stored name, kept so stored transcripts keep matching.
-  kind: 'check-fact-groups',
+    'Check a draft the way the run will: every claim id of the batch placed exactly once, in a group or in "alone"; every group two or more claims with a verdict; every conflict a pair of its own group\'s claims from two different sentences, with a note and a review. Call it on your complete draft before you give the outcome.',
+  kind: 'check-claim-groups',
   readOnly: true,
   destructive: false,
   display: {
@@ -894,7 +887,7 @@ function checkGroupsTool(batch: CompareBatch): SessionTool {
       const refusal = groupsRefusal(check)
       if (refusal) return { content: refusal, isError: true }
       return {
-        content: `The draft is complete: ${check.groups.length} group(s), ${check.conflicts.length} conflict(s), ${args.alone.length} fact(s) alone, all ${batch.claims.length} facts placed. Give it as the outcome.`,
+        content: `The draft is complete: ${check.groups.length} group(s), ${check.conflicts.length} conflict(s), ${args.alone.length} claim(s) alone, all ${batch.claims.length} claims placed. Give it as the outcome.`,
       }
     },
   })
@@ -945,18 +938,16 @@ function sentenceContext(sentences: readonly DocSentence[], body: string): { fro
 
 const READ_CONTEXT = defineToolSpec({
   name: 'read_context',
-  description: `Read the sentences some facts of your batch were recorded from, in their document: the section around each, as written. Pass up to ${CONTEXT_CLAIMS_MAX} fact ids per call; batch them.`,
-  // A stored name, kept so stored transcripts keep matching.
-  kind: 'read-fact-context',
+  description: `Read the sentences some claims of your batch were extracted from, in their document: the section around each, as written. Pass up to ${CONTEXT_CLAIMS_MAX} claim ids per call; batch them.`,
+  kind: 'read-claim-context',
   readOnly: true,
   destructive: false,
   display: {
     one: 'I read the sentence around a claim before judging it',
     many: 'I read the sentences around claims before judging them, {n} reads',
   },
-  // `facts` is the key the prompt names the ids by, kept so stored sessions keep matching.
   inputSchema: z
-    .object({ facts: z.array(z.string()).describe('Fact ids from the briefing, e.g. ["F41", "F207"].') })
+    .object({ claims: z.array(z.string()).describe('Claim ids from the briefing, e.g. ["F41", "F207"].') })
     .strict(),
 })
 
@@ -964,14 +955,14 @@ function readContextTool(item: CompareItem): SessionTool {
   const byId = new Map(item.batch.claims.map((bf) => [bf.id, bf]))
   return READ_CONTEXT.bind({
     async execute(args) {
-      const ids = [...new Set(args.facts)]
-      if (ids.length === 0) return { content: 'Name at least one fact id.', isError: true }
+      const ids = [...new Set(args.claims)]
+      if (ids.length === 0) return { content: 'Name at least one claim id.', isError: true }
       if (ids.length > CONTEXT_CLAIMS_MAX) {
-        return { content: `${ids.length} facts in one call; open at most ${CONTEXT_CLAIMS_MAX} per call.`, isError: true }
+        return { content: `${ids.length} claims in one call; open at most ${CONTEXT_CLAIMS_MAX} per call.`, isError: true }
       }
       const unknown = ids.filter((id) => !byId.has(id))
       if (unknown.length > 0) {
-        return { content: `${unknown.join(', ')}: not a fact of this batch (F1 to F${item.batch.claims.length}).`, isError: true }
+        return { content: `${unknown.join(', ')}: not a claim of this batch (F1 to F${item.batch.claims.length}).`, isError: true }
       }
       // Claims of one sentence's surroundings are shown once, under all their ids.
       const blocks = new Map<string, { ids: string[]; header: string; text: string }>()
@@ -1051,10 +1042,10 @@ export function compareClaimsBriefing(
   const { batch } = item
   const lines = [
     ...instructionsBriefingBlock(instructions),
-    `YOUR FACTS: the ${batch.claims.length} facts of ${describeBatch(batch)}.`,
+    `YOUR CLAIMS: the ${batch.claims.length} claims of ${describeBatch(batch)}.`,
     ...(batch.kind === 'subject'
       ? [
-          'These subjects have facts in more than one batch of areas, so their facts are compared here together. Subjects whose names share a rare word are listed together: they may be one control or feature named two ways, which is exactly where two documents disagree, so judge them by what their facts say, not by their names.',
+          'These subjects have claims in more than one batch of areas, so their claims are compared here together. Subjects whose names share a rare word are listed together: they may be one control or feature named two ways, which is exactly where two documents disagree, so judge them by what their claims say, not by their names.',
         ]
       : []),
     'Each line: id · document · the heading it sits under · [subject] statement.',
@@ -1072,7 +1063,7 @@ export function compareClaimsBriefing(
   if (prior.length > 0) {
     lines.push(
       '',
-      'PREVIOUSLY FLAGGED: conflicts an earlier scan reported between these documents. Re-examine each among the facts above; one that still stands is a conflict group here, one the documents no longer state is not.',
+      'PREVIOUSLY FLAGGED: conflicts an earlier scan reported between these documents. Re-examine each among the claims above; one that still stands is a conflict group here, one the documents no longer state is not.',
     )
     // A side shows its quote: two docs can hold several conflicts.
     const side = (s: ConflictSideLike): string => `${s.doc}${s.quote ? ` · "${s.quote}"` : ''}`
@@ -1083,27 +1074,27 @@ export function compareClaimsBriefing(
   }
   lines.push(
     '',
-    `Place every fact from F1 to F${batch.claims.length}: group the facts about the same thing and judge each group, put every fact with no peer in "alone". Check the draft with \`check_groups\`, then give it as the outcome.`,
+    `Place every claim from F1 to F${batch.claims.length}: group the claims about the same thing and judge each group, put every claim with no peer in "alone". Check the draft with \`check_groups\`, then give it as the outcome.`,
   )
   return lines.join('\n')
 }
 
-export const COMPARE_CLAIMS_SYSTEM_PROMPT = `You find where a product's documentation CONTRADICTS ITSELF by comparing the FACTS it states. Each fact was recorded from one sentence of one document. The briefing gives you a batch of them, one per line under an id: \`F41 · <document> · <heading> · [<subject>] <statement>\`. Facts are listed by subject, so facts about one thing are usually next to each other.
+export const COMPARE_CLAIMS_SYSTEM_PROMPT = `You find where a product's documentation CONTRADICTS ITSELF by comparing the CLAIMS it states. Each claim was extracted from one sentence of one document. The briefing gives you a batch of them, one per line under an id: \`F41 · <document> · <heading> · [<subject>] <statement>\`. Claims are listed by subject, so claims about one thing are usually next to each other.
 
 # How to work
 
-1. GROUP the facts by the POINT they speak to, not by their wording and not by their topic. A point is one question about the product that has one answer: how many rows a page shows, what saving announces, where a control lives, which status a route returns. Facts that answer the same question form one group, even when their subjects are named differently or they sit far apart in the list. Facts about the same screen or feature that answer DIFFERENT questions are different groups: the default date of a form and the message it shows after saving are two points. A fact no other fact of the batch speaks to goes in \`alone\`.
-2. JUDGE every group of two or more. Its verdict is \`agree\` when all its facts can be true of the same product at once: facts that restate each other, add detail or describe different aspects are a group with the verdict \`agree\`. It is \`conflict\` when two of its facts cannot both be true; name a pair for every two facts that disagree, and list the group's remaining facts in \`consistent\` (see "Each conflict").
-3. When you are unsure whether two facts are compatible, OPEN THEIR SENTENCES with \`read_context\` and read them before you decide. A statement alone loses the sentence before it, the list it belongs to and the scope its heading sets. Batch the ids: several facts per call.
+1. GROUP the claims by the POINT they speak to, not by their wording and not by their topic. A point is one question about the product that has one answer: how many rows a page shows, what saving announces, where a control lives, which status a route returns. Claims that answer the same question form one group, even when their subjects are named differently or they sit far apart in the list. Claims about the same screen or feature that answer DIFFERENT questions are different groups: the default date of a form and the message it shows after saving are two points. A claim no other claim of the batch speaks to goes in \`alone\`.
+2. JUDGE every group of two or more. Its verdict is \`agree\` when all its claims can be true of the same product at once: claims that restate each other, add detail or describe different aspects are a group with the verdict \`agree\`. It is \`conflict\` when two of its claims cannot both be true; name a pair for every two claims that disagree, and list the group's remaining claims in \`consistent\` (see "Each conflict").
+3. When you are unsure whether two claims are compatible, OPEN THEIR SENTENCES with \`read_context\` and read them before you decide. A statement alone loses the sentence before it, the list it belongs to and the scope its heading sets. Batch the ids: several claims per call.
 4. Check the draft with \`check_groups\`, fix what it lists, then give the outcome.
 
 # What a conflict is
 
 Two sentences that CANNOT BOTH BE TRUE of the same product: "Export my data is under Settings, Account" against "under Settings, Danger Zone"; "no account needed" against "you must sign in first"; "keys are kept in your browser's local storage" against "keys are stored encrypted on the server"; a default of 30 against a default of 60.
 
-The two sentences may be in ONE document: one section says a button press is a 1px translate and another says it is a 0.97 scale. That is a conflict too. Two facts recorded from the same sentence never conflict with each other.
+The two sentences may be in ONE document: one section says a button press is a 1px translate and another says it is a 0.97 scale. That is a conflict too. Two claims recorded from the same sentence never conflict with each other.
 
-NOT a conflict: one sentence giving more detail than the other; the same fact worded differently; different audiences (a user guide and a developer guide) describing the same behavior at different depths; one document silent where another speaks; two statements about different things that happen to share a word; a plan or a hedge beside a statement of what ships; a document whose status says it was dropped, deferred or superseded.
+NOT a conflict: one sentence giving more detail than the other; the same claim worded differently; different audiences (a user guide and a developer guide) describing the same behavior at different depths; one document silent where another speaks; two statements about different things that happen to share a word; a plan or a hedge beside a statement of what ships; a document whose status says it was dropped, deferred or superseded.
 
 Four rulings that decided real cases:
   - A LIST conflicts with another sentence only when the list presents itself as closed or complete (it gives a count, says "complete", "all" or "only", or it is plainly the inventory of one bounded thing, such as a reference table of every tool) AND the other sentence states a member it leaves out. An open or illustrative list that omits something ("for example", "such as", a few highlights) is not a conflict.
@@ -1111,31 +1102,31 @@ Four rulings that decided real cases:
   - A HEDGE ("may", "can", "coming soon", "planned") is not a conflict, unless the same sentence also asserts the thing definitely.
   - A UNIVERSAL or CLOSED statement ("all", "every", "always", "never", "only", "entirely", "either", "both", "exactly N", "complete") conflicts with a sentence that states an exception to it or a member beyond it. A statement that fully describes what one thing checks, contains or supports is closed too: "verifies the database and storage, returning 503 if either is unhealthy and 200 when both are healthy" conflicts with "checks the database, storage and Redis when configured". So does "all animations collapse to 0.01ms" with "transitions collapse to 0.01ms, except animate-spin, which keeps spinning". Read such a pair word by word before you call it agreement: an exception or an extra member is a conflict, not more detail. This does not touch the list ruling above: an open or illustrative list still conflicts with nothing it leaves out.
 
-When you have read both sentences and genuinely cannot tell whether two stated facts are compatible, report the conflict: a human should look.
+When you have read both sentences and genuinely cannot tell whether two stated claims are compatible, report the conflict: a human should look.
 
 # Each conflict
 
-A conflict is ONE PAIR OF FACTS that cannot both be true. Each fact is one sentence, list item or table row of a document, and the conflict shows exactly those two sentences as its evidence. So:
+A conflict is ONE PAIR OF CLAIMS that cannot both be true. Each claim is one sentence, list item or table row of a document, and the conflict shows exactly those two sentences as its evidence. So:
 
-  - Name a pair for EVERY two facts that disagree. A group in which a document states a point in one fact and another document contradicts it in one fact has one pair. Where two documents disagree on five points, in five facts each, that is five pairs (and usually five groups).
-  - A pair's note says only what ITS two facts state. Never let one pair stand for several: a note that lists disagreements its two facts do not themselves state points the reader at sentences that do not show them.
-  - When the same two facts disagree on two points (one sentence gives both a default date and a default category, and so does the other), that is one pair whose note names both.
+  - Name a pair for EVERY two claims that disagree. A group in which a document states a point in one claim and another document contradicts it in one claim has one pair. Where two documents disagree on five points, in five claims each, that is five pairs (and usually five groups).
+  - A pair's note says only what ITS two claims state. Never let one pair stand for several: a note that lists disagreements its two claims do not themselves state points the reader at sentences that do not show them.
+  - When the same two claims disagree on two points (one sentence gives both a default date and a default category, and so does the other), that is one pair whose note names both.
   - When several sentences of one document repeat the same statement, pair the one that states the point most directly and completely, so the next scan makes the same choice, and list the repeats in \`consistent\`.
-  - \`consistent\`: every fact of a conflict group that contradicts no other fact of the group. Every fact of the group is in a pair or in \`consistent\`; the run refuses a conflict group that leaves a fact in neither.
+  - \`consistent\`: every claim of a conflict group that contradicts no other claim of the group. Every claim of the group is in a pair or in \`consistent\`; the run refuses a conflict group that leaves a claim in neither.
 
-  - \`a\` and \`b\`: the ids of the two facts, both from the group. Side a is what \`pick-a\` names.
-  - \`note\`: what these two facts disagree on, naming each document by its filename (for one document, its two sections).
+  - \`a\` and \`b\`: the ids of the two claims, both from the group. Side a is what \`pick-a\` names.
+  - \`note\`: what these two claims disagree on, naming each document by its filename (for one document, its two sections).
   - \`review.explanation\`: 2 to 4 sentences naming the exact disagreement and quoting both sides, each attributed to its document by name.
-  - \`review.recommendation.action\`: exactly one of "pick-a" (fact a's sentence is right; b's should change), "pick-b", "fix-doc" (neither is simply right; say which doc needs which edit in \`fix\`), "dismiss" (on reflection both can hold).
+  - \`review.recommendation.action\`: exactly one of "pick-a" (claim a's sentence is right; b's should change), "pick-b", "fix-doc" (neither is simply right; say which doc needs which edit in \`fix\`), "dismiss" (on reflection both can hold).
   - \`review.recommendation.rationale\`: one sentence, naming the documents.
   - \`review.recommendation.confidence\`: "low", "medium" or "high". A "high" pick or dismiss is applied with no human review, so give "high" only when you would act on it unsupervised. When in doubt, the lower grade.
 
 # The gate
 
-Every fact id of the batch appears EXACTLY ONCE: in one group's \`facts\`, or in \`alone\`. A group holds two or more facts and a verdict. An \`agree\` group names no conflicts. A \`conflict\` group names at least one pair of its facts that disagree, both facts of that group, from two different sentences (two documents, or two places in one), each with a note and a review, and every other fact of the group is in another pair or in \`consistent\`. \`check_groups\` runs exactly this check.
+Every claim id of the batch appears EXACTLY ONCE: in one group's \`claims\`, or in \`alone\`. A group holds two or more claims and a verdict. An \`agree\` group names no conflicts. A \`conflict\` group names at least one pair of its claims that disagree, both claims of that group, from two different sentences (two documents, or two places in one), each with a note and a review, and every other claim of the group is in another pair or in \`consistent\`. \`check_groups\` runs exactly this check.
 
 You have ${COMPARE_CLAIMS_BUDGET.turns} turns, and one more grant of as many when they run out. Draft every group in your first turn or two, then read what you are unsure of.
 
 # The outcome
 
-One object: { "groups": [{ "subject": "Export my data", "facts": ["F41", "F207"], "verdict": "conflict", "conflicts": [{ "a": "F41", "b": "F207", "note": "exporting-your-resume.mdx puts Export my data under Settings, Account; faq.mdx under Settings, Danger Zone", "review": { "explanation": "...", "recommendation": { "action": "fix-doc", "rationale": "...", "fix": "...", "confidence": "medium" } } }], "consistent": [] }, { "subject": "PDF page size", "facts": ["F12", "F13"], "verdict": "agree", "conflicts": [] }], "alone": ["F3", "F9"] }`
+One object: { "groups": [{ "subject": "Export my data", "claims": ["F41", "F207"], "verdict": "conflict", "conflicts": [{ "a": "F41", "b": "F207", "note": "exporting-your-resume.mdx puts Export my data under Settings, Account; faq.mdx under Settings, Danger Zone", "review": { "explanation": "...", "recommendation": { "action": "fix-doc", "rationale": "...", "fix": "...", "confidence": "medium" } } }], "consistent": [] }, { "subject": "PDF page size", "claims": ["F12", "F13"], "verdict": "agree", "conflicts": [] }], "alone": ["F3", "F9"] }`

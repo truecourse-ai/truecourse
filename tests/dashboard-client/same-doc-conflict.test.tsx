@@ -30,7 +30,7 @@ const conflict = {
 };
 
 const CORPUS = {
-  version: 5,
+  version: 6,
   generatedAt: '',
   docs: [{ ref: DOC, title: 'Design', kind: 'prd', lastTouched: '', areaTags: ['core/design'] }],
   areas: [{ id: 'core/design', product: 'core', concern: 'design', docRefs: [DOC], conflicts: [conflict] }],

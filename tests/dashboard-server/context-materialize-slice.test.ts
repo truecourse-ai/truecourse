@@ -117,7 +117,7 @@ function corpus(): CuratedCorpus {
     { ref: ref(SRC_B, 'site.md'), kind: 'prd' as const, lastTouched: '', areaTags: ['p/c'], sourceId: SRC_B },
   ];
   return {
-    version: 5,
+    version: 6,
     generatedAt: '2026-01-01T00:00:00Z',
     docs,
     areas: [

@@ -117,7 +117,7 @@ describe('a generate the gates stop is on record too', () => {
     fs.writeFileSync(
       path.join(repo, '.truecourse', 'specs', 'corpus.json'),
       JSON.stringify({
-        version: 5,
+        version: 6,
         generatedAt: '2026-01-01T00:00:00Z',
         docs: [
           { ref: 'docs/v1.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['users'] },
@@ -163,7 +163,7 @@ describe('a generate the gates stop is on record too', () => {
     fs.writeFileSync(
       path.join(repo, '.truecourse', 'specs', 'corpus.json'),
       JSON.stringify({
-        version: 5,
+        version: 6,
         generatedAt: '2026-01-01T00:00:00Z',
         docs: [{ ref: 'docs/cli.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['cli'] }],
         areas: [{ id: 'cli', product: 'cli', concern: 'cli', docRefs: ['docs/cli.md'], conflicts: [] }],

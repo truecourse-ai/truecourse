@@ -331,7 +331,7 @@ beforeEach(async () => {
     run: async () => ({ status: 'ok', latest: latestOf('run-head', HEAD, 'pass') }) as never,
     scan: async () => {
       seen.scanned = true;
-      return { corpus: { version: 5, generatedAt: '', docs: [], areas: [], skippedDocs: [] } } as never;
+      return { corpus: { version: 6, generatedAt: '', docs: [], areas: [], skippedDocs: [] } } as never;
     },
   };
   await db.delete(schema.guardRuns);
@@ -366,7 +366,7 @@ beforeEach(async () => {
   // The repository reads one document of the workspace corpus: generate needs a slice.
   await setContextBindings(ORG, REPO, [SOURCE]);
   await saveWorkspaceSpec({ workspaceOrgId: ORG }, 'corpus', {
-    version: 5,
+    version: 6,
     generatedAt: '',
     docs: [{ ref: `context/${SOURCE}/docs/orgs.md`, kind: 'prd', lastTouched: '', areaTags: ['p/c'], sourceId: SOURCE }],
     areas: [{ id: 'p/c', product: 'p', concern: 'c', docRefs: [`context/${SOURCE}/docs/orgs.md`], conflicts: [] }],
@@ -517,7 +517,7 @@ describe('the pull request check', () => {
     });
     changedFiles = ['docs/orgs.md', 'src/index.ts'];
     const disputed: CuratedCorpus = {
-      version: 5,
+      version: 6,
       generatedAt: '',
       docs: [
         { ref: `context/${SOURCE}/docs/orgs.md`, kind: 'prd', lastTouched: '', areaTags: ['p/c'], sourceId: SOURCE },
@@ -589,7 +589,7 @@ describe('the pull request check', () => {
     engines.scan = async () =>
       ({
         corpus: {
-          version: 5,
+          version: 6,
           generatedAt: '',
           docs: [other, orgs].map((ref) => ({ ref, kind: 'prd', lastTouched: '', areaTags: ['p/c'], sourceId: SOURCE })),
           areas: [
@@ -635,7 +635,7 @@ describe('the pull request check', () => {
     const asked: Array<{ computer?: boolean }> = [];
     engines.scan = async (opts) => {
       asked.push({ computer: opts.computer });
-      return { corpus: { version: 5, generatedAt: '', docs: [], areas: [], skippedDocs: [] } } as never;
+      return { corpus: { version: 6, generatedAt: '', docs: [], areas: [], skippedDocs: [] } } as never;
     };
     await check();
     checkLlmMode = 'claude-code';

@@ -95,7 +95,7 @@ function seedCorpus(): string {
   const file = corpusFilePath(repo);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const prior = JSON.stringify({
-    version: 5,
+    version: 6,
     generatedAt: '2026-01-01T00:00:00Z',
     docs: [{ ref: 'docs/orders.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['core/orders'] }],
     areas: [],

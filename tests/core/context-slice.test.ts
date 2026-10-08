@@ -15,7 +15,7 @@ const A = (name: string): string => `context/src-a/${name}`;
 const B = (name: string): string => `context/src-b/${name}`;
 
 const corpus = (): CuratedCorpus => ({
-  version: 5,
+  version: 6,
   generatedAt: '2026-01-01T00:00:00Z',
   docs: [
     { ref: A('docs/one.md'), kind: 'prd', lastTouched: '', areaTags: ['p/c'], sourceId: 'src-a', sourceKind: 'repository' },

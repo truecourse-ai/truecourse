@@ -243,8 +243,8 @@ export type SentenceSkipReason = z.infer<typeof SentenceSkipReasonSchema>;
  */
 export const DocLedgerCountsSchema = z.object({
   sentences: z.number().int().nonnegative(),
-  /** The claims extracted. A stored key, kept so earlier corpora keep parsing. */
-  facts: z.number().int().nonnegative(),
+  /** The claims extracted. */
+  claims: z.number().int().nonnegative(),
   skipped: z.record(SentenceSkipReasonSchema, z.number().int().nonnegative()),
   unrecorded: z.number().int().nonnegative(),
 });
@@ -364,8 +364,8 @@ export type Conflict = z.infer<typeof ConflictSchema>;
  * many linked pairs of claims the cut separated.
  */
 export const AreaComparisonSchema = z.object({
-  /** The claims compared. A stored key, kept so earlier corpora keep parsing. */
-  facts: z.number().int().nonnegative(),
+  /** The claims compared. */
+  claims: z.number().int().nonnegative(),
   groups: z.number().int().nonnegative(),
   parts: z.number().int().positive().optional(),
   cutPairs: z.number().int().nonnegative().optional(),
@@ -379,16 +379,15 @@ export type AreaComparison = z.infer<typeof AreaComparisonSchema>;
  * formed (settled subjects joined by a rare word of their names, two or more
  * to a family), the families whose claims span area batches and were compared
  * again in subject batches, the claims those batches held, and the claims a
- * comparison session placed in no group and not alone. The two `…Facts` keys
- * are stored names, kept so earlier corpora keep parsing.
+ * comparison session placed in no group and not alone.
  */
 export const CorpusComparisonSchema = z.object({
   subjectNames: z.number().int().nonnegative(),
   settledSubjects: z.number().int().nonnegative(),
   subjectFamilies: z.number().int().nonnegative(),
   subjectBatchFamilies: z.number().int().nonnegative(),
-  subjectBatchFacts: z.number().int().nonnegative(),
-  unplacedFacts: z.number().int().nonnegative(),
+  subjectBatchClaims: z.number().int().nonnegative(),
+  unplacedClaims: z.number().int().nonnegative(),
 });
 export type CorpusComparison = z.infer<typeof CorpusComparisonSchema>;
 
@@ -436,7 +435,7 @@ export const SkippedDocSchema = z.object({
 export type SkippedDoc = z.infer<typeof SkippedDocSchema>;
 
 export const CuratedCorpusSchema = z.object({
-  version: z.literal(5),
+  version: z.literal(6),
   generatedAt: z.string(),
   docs: z.array(CorpusDocSchema),
   areas: z.array(AreaSchema),

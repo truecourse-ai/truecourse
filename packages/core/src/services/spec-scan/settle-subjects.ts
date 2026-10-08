@@ -22,8 +22,7 @@
  *
  * The fold ({@link settledSubjects}) maps every claim to its SETTLED SUBJECT:
  * the `subject` its name's `same` entry gives, else the name as its claims
- * most often spell it. The briefing and prompt say "facts", the word the
- * extraction's prompt asks the model for.
+ * most often spell it.
  */
 
 import { z } from 'zod'
@@ -351,23 +350,23 @@ export function settleSubjectsBriefing(part: SubjectPart, instructions: readonly
   const count = part.names.length
   const scope =
     part.parts > 1
-      ? `part ${part.index} of ${part.parts}: ${count} of the ${part.total} subject names the recorded facts use, grouped so names that share words sit in one part. Other sessions settle the rest.`
-      : `all ${count} subject names the recorded facts use.`
+      ? `part ${part.index} of ${part.parts}: ${count} of the ${part.total} subject names the extracted claims use, grouped so names that share words sit in one part. Other sessions settle the rest.`
+      : `all ${count} subject names the extracted claims use.`
   return [
     ...instructionsBriefingBlock(instructions),
     `SUBJECT NAMES, ${scope}`,
-    'Each line: id · name · how many facts and documents use it · one statement as a sample.',
+    'Each line: id · name · how many claims and documents use it · one statement as a sample.',
     '',
     ...part.names.map(
       (name, i) =>
-        `${nameId(i)} · ${name.name} · ${name.claims} fact${name.claims === 1 ? '' : 's'} in ${name.docs} doc${name.docs === 1 ? '' : 's'} · "${clip(name.sample, SAMPLE_CHARS)}"`,
+        `${nameId(i)} · ${name.name} · ${name.claims} claim${name.claims === 1 ? '' : 's'} in ${name.docs} doc${name.docs === 1 ? '' : 's'} · "${clip(name.sample, SAMPLE_CHARS)}"`,
     ),
     '',
     `Place every id from S1 to S${count} once: in a "same" entry with the other names of the same product thing, or in "distinct". Check the draft with \`check_subjects\`, then give it as the outcome.`,
   ].join('\n')
 }
 
-export const SETTLE_SUBJECTS_SYSTEM_PROMPT = `You settle the SUBJECT NAMES of a documentation corpus's recorded facts. Each fact was recorded from one document by a session that named its subject on its own: the product thing the fact is about, such as a control, a setting, an endpoint, an environment variable or a feature. So one thing goes by several names: "ATS checker", "resume checker", "ATS check". Your outcome says which names mean the same thing, so the facts about one thing are compared side by side.
+export const SETTLE_SUBJECTS_SYSTEM_PROMPT = `You settle the SUBJECT NAMES of a documentation corpus's extracted claims. Each claim was extracted from one document by a session that named its subject on its own: the product thing the claim is about, such as a control, a setting, an endpoint, an environment variable or a feature. So one thing goes by several names: "ATS checker", "resume checker", "ATS check". Your outcome says which names mean the same thing, so the claims about one thing are compared side by side.
 
 # Same or distinct
 
@@ -375,7 +374,7 @@ Names are the SAME when they name one product thing: the same control, setting, 
 
 They are DISTINCT when they name different things, however closely related: a feature and one of its own settings ("ATS checker" and "ATS checker threshold"), two endpoints of one resource ("GET /api/resume" and "DELETE /api/resume"), two variables, a whole and one of its parts, a general thing and a specific one ("Exports" and "PDF export").
 
-A wrong merge puts facts about two things side by side; a missed merge keeps facts about one thing apart, where a contradiction between them goes unseen. Both cost. When the names alone do not settle it, the sample statements usually do.
+A wrong merge puts claims about two things side by side; a missed merge keeps claims about one thing apart, where a contradiction between them goes unseen. Both cost. When the names alone do not settle it, the sample statements usually do.
 
 # The outcome
 

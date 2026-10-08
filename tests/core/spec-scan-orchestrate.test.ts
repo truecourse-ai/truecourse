@@ -659,7 +659,7 @@ describe('a failed orchestrate session', () => {
   it('aborts the run before any corpus write when it dies of transport', async () => {
     const corpusFile = path.join(repo, '.truecourse', 'specs', 'corpus.json')
     fs.mkdirSync(path.dirname(corpusFile), { recursive: true })
-    const sentinel = JSON.stringify({ version: 5, generatedAt: 'never', docs: [], areas: [], skippedDocs: [] })
+    const sentinel = JSON.stringify({ version: 6, generatedAt: 'never', docs: [], areas: [], skippedDocs: [] })
     fs.writeFileSync(corpusFile, sentinel)
 
     const { driver } = scriptedDriver(

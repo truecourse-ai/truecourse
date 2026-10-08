@@ -97,7 +97,7 @@ function corpus(opts: { extra?: string; conflict?: boolean } = {}): CuratedCorpu
       : []),
   ];
   return {
-    version: 5,
+    version: 6,
     generatedAt: '2026-01-01T00:00:00Z',
     docs,
     areas: [

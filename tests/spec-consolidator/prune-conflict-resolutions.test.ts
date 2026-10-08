@@ -28,7 +28,7 @@ const doc = (ref: string) => ({ ref, kind: 'unknown' as const, lastTouched: '202
 /** Corpus holding docs A+B with ONE flagged conflict between them (quoted). */
 function corpusWith(conflictQuoteA: string): CuratedCorpus {
   return {
-    version: 5,
+    version: 6,
     generatedAt: '2026-08-20T00:00:00Z',
     docs: [doc('docs/a.md'), doc('docs/b.md')],
     areas: [

@@ -367,9 +367,9 @@ describe('spec scan run record — the checklist block', () => {
     expect(block.items.map((item) => [item.key, item.sessionKinds])).toEqual([
       ['discover', ['spec-scan.orchestrate']],
       ['tag', ['spec-scan.curate-doc', 'spec-scan.settle-areas']],
-      ['record', ['spec-scan.record-facts']],
+      ['record', ['spec-scan.extract-claims']],
       ['subjects', ['spec-scan.settle-subjects']],
-      ['compare', ['spec-scan.compare-facts']],
+      ['compare', ['spec-scan.compare-claims']],
       ['conflicts', []],
       ['verify', []],
     ])

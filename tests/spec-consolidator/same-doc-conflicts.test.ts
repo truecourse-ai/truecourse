@@ -43,7 +43,7 @@ afterEach(() => {
 
 function corpusWith(conflict: Conflict): CuratedCorpus {
   return {
-    version: 5,
+    version: 6,
     generatedAt: '2026-10-01T00:00:00Z',
     docs: [{ ref: DOC, kind: 'unknown', lastTouched: '2026-10-01T00:00:00Z', areaTags: ['core/design'] }],
     areas: [{ id: 'core/design', product: 'core', concern: 'design', docRefs: [DOC], conflicts: [conflict] }],

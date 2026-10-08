@@ -60,7 +60,7 @@ export function writeCorpus(
   const file = corpusFilePath(repoRoot);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const payload: CuratedCorpus = {
-    version: 5,
+    version: 6,
     // Caller may pass the timestamp it stamped on the in-memory corpus so the
     // returned object and the persisted file agree; else stamp now.
     generatedAt: input.generatedAt ?? new Date().toISOString(),

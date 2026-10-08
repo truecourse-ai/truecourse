@@ -154,8 +154,8 @@ function curateStepSessionKinds(computer: boolean): Record<string, readonly stri
 // session per doc (and, when the driver can hand a session a computer, a
 // `spec-scan.corpus-review` after curation), at most one
 // `spec-scan.settle-areas` session, then the conflict steps: one
-// `spec-scan.record-facts` (claim extraction) per doc window, the
-// `spec-scan.settle-subjects` sessions and one `spec-scan.compare-facts` per
+// `spec-scan.extract-claims` (claim extraction) per doc window, the
+// `spec-scan.settle-subjects` sessions and one `spec-scan.compare-claims` per
 // batch of claims, under the
 // CURATE_STEPS the progress UI renders.
 // ---------------------------------------------------------------------------
@@ -552,7 +552,7 @@ export async function curateInProcess(
         );
         tracker?.detail(
           'compare',
-          `${compareBatches} batch${compareBatches === 1 ? '' : 'es'} compared${comparison.unplacedFacts > 0 ? ` · ${comparison.unplacedFacts} claims unplaced` : ''}`,
+          `${compareBatches} batch${compareBatches === 1 ? '' : 'es'} compared${comparison.unplacedClaims > 0 ? ` · ${comparison.unplacedClaims} claims unplaced` : ''}`,
         );
       }
       tracker?.done('conflicts', `${result.stats.areaCount} areas · ${result.stats.conflictCount} conflicts`);

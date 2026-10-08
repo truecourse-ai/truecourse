@@ -47,7 +47,7 @@ interface StatedClaim {
   subject: string
   statement: string
   testable?: boolean
-  reason?: ClaimLedgerWire['facts'][number]['reason']
+  reason?: ClaimLedgerWire['claims'][number]['reason']
 }
 
 /** What a sentence states (one claim, or several), or `null` to skip it. */
@@ -56,11 +56,11 @@ export type SentenceClaim = (sentence: BriefedSentence, doc: string) => StatedCl
 /** An extractor that writes the claims `claimOf` says each sentence states, under every area of the doc, and skips the rest. */
 export async function record(call: StubCall, claimOf: SentenceClaim): Promise<DriverResult> {
   const { doc, areas, sentences } = recordBriefing(call.briefing)
-  const ledger: ClaimLedgerWire = { facts: [], skips: [] }
+  const ledger: ClaimLedgerWire = { claims: [], skips: [] }
   for (const sentence of sentences) {
     const stated = claimOf(sentence, doc)
     if (stated === null) ledger.skips.push({ from: sentence.n, to: sentence.n, why: 'other', note: 'nothing to record' })
-    else for (const claim of [stated].flat()) ledger.facts.push({ sentences: [sentence.n], areas, testable: true, reason: null, ...claim })
+    else for (const claim of [stated].flat()) ledger.claims.push({ sentences: [sentence.n], areas, testable: true, reason: null, ...claim })
   }
   await useTool(call, 'check_ledger', ledger)
   return outcome(ledger)
@@ -71,7 +71,7 @@ export async function record(call: StubCall, claimOf: SentenceClaim): Promise<Dr
 // ---------------------------------------------------------------------------
 
 export function subjectNames(briefing: string): Array<{ id: string; name: string; claims: number }> {
-  return [...briefing.matchAll(/^(S\d+) · (.*?) · (\d+) facts? in/gm)].map((m) => ({ id: m[1]!, name: m[2]!, claims: Number(m[3]) }))
+  return [...briefing.matchAll(/^(S\d+) · (.*?) · (\d+) claims? in/gm)].map((m) => ({ id: m[1]!, name: m[2]!, claims: Number(m[3]) }))
 }
 
 /** A settler that merges the names `sameAs` maps to one subject, and keeps every other name distinct. */
@@ -155,7 +155,7 @@ export async function compare(
     const paired = new Set(conflicts.flatMap((c) => [c.a, c.b]))
     comparison.groups.push({
       subject,
-      facts: group.map((f) => f.id),
+      claims: group.map((f) => f.id),
       verdict: conflicts.length > 0 ? 'conflict' : 'agree',
       conflicts,
       ...(conflicts.length > 0 ? { consistent: group.map((f) => f.id).filter((id) => !paired.has(id)) } : {}),
