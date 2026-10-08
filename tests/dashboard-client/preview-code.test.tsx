@@ -32,17 +32,13 @@ vi.mock('@/lib/socket', () => ({
 
 const repo = toDashboardRepo({ id: 'expense-tracker', name: 'expenses', path: '/expenses', provider: 'github', defaultBranch: 'main' });
 const corpus = { corpus: { version: 3, generatedAt: new Date().toISOString(), docs: [], areas: [] } };
-const empty: GuardStatusSummary = { claims: null, coverage: null, lastRun: null, lastGenerate: null };
+const empty: GuardStatusSummary = { claims: null, flows: null, lastRun: null, lastGenerate: null };
 const counts = { failed: 1, blocked: 1, 'never-run': 1, 'partially-succeeded': 0, succeeded: 3, 'not-testable': 0 };
 function summary(): GuardStatusSummary {
   return {
     ...empty,
     claims: { total: 6, byStatus: counts },
-    coverage: {
-      totalSections: 4, withScenarios: 4, byStatus: { ...counts, succeeded: 2, 'never-run': 0 },
-      classification: { api: 2, web: 2, cli: 0, unclassified: 0, untestable: 0 },
-      flows: { total: 2, guarded: 1, partial: 1, blocked: 0, gapLabels: [], byStatus: { ...counts, succeeded: 1, blocked: 0, 'never-run': 0 } },
-    },
+    flows: { total: 2, guarded: 1, partial: 1, blocked: 0, gapLabels: [], byStatus: { ...counts, succeeded: 1, blocked: 0, 'never-run': 0 } },
     lastRun: { ranAt: new Date().toISOString(), commit: '58899f7', branch: 'main', summary: { total: 2, pass: 1, fail: 1, error: 0, blocked: 0, stale: 0, orphaned: 0 } },
   };
 }
@@ -147,8 +143,8 @@ describe('Code, the repositories and their stored summaries', () => {
     expect(screen.getByRole('button', { name: 'Connect repository' })).toBeInTheDocument();
   });
 
-  it('retains coverage when the baseline read fails and uses manifest totals before whole-corpus totals exist', async () => {
-    const server = serve({ ...summary(), claims: null });
+  it('retains coverage when the baseline read fails', async () => {
+    const server = serve();
     server.corpusCode = 500;
     renderCode();
     expect(await row().findByText('50%')).toBeInTheDocument();

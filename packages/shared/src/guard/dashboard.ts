@@ -7,7 +7,7 @@ import {
 } from './flow-tests.js'
 import { GuardBlockerSchema, GuardObligationRefSchema } from './verification.js'
 /**
- * Derived guard read-surface DTOs the dashboard renders — the per-section
+ * Derived guard read-surface DTOs the dashboard renders — the per-claim
  * coverage join, the flow inventory and its detail, the interface catalog, the
  * staleness probe, and a scenario's YAML source. These are *computed* on read
  * (never persisted, never validated back); the persisted, validated stores are
@@ -460,7 +460,7 @@ export const GuardRunFlowSchema = z
           .object({
             order: z.number().int().positive(),
             doc: z.string(),
-            anchor: z.string(),
+            claimId: z.string(),
             claimTitle: z.string(),
           })
           .strict(),
@@ -534,8 +534,6 @@ export interface GuardScenarioListItem {
   title: string
   /** Repo-relative spec doc the scenario binds to. */
   doc: string
-  /** Slugified heading path the scenario binds to (`binds.section`). */
-  anchor: string
   /** Repo-relative path of the YAML file. */
   file: string
   /** True when no manifest flow lists this id (authored by hand, not generated). */
@@ -739,8 +737,6 @@ export const GuardFlowListItemSchema = z
     /** True for the Manual pseudo-flow of a hand-written scenario. */
     manual: z.boolean(),
     milestoneCount: z.number().int().nonnegative(),
-    /** Sections the flow binds. */
-    sectionCount: z.number().int().nonnegative(),
     /** Repo-relative docs the flow binds — the area/doc filter key. */
     docs: z.array(z.string()),
     surfaces: z.array(GuardFlowSurfaceSchema),
@@ -770,7 +766,7 @@ export const GuardFlowListItemSchema = z
      * Optional/defaulted so a payload written before the split still parses.
      */
     toolDefects: z.number().int().nonnegative().default(0),
-    /** Generate errors on the flow's bound sections (best-effort attribution). */
+    /** Generate errors attributed to the flow. */
     errors: z.number().int().nonnegative(),
     /** True when the last run flagged interface drift on any of the flow's scenarios. */
     interfaceDrifted: z.boolean(),
@@ -871,15 +867,14 @@ export interface GuardFlowsView extends z.infer<typeof GuardFlowsViewCoreSchema>
   recipe: GuardRecipeCard | null
 }
 
-/** One milestone of a flow: the claim it proves and where the claim is stated. */
+/** One milestone of a flow: the claim it proves and the document it is read from. */
 export const GuardFlowMilestoneViewSchema = z
   .object({
     order: z.number().int().positive(),
     doc: z.string(),
-    anchor: z.string(),
+    /** The id of the claim this milestone proves. */
+    claimId: z.string(),
     claimTitle: z.string(),
-    /** The id of the claim this milestone proves, when the corpus holds it. */
-    claimId: z.string().optional(),
     /** Synthesis' note on why this step sits here. */
     note: z.string().optional(),
     /**
@@ -1009,7 +1004,7 @@ export const GuardFlowDetailSchema = z
      * committed failing test is already a `surfaces` row carrying its failure.
      */
     findings: z.array(GuardBirthFindingSchema),
-    /** Generate errors on the flow's bound sections (best-effort attribution). */
+    /** Generate errors attributed to the flow. */
     errors: z.array(GuardGenerateErrorSchema),
     /**
      * True when no synthesized flow claims this one any more — it survives only
@@ -1279,10 +1274,10 @@ export const GuardClaimRowSchema = z
   .object({
     id: z.string(),
     doc: z.string(),
-    title: z.string(),
-    claim: z.string(),
-    contentHash: z.string(),
-    verifyVia: z.string().optional(),
+    /** What the claim states, as the scan read it. */
+    statement: z.string(),
+    /** The keys of the sentences the claim is read from. */
+    sentences: z.array(z.string()),
     status: GuardCoverageStatusSchema,
     /** The gap text or dismissal note behind `status`, when one decided it. */
     reason: z.string().optional(),
@@ -1296,11 +1291,12 @@ export const GuardClaimRowSchema = z
   .strict()
 export type GuardClaimRow = z.infer<typeof GuardClaimRowSchema>
 
-/** One statement the scan read and judged untestable, with its reason. */
+/** One claim the scan read and judged untestable, with its reason. */
 export const GuardUntestableRowSchema = z
   .object({
+    id: z.string(),
     doc: z.string(),
-    text: z.string(),
+    statement: z.string(),
     reason: z.string(),
   })
   .strict()

@@ -17,7 +17,7 @@ import {
 const RECIPE: Recipe = { build: 'true', entry: ['node', 'bin.mjs'] }
 
 function candidate(id: string): BirthCandidate {
-  const binds = { doc: 'docs/cli.md', section: 'version', fingerprint: 'sha256:abc', sentences: ['version'] }
+  const binds = [{ doc: 'docs/cli.md', sentences: ['version'] }]
   const scenario: GuardScenario = {
     id,
     title: id,
@@ -27,16 +27,7 @@ function candidate(id: string): BirthCandidate {
     normalize: [],
   }
   return {
-    section: {
-      doc: 'docs/cli.md',
-      anchor: 'version',
-      fingerprint: 'sha256:abc',
-      headingText: 'version',
-      level: 2,
-      ownText: '',
-      fullText: '',
-      areaTags: [],
-    },
+    primary: { doc: 'docs/cli.md' },
     scenario,
     ref: id,
     claim: { claim: 'c', driver: 'cli', sectionAnchor: 'version', reason: 'exit' },
@@ -75,7 +66,6 @@ function passingExecutor(sink: { input?: GuardExecInput }) {
       },
       summary: { total: scenarios.length, pass: scenarios.length, fail: 0, stale: 0, orphaned: 0, error: 0 },
       scenarios,
-      sections: [],
     }
     return { status: 'ok', latest, latestPath: '', loadErrors: [], manifest: null }
   }

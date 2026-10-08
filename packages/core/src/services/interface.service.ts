@@ -47,11 +47,11 @@ import {
   guardAuthoredInterfacesPath,
   guardInterfacesPath,
   loadRecipe,
-  nodeRefContext,
   recipeControlledEnvVars,
   recipePath,
   resolveEntry,
 } from '@truecourse/guard-runner';
+import { nodeRefContext } from '@truecourse/shared/openapi-node';
 import {
   collectApiRequestContracts,
   createSandboxProbeExec,

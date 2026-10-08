@@ -12,7 +12,7 @@ import {
 // step's `failedMilestone`, and the `interfaceDrifted` dot. All optional, so runs
 // stored before flows existed keep parsing.
 
-const binds = { doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x', sentences: ['a/b'] }
+const binds = { doc: 'docs/spec.md', sentences: ['a/b'] }
 
 describe('GuardScenarioResultSchema — flow annotations', () => {
   it('parses a result carrying flowId, failedMilestone and the drift dot', () => {
@@ -70,7 +70,6 @@ describe('GuardScenarioResultSchema — flow annotations', () => {
           interfaceDrifted: true,
         },
       ],
-      sections: [{ doc: 'docs/spec.md', section: 'a/b', status: 'fail', scenarioIds: ['publish.cli.1'] }],
     })
     expect(latest.scenarios[0]).toMatchObject({ flowId: 'publish', failedMilestone: 3, interfaceDrifted: true })
   })
@@ -119,7 +118,7 @@ describe('run provenance — pullRequest and origin', () => {
 
   it('guardHistoryEntryOf carries the provenance and only the provenance that is set', () => {
     const latest = (run: Record<string, unknown>) =>
-      GuardLatestSchema.parse({ run, summary, scenarios: [], sections: [] })
+      GuardLatestSchema.parse({ run, summary, scenarios: [] })
     const stamped = latest({ ...envelope, pullRequest: 7, origin: 'hosted' })
     expect(guardHistoryEntryOf(stamped)).toEqual({
       runId: envelope.runId,

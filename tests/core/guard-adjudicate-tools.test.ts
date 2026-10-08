@@ -96,7 +96,7 @@ function okReport(id: string, result?: Partial<GuardScenarioResult>): GuardExecR
   const row: GuardScenarioResult = {
     id,
     title: `${id} title`,
-    binds: { doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x', sentences: ['a/b'] },
+    binds: { doc: 'docs/spec.md', sentences: ['a/b'] },
     outcome: 'pass',
     durationMs: 3,
     ...result,

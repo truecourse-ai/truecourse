@@ -19,7 +19,7 @@ afterEach(() => { resetKvCacheStore(); while (repos.length) fs.rmSync(repos.pop(
 const universe = buildGuardDocUniverse([])
 const faithful = (evidence = correctedEmptyLedgerEvidence) => ({ verdict: 'faithful' as const, evidence })
 function input(proofContext = emptyLedgerEvidenceContext): WorkerFidelityInput {
-  return { flowFingerprint: 'empty-ledger-flow', sectionKeys: ['empty-ledger-section'], scenarioBehavior: JSON.stringify(proofContext.steps),
+  return { flowFingerprint: 'empty-ledger-flow', scenarioBehavior: JSON.stringify(proofContext.steps),
     briefing: 'The pristine ledger shows its empty heading and add-expense guidance. Other filtering cases are unselected.', proofContext }
 }
 function harness(script: (call: StubCall) => ReturnType<typeof outcome> | Promise<ReturnType<typeof outcome>>) {

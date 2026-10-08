@@ -207,7 +207,7 @@ function resolveStepSchema(
   if (!responseSchemas) {
     return {
       error:
-        'response-schema conformance (`schema: true`) requires the scenario to bind to an OpenAPI operation, but its bound section is not one',
+        'response-schema conformance (`schema: true`) requires a bound OpenAPI operation, and a scenario binds document sentences, not operations',
     }
   }
   const status = step.expect.status

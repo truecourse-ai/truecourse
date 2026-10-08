@@ -16,7 +16,7 @@ import { eq } from 'drizzle-orm';
 import { schema, MIGRATIONS_DIR, content, type Db } from '@truecourse/db';
 import { PgGuardStore, contentScope } from '../../packages/data-store/src/index';
 import type { RepoRef } from '@truecourse/core/lib/guard-store';
-import { EMPTY_GUARD_DECISIONS, type GuardGenerateReport, type GuardLatest } from '@truecourse/shared';
+import { EMPTY_GUARD_DECISIONS, claimId, type GuardGenerateReport, type GuardLatest } from '@truecourse/shared';
 
 const REPO = 'acme/api';
 const refAt = (sha: string): RepoRef => ({ repoKey: REPO, commitSha: sha });
@@ -33,7 +33,7 @@ function writeFile(root: string, rel: string, body: string): void {
   fs.writeFileSync(f, body);
 }
 
-/** A minimal valid GuardLatest — one passing scenario over one section. */
+/** A minimal valid GuardLatest — one passing scenario bound to one sentence. */
 function makeLatest(over: {
   runId: string;
   ranAt: string;
@@ -41,7 +41,7 @@ function makeLatest(over: {
   commit?: string | null;
   summary?: GuardLatest['summary'];
 }): GuardLatest {
-  const binds = { doc: 'README.md', section: 'intro', fingerprint: 'sha256:abc', sentences: ['intro'] };
+  const binds = { doc: 'README.md', sentences: ['intro'] };
   return {
     run: {
       runId: over.runId,
@@ -62,7 +62,6 @@ function makeLatest(over: {
         evidencePath: `.truecourse/guard/evidence/${over.runId}/s1`,
       },
     ],
-    sections: [{ doc: 'README.md', section: 'intro', status: 'pass', scenarioIds: ['s1'] }],
   };
 }
 
@@ -70,16 +69,12 @@ function makeReport(over: Partial<GuardGenerateReport> = {}): GuardGenerateRepor
   return {
     generatedAt: '2026-07-09T00:00:00.000Z',
     status: 'ok',
-    sectionsTotal: 3,
-    sectionsChanged: 1,
-    skippedUnchanged: 2,
     noChanges: false,
     written: [],
     coverageGaps: [],
     birthFindings: [],
     errors: [],
     extractionFailures: [],
-    orphaned: [],
     ...over,
   };
 }
@@ -95,8 +90,6 @@ id: s1
 title: shows help
 binds:
   - doc: README.md
-    section: intro
-    fingerprint: sha256:abc
     sentences: [intro]
 driver: cli
 steps:
@@ -110,9 +103,9 @@ const MANIFEST_JSON = JSON.stringify({
   version: 2,
   flows: [
     {
-      flowId: 'README.md#intro',
+      flowId: 'intro',
       flowFingerprint: 'sha256:abc',
-      bindings: [{ doc: 'README.md', anchor: 'intro', fingerprint: 'sha256:abc', sentences: ['intro'] }],
+      bindings: [{ doc: 'README.md', sentences: ['intro'] }],
       scenarios: [{ id: 's1', surface: 'cli' }],
       generationInputsHash: null,
       gaps: [],
@@ -249,27 +242,27 @@ describe('PgGuardStore — run state (pglite)', () => {
 
   it('keys generate results per commit; commit-less read falls back to the newest', async () => {
     expect(await store.readGuardResult(REPO)).toBeNull();
-    await store.writeGuardResult(refAt('c1'), makeReport({ sectionsChanged: 1 }));
+    await store.writeGuardResult(refAt('c1'), makeReport({ generatedAt: '2026-07-09T00:00:00.000Z' }));
     // "newest" orders by created_at (ms precision) — separate the two writes.
     await new Promise((r) => setTimeout(r, 5));
-    await store.writeGuardResult(refAt('c2'), makeReport({ sectionsChanged: 4, generatedAt: '2026-07-10T00:00:00.000Z' }));
+    await store.writeGuardResult(refAt('c2'), makeReport({ generatedAt: '2026-07-10T00:00:00.000Z' }));
     // both commits' reports coexist and read back by commit
-    expect((await store.readGuardResult(REPO, { commitSha: 'c1' }))!.sectionsChanged).toBe(1);
-    expect((await store.readGuardResult(REPO, { commitSha: 'c2' }))!.sectionsChanged).toBe(4);
+    expect((await store.readGuardResult(REPO, { commitSha: 'c1' }))!.generatedAt).toBe('2026-07-09T00:00:00.000Z');
+    expect((await store.readGuardResult(REPO, { commitSha: 'c2' }))!.generatedAt).toBe('2026-07-10T00:00:00.000Z');
     expect(await store.readGuardResult(REPO, { commitSha: 'nope' })).toBeNull();
     // no commit → the newest stored row
-    expect((await store.readGuardResult(REPO))!.sectionsChanged).toBe(4);
+    expect((await store.readGuardResult(REPO))!.generatedAt).toBe('2026-07-10T00:00:00.000Z');
     expect(await store.readGuardResult('other/repo')).toBeNull();
   });
 
   it('a second report at a commit is a new version; the commit reads its newest and the old one stays', async () => {
-    await store.writeGuardResult(refAt('c1'), makeReport({ sectionsChanged: 1 }));
+    await store.writeGuardResult(refAt('c1'), makeReport({ generatedAt: '2026-07-09T00:00:00.000Z' }));
     await new Promise((r) => setTimeout(r, 5));
-    await store.writeGuardResult(refAt('c1'), makeReport({ sectionsChanged: 2 }));
-    expect((await store.readGuardResult(REPO, { commitSha: 'c1' }))!.sectionsChanged).toBe(2);
+    await store.writeGuardResult(refAt('c1'), makeReport({ generatedAt: '2026-07-10T00:00:00.000Z' }));
+    expect((await store.readGuardResult(REPO, { commitSha: 'c1' }))!.generatedAt).toBe('2026-07-10T00:00:00.000Z');
     const versions = await store.listGuardVersions(REPO, 'report');
     expect(versions).toHaveLength(2);
-    expect((await store.readGuardResult(REPO, { id: versions[1]!.id }))!.sectionsChanged).toBe(1);
+    expect((await store.readGuardResult(REPO, { id: versions[1]!.id }))!.generatedAt).toBe('2026-07-09T00:00:00.000Z');
   });
 
   it('rejects an empty commit SHA on writeGuardResult', async () => {
@@ -492,7 +485,7 @@ describe('PgGuardStore — scenario corpus (pglite + Postgres content)', () => {
     expect(await store.readScenarioFile(REPO, 'somewhere/else.yaml')).toBeNull();
     expect(await store.readScenarioFile(REPO, '.truecourse/scenarios/nope.yaml')).toBeNull();
     // manifest + recipe read through the set
-    expect((await store.readManifest(REPO))!.flows[0]!.bindings[0]!.anchor).toBe('intro');
+    expect((await store.readManifest(REPO))!.flows[0]!.bindings[0]!.sentences).toEqual(['intro']);
     expect(await store.readRecipeRaw(REPO)).toBe(RECIPE_JSON);
     // three unique bodies stored content-addressed under the guard scope
     expect(await scopeCount(db, contentScope.guard(REPO))).toBe(3);
@@ -576,11 +569,12 @@ describe('PgGuardStore — decisions (pglite)', () => {
     await client.close();
   });
 
-  const claim = (title: string) => ({
+  const claim = (note: string) => ({
     version: 1 as const,
     dismissedClaims: [
-      { doc: 'README.md', anchor: 'intro', title, dismissedAt: '2026-07-09T00:00:00.000Z' },
+      { claimId: claimId('README.md', ['intro']), note, dismissedAt: '2026-07-09T00:00:00.000Z' },
     ],
+    dismissedFlows: [],
   });
 
   it('absent decisions read as EMPTY_GUARD_DECISIONS, never null', async () => {
@@ -589,11 +583,11 @@ describe('PgGuardStore — decisions (pglite)', () => {
 
   it('a write upserts the repository row, and another repo keeps its own', async () => {
     await store.writeGuardDecisions(REPO, claim('repo-claim'));
-    expect((await store.readGuardDecisions(REPO)).dismissedClaims[0]!.title).toBe('repo-claim');
+    expect((await store.readGuardDecisions(REPO)).dismissedClaims[0]!.note).toBe('repo-claim');
     await store.writeGuardDecisions(REPO, claim('re-ruled'));
     expect((await store.readGuardDecisions(REPO)).dismissedClaims).toHaveLength(1);
-    expect((await store.readGuardDecisions(REPO)).dismissedClaims[0]!.title).toBe('re-ruled');
+    expect((await store.readGuardDecisions(REPO)).dismissedClaims[0]!.note).toBe('re-ruled');
     await store.writeGuardDecisions('acme/other', claim('other-claim'));
-    expect((await store.readGuardDecisions(REPO)).dismissedClaims[0]!.title).toBe('re-ruled');
+    expect((await store.readGuardDecisions(REPO)).dismissedClaims[0]!.note).toBe('re-ruled');
   });
 });

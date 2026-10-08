@@ -18,7 +18,7 @@ import { LEGACY_ADJUDICATE_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerpri
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { defineSessionKind, type SessionBudget, type SessionDef } from '@truecourse/agent-loop';
-import { extractSectionTexts, nodeRefContext } from '@truecourse/guard-runner';
+import { parseDocTree, sectionOfSentences, sectionText } from '@truecourse/shared';
 import { GuardAdjudicationSchema, type GuardAdjudication, type GuardScenario } from '@truecourse/shared';
 import { promptFingerprint } from '../agent/session-cache.js';
 import { buildAdjudicationTools, RERUN_MAX, type AdjudicationSessionState } from './tools.js';
@@ -158,37 +158,36 @@ const BRIEFING_MAX_SECTIONS = 5;
 const BRIEFING_YAML_CHARS = 8000;
 
 /**
- * The spec text behind the failure: each bound section's full text (capped),
- * read off the working tree. A section whose current text no longer carries
- * the bound fingerprint is still quoted — with the drift said out loud, since
- * an adjudicator reading silently drifted text would blame the wrong side.
+ * The spec text behind the failure: for each bound document, the full text
+ * (capped) of the section its bound sentences sit in, read off the working
+ * tree. A document whose bound sentences are all gone is still named — with the
+ * loss said out loud, since an adjudicator reading silently drifted text would
+ * blame the wrong side.
  */
 export function sectionTextsForItem(repoRoot: string, item: AdjudicationItem): string {
   const binds = item.scenario?.binds ?? (item.row.binds ? [item.row.binds] : []);
   const blocks: string[] = [];
   const seen = new Set<string>();
   for (const bind of binds.slice(0, BRIEFING_MAX_SECTIONS)) {
-    const key = `${bind.doc}\0${bind.section}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (seen.has(bind.doc)) continue;
+    seen.add(bind.doc);
     const abs = path.resolve(repoRoot, bind.doc);
     let content: string;
     try {
       content = fs.readFileSync(abs, 'utf-8');
     } catch {
-      blocks.push(`### ${bind.doc} #${bind.section}\n(the document is not on disk)`);
+      blocks.push(`### ${bind.doc}\n(the document is not on disk)`);
       continue;
     }
-    // `extractSectionTexts` returns the sections keyed by anchor.
-    const section = extractSectionTexts(bind.doc, content, nodeRefContext(repoRoot, abs)).get(bind.section);
+    const tree = parseDocTree(bind.doc, content);
+    const section = sectionOfSentences(tree, bind.sentences);
     if (!section) {
-      blocks.push(`### ${bind.doc} #${bind.section}\n(the section no longer exists in the document)`);
+      blocks.push(`### ${bind.doc}\n(none of the bound sentences is in the document any more)`);
       continue;
     }
-    const text = section.fullText.length > BRIEFING_SECTION_CHARS
-      ? `${section.fullText.slice(0, BRIEFING_SECTION_CHARS)}… (truncated)`
-      : section.fullText;
-    blocks.push(`### ${bind.doc} #${bind.section} — ${section.headingText}\n${text}`);
+    const full = sectionText(tree, section);
+    const text = full.length > BRIEFING_SECTION_CHARS ? `${full.slice(0, BRIEFING_SECTION_CHARS)}… (truncated)` : full;
+    blocks.push(`### ${bind.doc} — ${section.headingText}\n${text}`);
   }
   return blocks.join('\n\n');
 }
@@ -197,7 +196,7 @@ export interface AdjudicationBriefingInput {
   item: AdjudicationItem;
   /** The evidence digest (evidence.ts) — already rendered. */
   evidenceDigest: string;
-  /** The bound sections' texts — already rendered ({@link sectionTextsForItem}). */
+  /** The text around the bound sentences, per document — already rendered ({@link sectionTextsForItem}). */
   sectionTexts: string;
 }
 
@@ -256,7 +255,7 @@ export function adjudicationBriefing(input: AdjudicationBriefingInput): string {
   if (item.flow) {
     lines.push('', `## The flow — ${item.flow.title}`, `goal: ${item.flow.goal}`);
     for (const m of [...item.flow.milestones].sort((a, b) => a.order - b.order)) {
-      lines.push(`  ${m.order}. ${m.claimTitle}  (${m.doc} #${m.anchor})`);
+      lines.push(`  ${m.order}. ${m.claimTitle}  (${m.doc})`);
     }
   }
 

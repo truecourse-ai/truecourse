@@ -573,9 +573,7 @@ function tallyBlockedFlows(
   const seen = new Map<string, Set<string>>();
   for (const gap of report?.coverageGaps ?? []) {
     if (gap.kind !== 'blocked-on') continue;
-    // A claim-level gap carries no flowId — key on the section it pivots on so
-    // each distinct blocked unit still counts exactly once.
-    const unit = gap.flowId ?? `${gap.doc}\0${gap.anchor}`;
+    const unit = gap.flowId;
     for (const capability of gap.blocker?.dependencies ?? parseBlockedOnCapabilities(gap.reason)) {
       let flows = seen.get(capability);
       if (!flows) seen.set(capability, (flows = new Set()));

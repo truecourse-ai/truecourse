@@ -112,27 +112,6 @@ describe('runGuard — end to end', () => {
     expect(fs.readFileSync(path.join(evDir, 'pass1', 'diff.txt'), 'utf-8')).toContain('met their expectations')
   })
 
-  it('rolls up a section to the worst outcome across its scenarios', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeScenario(
-      r,
-      'a.yaml',
-      scenario({ id: 'a', binds: bindsFor('same/section'), steps: [{ run: ['--version'], expect: { exit: 0 } }] }),
-    )
-    writeScenario(
-      r,
-      'b.yaml',
-      scenario({ id: 'b', binds: bindsFor('same/section'), steps: [{ run: ['boom'], expect: { exit: 0 } }] }),
-    )
-
-    const res = await runGuard({ repoRoot: r, skipBuild: true })
-    if (res.status !== 'ok') throw new Error('expected ok')
-    expect(res.latest.sections).toHaveLength(1)
-    expect(res.latest.sections[0]).toMatchObject({ section: 'same/section', status: 'fail' })
-    expect(res.latest.sections[0].scenarioIds.sort()).toEqual(['a', 'b'])
-  })
-
   it('honors --scenario selection', async () => {
     const r = repo()
     writeRecipe(r)
@@ -535,7 +514,7 @@ describe('runGuard — tests committed FAILING at birth', () => {
         {
           flowId: 'flow',
           flowFingerprint: 'sha256:f',
-          bindings: [{ doc: 'docs/spec.md', anchor: 'cli/version', fingerprint: 'sha256:cli/version', sentences: ['cli/version'] }],
+          bindings: [{ doc: 'docs/spec.md', sentences: specBinds('cli/version')[0].sentences }],
           scenarios: [
             { id: 'flow.cli.1', surface: 'cli', status: 'failing' },
             { id: 'flow.cli.2', surface: 'cli', status: 'failing' },

@@ -35,7 +35,7 @@ const report = (over: Partial<PullRequestCheckReport> = {}): PullRequestCheckRep
   base: { mergeBase: 'b'.repeat(40), commit: 'b'.repeat(40), nearestWithBase: null },
   fork: false,
   conflictsCreated: [],
-  sectionsMoved: [],
+  docsMoved: [],
   repositoriesAffected: [],
   run: {
     runId: 'run-1',
@@ -130,19 +130,19 @@ describe('renderCheckOutput', () => {
             blocksRepositories: ['acme/api'],
           },
         ],
-        sectionsMoved: [{ doc: 'context/src/docs/a.md', anchor: 'login', flows: [{ id: 'f1', title: 'Login flow' }] }],
+        docsMoved: [{ doc: 'context/src/docs/a.md', flows: [{ id: 'f1', title: 'Login flow' }] }],
         repositoriesAffected: [{ repoFullName: 'acme/web', slug: 'web' }],
       }),
       'https://app/agent/run-1',
     );
     expect(out.title).toBe('New failures');
     const summary = out.summary;
-    expect(summary.startsWith('**1 conflict created · 1 section moved · 1 other repository affected · 1 new failure · 2 pre-existing · 0 fixed**')).toBe(true);
-    const order = ['## Conflicts created', '## Sections moved', '## Repositories affected', '## The run', '[The full report]'].map((h) => summary.indexOf(h));
+    expect(summary.startsWith('**1 conflict created · 1 document moved · 1 other repository affected · 1 new failure · 2 pre-existing · 0 fixed**')).toBe(true);
+    const order = ['## Conflicts created', '## Documents moved', '## Repositories affected', '## The run', '[The full report]'].map((h) => summary.indexOf(h));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(summary).toContain('context/src/docs/a.md · Login vs context/src/docs/b.md · Sessions: one hour vs two');
-    expect(summary).toContain('context/src/docs/a.md · login (Login flow)');
+    expect(summary).toContain('- context/src/docs/a.md (Login flow)');
     expect(summary).toContain('- acme/web');
     expect(summary).toContain('### New failures\n\n- Checkout completes (bug)');
     expect(summary.endsWith('[The full report](https://app/agent/run-1)')).toBe(true);
@@ -168,7 +168,7 @@ describe('renderCheckOutput', () => {
       'https://app/agent/run-1',
     );
     expect(out.summary.length).toBeLessThan(60_000);
-    expect(out.summary).toBe('**0 conflicts created · 0 sections moved · 0 other repositories affected · 0 new failures · 3000 pre-existing · 0 fixed**\n\n[The full report](https://app/agent/run-1)');
+    expect(out.summary).toBe('**0 conflicts created · 0 documents moved · 0 other repositories affected · 0 new failures · 3000 pre-existing · 0 fixed**\n\n[The full report](https://app/agent/run-1)');
   });
 
   it('says what a settled check without a report means', () => {

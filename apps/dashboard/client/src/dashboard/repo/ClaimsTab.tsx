@@ -53,7 +53,7 @@ function wordOf(row: ClaimRowData): GuardCoveragePlainStatus {
 }
 
 function textOf(row: ClaimRowData): string {
-  return row.claim ? row.claim.claim : row.untestable.text;
+  return row.claim ? row.claim.statement : row.untestable.statement;
 }
 
 function docOf(row: ClaimRowData): string {
@@ -135,9 +135,9 @@ export function ClaimsTab({ repo }: { repo: Repo }) {
         wrap: true,
         cell: (row) =>
           row.claim ? (
-            <span className="block text-[12px] leading-snug text-foreground">{row.claim.claim}</span>
+            <span className="block text-[12px] leading-snug text-foreground">{row.claim.statement}</span>
           ) : (
-            <span className="block text-[12px] italic leading-snug text-muted-foreground">{row.untestable.text}</span>
+            <span className="block text-[12px] italic leading-snug text-muted-foreground">{row.untestable.statement}</span>
           ),
       },
       {

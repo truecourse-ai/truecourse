@@ -4,16 +4,13 @@ import { GuardCaseEvidenceSchema } from './proof.js'
  * `scenarios/manifest.json` — the binding record for the committed scenarios, the
  * guard analogue of `contracts/manifest.json`. It is keyed by FLOW (v2): each
  * entry names the flow, the milestone composition it was generated against, the
- * sections it binds, the scenarios that realize it (each with the drivers its steps
- * exercise), the generation-inputs hash that makes an unchanged flow a no-op, and
- * the per-surface gaps that explain a missing scenario.
- *
- * Per-SECTION coverage derives at read time from the flows' bindings — see
- * {@link guardManifestSections}.
+ * document sentences it binds, the scenarios that realize it (each with the
+ * drivers its steps exercise), the generation-inputs hash that makes an unchanged
+ * flow a no-op, and the per-surface gaps that explain a missing scenario.
  *
  * It is stored with the scenario set, like the scenarios themselves. At run
  * time it is informational — binding truth is the scenarios' own `binds` checked
- * against the live section index, not this file.
+ * against the live documents, not this file.
  */
 
 import { z } from 'zod'
@@ -170,7 +167,7 @@ export const GuardManifestFlowSchema = z
     flowFingerprint: z.string().min(1),
     /** Requirements retained when the separate flow corpus is unavailable. */
     milestones: z.array(GuardFlowMilestoneSchema).optional(),
-    /** The sections the flow binds (doc + anchor + section fingerprint). */
+    /** The documents the flow binds, with the sentences bound in each. */
     bindings: z.array(GuardFlowBindingSchema),
     /** The scenarios realizing the flow, one per surface it was authored for. */
     scenarios: z.array(GuardManifestScenarioSchema),
@@ -238,32 +235,9 @@ function dropLegacyVersion(value: unknown): unknown {
 }
 
 /**
- * One live section a completed generate SAW and deliberately left uncovered —
- * no flow bound it (untestable prose, a heading with no assertable claim, a
- * no-flow verdict). Persisted so the next generate's section-change gate can
- * tell "known, judged, unchanged" from "never seen": without this record every
- * uncovered section re-entered the work set on every run, forever, because the
- * verdicts lived only in the run report. Keyed by the same text
- * fingerprint the flow bindings use — an edit to the section re-admits it.
- */
-export const GuardManifestGapSectionSchema = z
-  .object({
-    /** Repo-relative path of the spec document. */
-    doc: z.string(),
-    /** Slugified heading path (the section anchor). */
-    anchor: z.string(),
-    /** `sha256:…` over the normalized section text at the judging generate. */
-    fingerprint: z.string(),
-  })
-  .strict()
-export type GuardManifestGapSection = z.infer<typeof GuardManifestGapSectionSchema>
-
-/**
- * One spec document as the last completed generate extracted it. `contentHash`
- * is the sha256 of the document's bytes — the same input the extraction
- * session's cache key folds — so the next generate can find the PRIOR
- * extraction outcome of an edited document and ask the claim-diff gate whether
- * the edit changed any obligation before paying to re-extract and re-author.
+ * One spec document as the last completed generate read it. `contentHash` is
+ * the sha256 of the document's bytes, so the next generate can tell which
+ * documents changed since.
  */
 export const GuardManifestDocSchema = z
   .object({
@@ -280,10 +254,7 @@ export const GuardManifestSchema = z.preprocess(
   z
     .object({
       flows: z.array(GuardManifestFlowSchema),
-      /** Absent on manifests written before the field existed — treated as empty. */
-      gapSections: z.array(GuardManifestGapSectionSchema).optional(),
-      /** Absent on manifests written before the claim-diff gate existed — the
-       *  gate then has no prior to compare against and every doc edit re-extracts. */
+      /** Absent on a manifest written before documents were recorded — every document then reads as changed. */
       docs: z.array(GuardManifestDocSchema).optional(),
     })
     .strict(),
@@ -358,61 +329,4 @@ export function movedSchemeInputs(
   return Object.keys(current)
     .filter((name) => name in prior && prior[name] !== current[name])
     .sort()
-}
-
-/**
- * One live section's manifest coverage, DERIVED from the flow-keyed manifest — the
- * per-section pivot the coverage surfaces join on (sections stay the staleness
- * anchor). Never persisted: `guardManifestSections` recomputes it per read.
- */
-export interface GuardManifestSectionView {
-  /** Repo-relative path of the spec document. */
-  doc: string
-  /** Slugified heading path (the section anchor). */
-  anchor: string
-  /** `sha256:…` over the normalized section text the flows bound against. */
-  fingerprint: string
-  /** Ids of the flows binding this section, in manifest order. */
-  flowIds: string[]
-  /** Ids of every scenario those flows are realized by, sorted. */
-  scenarioIds: string[]
-  /** The bound flows' generation-inputs hash when they agree on one; else null. */
-  generationInputsHash: string | null
-}
-
-/**
- * Project the flow-keyed manifest onto its sections: one view per bound (doc,
- * anchor), unioning the flows that bind it and the scenarios those flows are
- * realized by. Sorted by doc then anchor.
- */
-export function guardManifestSections(manifest: GuardManifest | null): GuardManifestSectionView[] {
-  const byKey = new Map<string, GuardManifestSectionView & { hashes: Set<string | null> }>()
-  for (const flow of manifest?.flows ?? []) {
-    for (const binding of flow.bindings) {
-      const key = `${binding.doc}\0${binding.anchor}`
-      let view = byKey.get(key)
-      if (!view) {
-        view = {
-          doc: binding.doc,
-          anchor: binding.anchor,
-          fingerprint: binding.fingerprint,
-          flowIds: [],
-          scenarioIds: [],
-          generationInputsHash: null,
-          hashes: new Set(),
-        }
-        byKey.set(key, view)
-      }
-      view.flowIds.push(flow.flowId)
-      for (const s of flow.scenarios) view.scenarioIds.push(s.id)
-      view.hashes.add(flow.generationInputsHash)
-    }
-  }
-  return [...byKey.values()]
-    .map(({ hashes, ...view }) => ({
-      ...view,
-      scenarioIds: [...new Set(view.scenarioIds)].sort(),
-      generationInputsHash: hashes.size === 1 ? [...hashes][0] : null,
-    }))
-    .sort((a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor))
 }

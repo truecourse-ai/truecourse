@@ -222,7 +222,6 @@ export function flowWorkerCacheKey(task: FlowWorkerTask): string {
     `flow-worker-v${FLOW_WORKER_STAGE_VERSION}`,
     { fingerprint: m.flowFingerprint },
     task.surface,
-    m.sectionKeys,
     m.interfaceFingerprints,
     workerRecipeMaterial(m),
     // Edit mode folds the briefed priors in: a from-scratch task keys exactly
@@ -243,7 +242,7 @@ export function flowWorkerLegacyCacheKeys(task: FlowWorkerTask): string[] {
   const edit = m.mode === 'edit' ? { priorShas: m.priorShas } : undefined
   return [
     workerCacheKey(flowWorkerPromptFingerprint(task.surface), { fingerprint: m.flowFingerprint }, task.surface,
-      m.sectionKeys, legacyBag, m.recipeFingerprint, edit),
+      legacyBag, m.recipeFingerprint, edit),
   ]
 }
 

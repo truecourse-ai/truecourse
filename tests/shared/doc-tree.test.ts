@@ -6,9 +6,8 @@
  * - the sections: anchors (slug chains, `-N` for repeats, the lead claimed
  *   last), line ranges, own and full text, and the whole-doc section of a
  *   doc that is not markdown;
- * - that the guard runner's section index, built on the tree, gives the
- *   anchors, fingerprints, lines and texts it gave before the tree existed,
- *   pinned over the fixture docs in `tests/fixtures/doc-tree`;
+ * - that the sections' anchors, lines and texts stay what they were, pinned
+ *   over real docs in `tests/fixtures/doc-tree/sections-snapshot.json`;
  * - the windows: packing by section and by bounds, the lines a window shows,
  *   and that a doc's windows rejoin to the doc.
  */
@@ -26,10 +25,10 @@ import {
   planWindows,
   sectionOwnText,
   sectionText,
+  slugifyHeading,
   windowText,
   type DocWindow,
 } from '@truecourse/shared'
-import { buildDocSectionIndex, extractSectionTexts } from '@truecourse/guard-runner'
 
 const ROOT = path.resolve(__dirname, '../..')
 
@@ -104,6 +103,14 @@ describe('parseDocTree sections', () => {
     expect(titled.sections.map((s) => s.anchor)).toEqual(['guide-2', 'guide'])
   })
 
+  it('slugs a heading: punctuation runs fold to one hyphen, emphasis markers drop', () => {
+    expect(slugifyHeading('9.2.1 Git guard')).toBe('9-2-1-git-guard')
+    expect(slugifyHeading('`contracts validate`')).toBe('contracts-validate')
+    expect(slugifyHeading('9. Common — CLI Reference')).toBe('9-common-cli-reference')
+    expect(slugifyHeading('Foo *Bar* _baz_')).toBe('foo-bar-baz')
+    expect(slugifyHeading('  Trailing spaces  ')).toBe('trailing-spaces')
+  })
+
   it('numbers repeated headings in document order, descendants inheriting the ordinal', () => {
     const tree = parseDocTree('a.md', '# A\n## B\n### C\n# A\n## B\n### C\n')
     expect(tree.sections.map((s) => s.anchor)).toEqual(['a', 'a/b', 'a/b/c', 'a-2', 'a-2/b', 'a-2/b/c'])
@@ -144,7 +151,6 @@ describe('parseDocTree sections', () => {
 
 interface SnapshotSection {
   anchor: string
-  fingerprint: string
   headingText: string
   level: number
   startLine: number
@@ -153,27 +159,27 @@ interface SnapshotSection {
   fullText: string
 }
 const SNAPSHOT = JSON.parse(
-  fs.readFileSync(path.join(ROOT, 'tests/fixtures/doc-tree/section-index-snapshot.json'), 'utf-8'),
-) as Record<string, { markdown: boolean; sections: SnapshotSection[] }>
+  fs.readFileSync(path.join(ROOT, 'tests/fixtures/doc-tree/sections-snapshot.json'), 'utf-8'),
+) as Record<string, { sections: SnapshotSection[] }>
 
-describe('the section index, on the tree', () => {
-  // A section's text ends where its lines end; before the tree the last
-  // section's carried the doc's final newline. Fingerprints normalize it away.
+describe('the sections of real docs', () => {
+  // A section's text ends where its lines end; the pinned texts may carry the
+  // doc's final newline.
   const trimmed = (text: string): string => text.replace(/\n+$/, '')
 
-  it.each(Object.keys(SNAPSHOT))('%s: the anchors, fingerprints, lines and texts it gave before', (rel) => {
-    const content = fs.readFileSync(path.join(ROOT, rel), 'utf-8')
-    const index = buildDocSectionIndex(rel, content)
-    const texts = extractSectionTexts(rel, content)
-    const want = SNAPSHOT[rel]!
-    expect(index.markdown).toBe(want.markdown)
+  it.each(Object.keys(SNAPSHOT))('%s: the anchors, lines and texts stay pinned', (rel) => {
+    const tree = parseDocTree(rel, fs.readFileSync(path.join(ROOT, rel), 'utf-8'))
     expect(
-      index.sections.map((s) => ({
-        ...s,
-        ownText: trimmed(texts.get(s.anchor)!.ownText),
-        fullText: trimmed(texts.get(s.anchor)!.fullText),
+      tree.sections.map((s) => ({
+        anchor: s.anchor,
+        headingText: s.headingText,
+        level: s.level,
+        startLine: s.startLine,
+        endLine: s.endLine,
+        ownText: trimmed(sectionOwnText(tree, s)),
+        fullText: trimmed(sectionText(tree, s)),
       })),
-    ).toEqual(want.sections.map((s) => ({ ...s, ownText: trimmed(s.ownText), fullText: trimmed(s.fullText) })))
+    ).toEqual(SNAPSHOT[rel]!.sections.map((s) => ({ ...s, ownText: trimmed(s.ownText), fullText: trimmed(s.fullText) })))
   })
 })
 

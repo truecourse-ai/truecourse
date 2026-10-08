@@ -20,7 +20,7 @@ export function GuardClaimListRow({ claim }: { claim: GuardClaimRow }) {
     <>
       <div className="flex w-full items-start gap-2">
         <GuardFlowStatusChip status={guardPlainStatus(claim.status)} className="mt-0.5 w-24 shrink-0" />
-        <span className="min-w-0 flex-1 text-[12px] leading-snug text-foreground">{claim.claim}</span>
+        <span className="min-w-0 flex-1 text-[12px] leading-snug text-foreground">{claim.statement}</span>
       </div>
       <span className="w-full truncate pl-[6.5rem] text-[11px] leading-snug text-muted-foreground">
         {claim.doc}
@@ -34,7 +34,7 @@ export function GuardClaimListRow({ claim }: { claim: GuardClaimRow }) {
 export function GuardUntestableListRow({ row }: { row: GuardUntestableRow }) {
   return (
     <>
-      <span className="w-full truncate text-[12px] italic leading-snug text-muted-foreground">{row.text}</span>
+      <span className="w-full truncate text-[12px] italic leading-snug text-muted-foreground">{row.statement}</span>
       <span className="w-full truncate text-[11px] text-muted-foreground/80">
         {row.doc} · {row.reason}
       </span>

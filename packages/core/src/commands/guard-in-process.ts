@@ -3,7 +3,7 @@
  * `curateInProcess`: the estimate gate, model resolution, transport selection
  * and progress wiring live in one place.
  *
- * Steps: index (deterministic section plan) → extract (claim-extraction
+ * Steps: index (deterministic document plan) → extract (claim-extraction
  * sessions) → interfaces → flows (synthesis sessions) → match (a one-turn
  * session per flow×surface) → author (the flow-worker session pool) →
  * validate (per-flow settling). Birth
@@ -158,7 +158,7 @@ function assertNoOpenConflicts(repoRoot: string): void {
 
 /** Stable step taxonomy for the guard generate progress UI. */
 export const GUARD_GENERATE_STEPS = [
-  { key: 'index', label: 'Indexing sections' },
+  { key: 'index', label: 'Indexing documents' },
   { key: 'extract', label: 'Reading claims' },
   { key: 'interfaces', label: 'Mapping interfaces' },
   { key: 'flows', label: 'Synthesizing flows' },
@@ -182,7 +182,7 @@ export const GUARD_GENERATE_STEPS = [
  * and the seed it starts from against it.
  */
 export const WORLD_GENERATE_STEPS = [
-  { key: 'index', label: 'Indexing sections' },
+  { key: 'index', label: 'Indexing documents' },
   { key: 'extract', label: 'Reading claims' },
   { key: 'flows', label: 'Synthesizing flows' },
   { key: 'world', label: 'Bringing the product up' },
@@ -211,7 +211,7 @@ const WORLD_GENERATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
 /**
  * Which LLM stage(s) each guard step covers — so a step line shows the model +
  * live tokens/$ of the work it's doing (the scan/contracts convention). Recipe
- * discovery rides `index` (the section-indexing window), reading the claims
+ * discovery rides `index` (the document-indexing window), reading the claims
  * rides `extract` and spends nothing, synthesis rides `flows`, realization matching rides `match`, and
  * per-(flow, surface) authoring rides `author` (stage `guard.generate`). Interface
  * mapping is deterministic tree derivation — no stage, no spend. Birth EXECUTION
@@ -623,11 +623,11 @@ export async function guardGenerateInProcess(
       ...(options.stopAfterFlows ? { stopAfterFlows: true } : {}),
       ...(options.only ? { only: options.only } : {}),
       ...(options.fromScratch ? { fromScratch: true } : {}),
-      onPlan: (total, work) => {
+      onPlan: (docs, changed) => {
         throwIfAborted();
         // Indexing is an instant deterministic pass — mark it done with its result
         // detail immediately (recipe-discovery usage rides its tag), never a live phase.
-        tracker?.done('index', `${work} of ${total} section${total === 1 ? '' : 's'} changed`);
+        tracker?.done('index', `${changed} of ${docs} document${docs === 1 ? '' : 's'} changed`);
         cur = STEPS.indexOf('extract');
         if (!restored.has('extract')) tracker?.start('extract');
       },
@@ -939,16 +939,12 @@ export function buildOpenConflictsReport(
     generatedAt,
     status: 'open-conflicts',
     reason: error.message,
-    sectionsTotal: 0,
-    sectionsChanged: 0,
-    skippedUnchanged: 0,
     noChanges: false,
     written: [],
     coverageGaps: [],
     birthFindings: [],
     errors: [],
     extractionFailures: [],
-    orphaned: [],
   };
 }
 

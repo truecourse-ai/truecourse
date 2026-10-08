@@ -5,8 +5,8 @@ import { FlowTestRunResultSchema } from './flow-tests.js'
  * Guard run result types — the materialized current state a `guard run` writes to
  * `.truecourse/guard/LATEST.json` and the dashboard reads back.
  *
- * The snapshot is stored as the repo's run row, so a surface renders section
- * coverage without a local run. Failure detail is kept **inline-compact** here
+ * The snapshot is stored as the repo's run row, so a surface renders coverage
+ * without a local run. Failure detail is kept **inline-compact** here
  * (`{ step, expected, actual }`) with only a pointer into `evidence/`; the full
  * transcript is stored beside the run.
  */
@@ -21,10 +21,10 @@ import { hasMilestone, type GuardStepMilestone } from './step-parts.js'
 
 /**
  * Per-scenario run outcome. `pass` | `fail` | `error` come from executing the
- * scenario; `stale` (the bound section's text was edited since the scenario was
- * written) and `orphaned` (the bound section no longer exists) come from the
- * binding check the runner performs against the live section index before it
- * executes anything — a stale/orphaned scenario is never run.
+ * scenario; `stale` (a sentence the scenario is bound to has left the document
+ * since it was written) and `orphaned` (every bound sentence, or the document,
+ * is gone) come from the binding check the runner performs against the live
+ * documents before it executes anything — a stale/orphaned scenario is never run.
  *
  * `blocked` is the sixth and likewise NON-EXECUTED state: the scenario binds a
  * SUPPLIED dependency (the dependency catalog's) for which no instance is
@@ -197,9 +197,8 @@ export const GuardScenarioResultSchema = z
     title: z.string(),
     /**
      * The scenario's PRIMARY binding (`binds[0]` of the scenario file). A scenario
-     * may bind several sections — one per flow milestone — but the run result keys
-     * on the primary one; the full set is the flow's, and the per-section rollup
-     * credits every bound section (see `sections`).
+     * may bind several documents but the run result keys on the primary one; the
+     * full set is the flow's.
      */
     binds: GuardBindsSchema,
     outcome: GuardOutcomeSchema,
@@ -242,19 +241,6 @@ export const GuardScenarioResultSchema = z
      * Optional so pre-change snapshots keep parsing.
      */
     bootAttempts: z.number().int().positive().optional(),
-    /**
-     * Present when the PRIMARY bound section moved: the section kept its text but
-     * now lives under a different anchor. The scenario still executed; this records
-     * where its section was found so the binding can be re-anchored.
-     */
-    remappedTo: z.string().optional(),
-    /**
-     * Present on `stale` when a bound section was EDITED: that section's current
-     * fingerprint (the first stale bind's), so the UI and regeneration can see what
-     * the binding drifted to without a re-scan. A `stale` caused only by a REMOVED
-     * bound section carries none — there is no current text to fingerprint.
-     */
-    currentFingerprint: z.string().optional(),
     /**
      * The flow this scenario realizes (`flow.id` in the scenario file) — the key
      * the flow-first rollups group by. Absent on a hand-written scenario, which
@@ -350,28 +336,15 @@ export function blockedPreconditionAnnotation(
   return steps.some((s) => hasMilestone(s.milestone)) ? { blockedPrecondition: true } : {}
 }
 
-/** Per-section rollup — the unit the coverage UI highlights. */
-export const GuardSectionRollupSchema = z
-  .object({
-    doc: z.string(),
-    section: z.string(),
-    /** Worst outcome across the section's scenarios. */
-    status: GuardOutcomeSchema,
-    scenarioIds: z.array(z.string()),
-  })
-  .strict()
-export type GuardSectionRollup = z.infer<typeof GuardSectionRollupSchema>
-
 export const GuardLatestSchema = z
   .object({
     run: GuardRunEnvelopeSchema,
     summary: GuardSummarySchema,
     scenarios: z.array(GuardScenarioResultSchema),
-    sections: z.array(GuardSectionRollupSchema),
     /**
      * A run of a repository's stored flow tests: one result per test, each
      * beside the status it was authored with. Such a run executes no scenario,
-     * so `scenarios` and `sections` are empty and `summary` counts the tests
+     * so `scenarios` is empty and `summary` counts the tests
      * (a seed that did not hold is an `error`). Absent on a scenario run.
      */
     flowTests: z.array(FlowTestRunResultSchema).optional(),
@@ -414,15 +387,15 @@ export function guardHistoryEntryOf(latest: GuardLatest): GuardHistoryEntry {
 }
 
 /**
- * Section status precedence — the worst scenario outcome wins. A section is green
- * only when every scenario passed; a single failure paints it red.
+ * Outcome precedence — the worst scenario outcome wins. A set of scenarios is
+ * green only when every one passed; a single failure paints it red.
  */
 const OUTCOME_PRECEDENCE: readonly GuardOutcome[] = [
   'fail',
   'error',
   'stale',
   'orphaned',
-  // Blocked outranks pass for the same reason stale does: a section whose other
+  // Blocked outranks pass for the same reason stale does: a claim whose other
   // scenario never ran is not proven, and hiding that behind a green sibling would
   // report coverage nobody earned.
   'blocked',

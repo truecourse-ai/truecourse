@@ -110,8 +110,11 @@ describe('two-sided promises — the negative half SURVIVES the pipeline (G15 re
     })
 
     // And the flow settled — a two-sided realization is a complete one.
-    expect(readManifest(r)!.flows.find((f) => f.flowId === 'strictness')!.scenarios).toMatchObject([
-      { id: 'strictness', drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] },
+    // The flow is titled by its claim's text.
+    const { flowId } = res.written[0]
+    expect(flowId).toBe('valid-invocations-are-accepted-and-invalid-ones-are-rejected')
+    expect(readManifest(r)!.flows.find((f) => f.flowId === flowId)!.scenarios).toMatchObject([
+      { id: flowId, drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] },
     ])
   })
 })

@@ -57,7 +57,6 @@ function emptyLatest(): GuardLatest {
     },
     summary: { total: 0, pass: 0, fail: 0, stale: 0, orphaned: 0, error: 0 },
     scenarios: [],
-    sections: [],
   }
 }
 

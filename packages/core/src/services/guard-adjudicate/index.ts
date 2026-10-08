@@ -46,7 +46,7 @@ export {
 } from './control.js';
 export {
   adjudicationRefusalReason,
-  claimIdentity,
+  failingClaimId,
   persistAdjudication,
   type AdjudicationRouting,
   type PersistAdjudicationResult,

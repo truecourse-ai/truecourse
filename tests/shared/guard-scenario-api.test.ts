@@ -10,7 +10,7 @@ import {
   isRunnableDriver,
 } from '@truecourse/shared'
 
-const BINDS = [{ doc: 'docs/api.md', section: 'todos/create', fingerprint: 'sha256:abc', sentences: ['todos/create'] }]
+const BINDS = [{ doc: 'docs/api.md', sentences: ['todos/create'] }]
 
 const API_SCENARIO = {
   id: 'todo-lifecycle.api.1',
@@ -159,8 +159,8 @@ describe('guard scenario envelope v3', () => {
     flow: { id: 'todo-lifecycle', fingerprint: 'sha256:flow' },
     interface: { path: ['cli/todos-add', 'cli/todos-list'], fingerprints: ['sha256:a', 'sha256:b'] },
     binds: [
-      { doc: 'docs/cli.md', section: 'todos/add', fingerprint: 'sha256:add', sentences: ['todos/add'] },
-      { doc: 'docs/cli.md', section: 'todos/list', fingerprint: 'sha256:list', sentences: ['todos/list'] },
+      { doc: 'docs/cli.md', sentences: ['todos/add'] },
+      { doc: 'docs/cli.md', sentences: ['todos/list'] },
     ],
     steps: [
       { run: ['todos', 'add', 'milk'], expect: { exit: 0 }, milestone: 1 },
@@ -182,7 +182,7 @@ describe('guard scenario envelope v3', () => {
     const v1 = {
       ...CLI_SCENARIO,
       guard: 1,
-      binds: { doc: 'docs/cli.md', section: 'todos/add', fingerprint: 'sha256:add', sentences: ['todos/add'] },
+      binds: { doc: 'docs/cli.md', sentences: ['todos/add'] },
     }
     expect(() => GuardScenarioSchema.parse(v1)).toThrow()
   })

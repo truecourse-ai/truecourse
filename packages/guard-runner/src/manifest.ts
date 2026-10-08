@@ -1,9 +1,9 @@
 /**
  * Read/write `.truecourse/scenarios/manifest.json` and rebuild it from the
  * committed scenarios. The manifest is the binding record: one entry per FLOW with
- * the sections it binds and the scenarios realizing it per surface. `guard run`
- * reads it informationally; the binding decisions come from the scenarios' own
- * `binds` checked against the live section index, not from this file.
+ * the document sentences it binds and the scenarios realizing it per surface.
+ * `guard run` reads it informationally; the binding decisions come from the
+ * scenarios' own `binds` checked against the live documents, not from this file.
  */
 
 import fs from 'node:fs'
@@ -43,8 +43,9 @@ export function writeManifest(repoRoot: string, manifest: GuardManifest): string
 
 /**
  * A hand-written scenario's Manual pseudo-flow: one flow per scenario, its single
- * milestone the scenario's own title at its first bound section, so the corpus is
- * total — every committed scenario is reachable through a flow.
+ * milestone the scenario's own title over its first bind, so the corpus is
+ * total — every committed scenario is reachable through a flow. A hand-written
+ * scenario proves no claim of the corpus, so its own id stands as the milestone's.
  */
 function manualFlow(scenario: GuardScenario): { id: string; fingerprint: string } {
   return {
@@ -53,7 +54,7 @@ function manualFlow(scenario: GuardScenario): { id: string; fingerprint: string 
       {
         order: 1,
         doc: scenario.binds[0].doc,
-        anchor: scenario.binds[0].section,
+        claimId: scenario.id,
         claimTitle: scenario.title,
         sentences: [...scenario.binds[0].sentences],
       },
@@ -64,7 +65,7 @@ function manualFlow(scenario: GuardScenario): { id: string; fingerprint: string 
 /**
  * Derive the manifest from the committed scenarios: group them by the flow they
  * realize (hand-written scenarios each take their Manual pseudo-flow), union the
- * sections their `binds` name, and record one entry per scenario with the drivers
+ * sentences their `binds` name per document, and record one entry per scenario with the drivers
  * its STEPS exercise. The generation-inputs hash is left unset — the generator
  * stamps it when it authors.
  */
@@ -89,12 +90,9 @@ export function rebuildManifestFromScenarios(repoRoot: string): GuardManifest {
       byFlow.set(flow.id, entry)
     }
     for (const b of s.binds) {
-      const key = `${b.doc}\x00${b.section}`
-      const prior = entry.bindings.get(key)
-      entry.bindings.set(key, {
+      const prior = entry.bindings.get(b.doc)
+      entry.bindings.set(b.doc, {
         doc: b.doc,
-        anchor: b.section,
-        fingerprint: b.fingerprint,
         sentences: [...new Set([...(prior?.sentences ?? []), ...b.sentences])].sort(),
       })
     }
@@ -120,9 +118,7 @@ export function rebuildManifestFromScenarios(repoRoot: string): GuardManifest {
     .map(([flowId, e]) => ({
       flowId,
       flowFingerprint: e.flowFingerprint,
-      bindings: [...e.bindings.values()].sort(
-        (a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor),
-      ),
+      bindings: [...e.bindings.values()].sort((a, b) => a.doc.localeCompare(b.doc)),
       scenarios: e.scenarios.slice().sort((a, b) => a.id.localeCompare(b.id)),
       // A manifest rebuilt from files knows nothing about deliberate drops.
       retiredScenarios: [],

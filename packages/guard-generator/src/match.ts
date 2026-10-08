@@ -672,7 +672,7 @@ export async function matchFlow(
     if (repairMissing) for (const entry of missing) {
       const milestone = flow.milestones.find(m => m.order === entry.milestone)!
       const claims = entry.checks?.map(id => milestone.verification!.cases!.find(c => c.id === id)!.claim).join('; ')
-      gaps.push({ ...entry, kind: 'mapping', reason: `${uncoveredReason(flow, [entry.milestone])}${claims ? ` — missing cases: ${claims}` : ''}. Reconcile the interface catalog against ${milestone.doc}#${milestone.anchor}; preserve the existing mapped actions.` })
+      gaps.push({ ...entry, kind: 'mapping', reason: `${uncoveredReason(flow, [entry.milestone])}${claims ? ` — missing cases: ${claims}` : ''}. Reconcile the interface catalog against ${milestone.doc} (claim ${milestone.claimId}); preserve the existing mapped actions.` })
     }
     const issues = matchReferenceIssues(flow, catalog, combined)
     if (describeMatchIssues(issues)) return null

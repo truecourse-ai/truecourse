@@ -23,8 +23,7 @@
 import {
   DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER,
   autoResolutionKey,
-  claimIdentityKey,
-  claimsByIdentity,
+  claimsById,
   type GuardAdjudication,
   type GuardScenarioAdjudication,
 } from '@truecourse/shared';
@@ -155,12 +154,8 @@ export async function persistAdjudication(opts: {
     // (idempotent by id), the mechanism as the recorded reason. Held back once
     // the escalation threshold is crossed — past it, nothing auto-resolves again.
     if (verdict.confidence === 'high' && verdict.fix?.layer === 'scenario' && !escalated) {
-      const identity = claimIdentity(item);
-      const claim = identity
-        ? claimsByIdentity(readGuardClaimsCorpus(repoRoot)?.claims ?? []).get(
-            claimIdentityKey(identity.doc, identity.anchor, identity.title),
-          )
-        : undefined;
+      const claimId = failingClaimId(item);
+      const claim = claimId ? claimsById(readGuardClaimsCorpus(repoRoot)?.claims ?? []).get(claimId) : undefined;
       if (claim) {
         dismissGuardClaim(repoRoot, {
           claimId: claim.id,
@@ -176,24 +171,17 @@ export async function persistAdjudication(opts: {
 }
 
 /**
- * The claim a scenario-layer authoring defect is ABOUT, as the flow names it
- * (doc + anchor + claim title, the identity the corpus resolves to a claim id).
- * The committed diagnosis carries it outright; failing that, the failing
- * milestone of the flow names it. `null` when neither does — a dismissal
- * without an identity would key on nothing.
- * This is the structural reading of the plan's "mechanism names a claim-level
- * mistake": only a failure that RESOLVES to a claim can dismiss one.
+ * The id of the claim a scenario-layer authoring defect is ABOUT. The committed
+ * diagnosis carries it outright; failing that, the failing milestone of the
+ * flow names it. `null` when neither does — a dismissal without a claim would
+ * key on nothing: only a failure that RESOLVES to a claim can dismiss one.
  */
-export function claimIdentity(
-  item: AdjudicationItem,
-): { doc: string; anchor: string; title: string } | null {
-  if (item.diagnosis?.claim) {
-    return { doc: item.diagnosis.doc, anchor: item.diagnosis.anchor, title: item.diagnosis.claim };
-  }
+export function failingClaimId(item: AdjudicationItem): string | null {
+  if (item.diagnosis?.claimId) return item.diagnosis.claimId;
   const order = item.row.failedMilestone;
   if (order !== undefined && item.flow) {
     const milestone = item.flow.milestones.find((m) => m.order === order);
-    if (milestone) return { doc: milestone.doc, anchor: milestone.anchor, title: milestone.claimTitle };
+    if (milestone) return milestone.claimId;
   }
   return null;
 }

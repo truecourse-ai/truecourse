@@ -23,7 +23,6 @@ function guardLatest(ranAt: string): GuardLatest {
     run: { runId: 'r1', ranAt, branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:r', scenarioFormat: 2 },
     summary: { total: 0, pass: 0, fail: 0, stale: 0, orphaned: 0, error: 0 },
     scenarios: [],
-    sections: [],
   };
 }
 
@@ -31,16 +30,12 @@ function guardReport(generatedAt: string): GuardGenerateReport {
   return {
     generatedAt,
     status: 'ok',
-    sectionsTotal: 0,
-    sectionsChanged: 0,
-    skippedUnchanged: 0,
     noChanges: true,
     written: [],
     coverageGaps: [],
     birthFindings: [],
     errors: [],
     extractionFailures: [],
-    orphaned: [],
   };
 }
 

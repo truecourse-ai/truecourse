@@ -35,9 +35,8 @@ export const GuardWrittenScenarioSchema = z
   .object({
     id: z.string(),
     title: z.string(),
-    /** The scenario's PRIMARY binding — its flow's first milestone's section. */
+    /** The document of the scenario's PRIMARY binding — its flow's first milestone's. */
     doc: z.string(),
-    anchor: z.string(),
     /** Repo-relative path of the written `.yaml`. */
     file: z.string(),
     /** The flow this scenario realizes (absent on hand-written work). */
@@ -56,15 +55,15 @@ export const GuardWrittenScenarioSchema = z
 export type GuardWrittenScenario = z.infer<typeof GuardWrittenScenarioSchema>
 
 /**
- * Why a spec claim or a flow surface has no guard, UN-CONFLATED so a postponement
- * never reads as a verdict: `awaiting-driver` (the surface needs a driver that
- * isn't runnable yet — which one is the `driver` field, not the kind),
- * `untestable`/`no-claim` (nothing a runnable driver can assert), `blocked-on`
- * (needs world-state no `setup` block can express — a running service, database,
- * network, credentials), `dismissed` (the user judged the claim/flow
- * noise/won't-fix in `scenarios/decisions.json`, so generate settles it explicitly
- * instead of silently disappearing it), or the two REALIZATION kinds a flow's
- * surface can end in:
+ * Why a flow surface has no guard, UN-CONFLATED so a postponement never reads as
+ * a verdict: `awaiting-driver` (the surface needs a driver that isn't runnable
+ * yet — which one is the `driver` field, not the kind), `untestable`/`no-claim`
+ * (nothing a runnable driver can assert), `blocked-on` (needs world-state no
+ * `setup` block can express — a running service, database, network,
+ * credentials), `dismissed` (the user judged the flow noise/won't-fix in
+ * `scenarios/decisions.json`, so generate settles it explicitly instead of
+ * silently disappearing it), or the two REALIZATION kinds a flow's surface can
+ * end in:
  *  - `no-interface` — a required executable action is missing from the catalog,
  *    including an entirely empty catalog. This is a mapping gap, never evidence
  *    that the product lacks the behavior.
@@ -98,8 +97,8 @@ export type GuardCoverageGapKind = z.infer<typeof GuardCoverageGapKindSchema>
  */
 export const GuardCoverageGapSchema = z
   .object({
-    doc: z.string(),
-    anchor: z.string(),
+    /** The flow the gap belongs to. */
+    flowId: z.string(),
     kind: GuardCoverageGapKindSchema,
     milestones: z.array(z.number().int().positive()).min(1).optional(),
     /** Case-level gap scope. Absent only for historical whole-milestone gaps. */
@@ -108,15 +107,7 @@ export const GuardCoverageGapSchema = z
     blocker: GuardBlockerSchema.optional(),
     /** Present iff `kind === 'awaiting-driver'` — the non-runnable driver awaited. */
     driver: GuardDriverIdSchema.optional(),
-    /**
-     * The FLOW the gap belongs to, when it is a flow-level gap (`no-interface`,
-     * `unrealizable`, `awaiting-driver` on a mapped-but-unrunnable surface, a
-     * dismissed flow). `doc`/`anchor` then name the flow's PRIMARY binding (its
-     * first milestone's section) so every gap still pivots on a section. Absent
-     * for claim-level gaps (untestable / no-claim / dismissed claim / blocked-on).
-     */
-    flowId: z.string().optional(),
-    /** The surface a flow-level gap happened on — the driver a scenario would run on. */
+    /** The surface the gap happened on — the driver a scenario would run on. */
     surface: GuardDriverIdSchema.optional(),
   })
   .strict()
@@ -238,7 +229,7 @@ export type GuardTriage = z.infer<typeof GuardTriageSchema>
  * ({@link carryForwardBirthFindings}), never carried from a prior report.
  *
  * It carries the failing interface-step identity (`step` + `failedMilestone`, and
- * the milestone's own `doc`/`anchor`/`claim`), expected vs actual, the raw output
+ * the milestone's own `doc`/`claimId`/`claim`), expected vs actual, the raw output
  * excerpts, the evidence pointer, and the triage verdict — everything a reader
  * needs to explain the red test without `guard/result.json`. NOT `.strict()`: a
  * field a future generate adds is dropped by an older reader, never a parse
@@ -246,12 +237,13 @@ export type GuardTriage = z.infer<typeof GuardTriageSchema>
  * file sits beside the manifest in the same commit.
  */
 export const GuardScenarioDiagnosisSchema = z.object({
-  /** The failing milestone's section — where the finding pivots. */
+  /** The document of the failing milestone (the flow's primary document when no step carried one). */
   doc: z.string(),
-  anchor: z.string(),
   /** The scenario title — the claim the test was asserting. */
   title: z.string(),
-  /** The failing milestone's extracted-claim text — the dismissal identity. */
+  /** The id of the failing milestone's claim — what a dismissal names. */
+  claimId: z.string().optional(),
+  /** The failing milestone's claim statement. */
   claim: z.string().optional(),
   /** 1-based failing step from the birth run. */
   step: z.number().int().positive(),
@@ -297,15 +289,15 @@ export type GuardScenarioDiagnosis = z.infer<typeof GuardScenarioDiagnosisSchema
  */
 export const GuardBirthFindingSchema = z
   .object({
+    /** The document of the failing milestone (the flow's primary document when no step carried one). */
     doc: z.string(),
-    anchor: z.string(),
     /**
      * What kind of result this is:
      *  - `birth` (default when absent) — the test failed its birth execution: the
      *    doc and the code disagree (or the authoring is defective). The test is
      *    committed with `status: 'failing'`.
      *  - `fidelity` — a scenario that PASSED birth but the fidelity reviewer judged
-     *    it weak/vacuous/miscast: it does not truly verify what its section claims.
+     *    it weak/vacuous/miscast: it does not truly verify what its flow claims.
      *    Never committed — "the test is wrong" is a re-author path, not a code
      *    disagreement. `actual` carries the reviewer's one-sentence stated
      *    mismatch; `step`/`expected` are placeholders (no birth step ran).
@@ -343,28 +335,24 @@ export const GuardBirthFindingSchema = z
      */
     ...OutputExcerptsSchema.shape,
     /**
-     * The failed candidate's authored YAML, serialized inline AT FINDING CREATION
-     * (same serialize-at-creation as heldSections' readyScenarios). The finding
-     * detail renders it in the scenario-source code block so the user can judge
+     * The failed candidate's authored YAML, serialized inline AT FINDING CREATION.
+     * The finding detail renders it in the scenario-source code block so the user can judge
      * "defect or drift" with the exact commands the scenario ran on-screen.
      * Optional so older `result.json` files keep parsing.
      */
     yaml: z.string().optional(),
     /**
-     * The EXTRACTED CLAIM's stable text — the claim identity a dismissal keys on
-     * (anchor + this). The finding detail's Dismiss action writes it into
-     * `scenarios/decisions.json`; generate then skips a matching claim before
-     * authoring. Distinct from `title` (the scenario title). Optional so older
-     * reports (and the internal retry-evidence findings) parse.
+     * The id of the failing milestone's claim — what the finding detail's Dismiss
+     * action writes into `scenarios/decisions.json`; generate then skips the claim
+     * before authoring. Absent when the failing step carried no milestone.
+     */
+    claimId: z.string().optional(),
+    /**
+     * The failing milestone's claim statement. Distinct from `title` (the
+     * scenario title). Optional so older reports (and the internal
+     * retry-evidence findings) parse.
      */
     claim: z.string().optional(),
-    /**
-     * The bound section's human heading, joined SERVER-SIDE at report read time
-     * (never written to `result.json` — the enrichment is read-side). A finding's
-     * section is unsettled by definition, so it never has a committed scenario to
-     * donate the heading client-side; slugs are engine ids, not UI copy.
-     */
-    headingText: z.string().optional(),
     /** The flow the failing scenario realizes (absent on hand-written work). */
     flowId: z.string().optional(),
     /** The surface the failing scenario runs on — the flow×surface identity. */
@@ -434,9 +422,8 @@ export const GuardFidelityDiscardSchema = z
     kind: z.literal('fidelity-discard'),
     flowId: z.string(),
     surface: GuardDriverIdSchema,
-    /** The flow's primary binding — where coverage surfaces attribute it. */
+    /** The flow's primary document. */
     doc: z.string(),
-    anchor: z.string(),
     /** The discarded scenario's title. */
     title: z.string(),
     /** The reviewer's high-confidence mismatch — why the scenario was discarded. */
@@ -458,9 +445,8 @@ export const GuardTriageResolveSchema = z
     kind: z.literal('triage-resolve'),
     flowId: z.string(),
     surface: GuardDriverIdSchema,
-    /** The failing milestone's section — where the retired failure pivoted. */
+    /** The failing milestone's document. */
     doc: z.string(),
-    anchor: z.string(),
     /** The retired test's scenario title. */
     title: z.string(),
     /** The verdict that drove the auto-resolution (always `generation-defect`). */
@@ -532,8 +518,8 @@ export function isCompositionFinding(finding: GuardBirthFinding): boolean {
 
 export const GuardGenerateErrorSchema = z
   .object({
+    /** The document the errored work was for ({@link RUN_REFUSAL_DOC} for a run-level refusal). */
     doc: z.string(),
-    anchor: z.string(),
     message: z.string(),
     /**
      * WHAT KIND of failure this is — the discriminator every surface triages on,
@@ -552,10 +538,9 @@ export const GuardGenerateErrorSchema = z
      */
     kind: z.enum(['authoring', 'birth', 'refusal']).optional(),
     /**
-     * The flow the errored work belonged to, when the error HAS one. Errors are
-     * otherwise attributed by section, which is lossy (many flows bind one section).
-     * A run-level `refusal` carries none by nature — see {@link GuardRunRefusalSchema},
-     * which names the flows it blocked. Optional for older reports.
+     * The flow the errored work belonged to, when the error HAS one. A run-level
+     * `refusal` carries none by nature — see {@link GuardRunRefusalSchema}, which
+     * names the flows it blocked.
      */
     flowId: z.string().optional(),
     /**
@@ -577,41 +562,6 @@ export const GuardGenerateErrorSchema = z
   })
   .strict()
 export type GuardGenerateError = z.infer<typeof GuardGenerateErrorSchema>
-
-/**
- * One birth-passed-but-withheld candidate under a held section — validated work
- * the all-or-nothing persist held back. The authored `yaml` rides inline (the
- * exact bytes the section would have committed): a few KB per scenario is
- * trivial, so the inline copy beats a server-side
- * authoring-cache lookup for robustness (a cleared cache never blanks the UI).
- */
-export const GuardReadyScenarioSchema = z
-  .object({
-    id: z.string(),
-    title: z.string(),
-    /** The committed YAML the scenario would have been written as. */
-    yaml: z.string(),
-  })
-  .strict()
-export type GuardReadyScenario = z.infer<typeof GuardReadyScenarioSchema>
-
-/**
- * A section whose birth-passed candidates were WITHHELD by the all-or-nothing
- * per-section persist. Flow-keyed generation persists every green scenario
- * independently — a failing sibling becomes a finding and holds nothing back — so
- * generate no longer produces this; the schema stays for the `result.json` files
- * that already carry it (they cost real money to produce) and the surfaces that
- * render them.
- */
-export const GuardHeldSectionSchema = z
-  .object({
-    doc: z.string(),
-    anchor: z.string(),
-    headingText: z.string().optional(),
-    readyScenarios: z.array(GuardReadyScenarioSchema),
-  })
-  .strict()
-export type GuardHeldSection = z.infer<typeof GuardHeldSectionSchema>
 
 /**
  * The built entry did not clear pre-flight — it either failed to START (a
@@ -667,8 +617,6 @@ export type GuardRunRefusal = z.infer<typeof GuardRunRefusalSchema>
 
 /** The `doc` a run-level refusal is filed under — it belongs to no document. */
 export const RUN_REFUSAL_DOC = '(guard run)'
-/** The `anchor` a run-level refusal is filed under — it belongs to no section. */
-export const RUN_REFUSAL_ANCHOR = '(refused)'
 
 /**
  * The ONE error entry a refusal contributes to a report. Built here rather than at
@@ -678,13 +626,12 @@ export const RUN_REFUSAL_ANCHOR = '(refused)'
 export function runRefusalError(refusal: GuardRunRefusal): GuardGenerateError {
   return {
     doc: RUN_REFUSAL_DOC,
-    anchor: RUN_REFUSAL_ANCHOR,
     kind: 'refusal',
     message: refusal.message,
   }
 }
 
-/** A document whose claim extraction could not complete — its sections re-attempt next run. */
+/** A document whose claims could not all be placed — a claim it no longer holds the sentences of. */
 export const GuardExtractionFailureSchema = z
   .object({
     doc: z.string(),
@@ -807,16 +754,6 @@ export const GuardInterfacesReportSchema = z
   .strict()
 export type GuardInterfacesReport = z.infer<typeof GuardInterfacesReportSchema>
 
-/** A bound section whose scenarios remain but the section itself is gone. */
-export const GuardOrphanedSectionSchema = z
-  .object({
-    doc: z.string(),
-    anchor: z.string(),
-    scenarioIds: z.array(z.string()),
-  })
-  .strict()
-export type GuardOrphanedSection = z.infer<typeof GuardOrphanedSectionSchema>
-
 /** The recipe outcome for the run — loaded as-is or freshly discovered. `entry`
  *  is the cli preparation (absent on an api-only recipe); `serve` the api one. */
 export const GuardRecipeReportSchema = z
@@ -935,15 +872,6 @@ export const GuardGenerateReportSchema = z
      * older reports parse; absent reads as "unknown".
      */
     recipeFingerprint: z.string().optional(),
-    sectionsTotal: z.number().int().nonnegative(),
-    sectionsChanged: z.number().int().nonnegative(),
-    skippedUnchanged: z.number().int().nonnegative(),
-    /** Of `sectionsChanged`, the sections whose edit the claim-diff gate judged
-     *  cosmetic: their prior extraction was reused and no flow re-authored for
-     *  them. Absent on reports written before the gate existed. */
-    cosmeticSections: z.number().int().nonnegative().optional(),
-    /** Live claim-diff gate calls this run made (cache hits excluded). */
-    claimDiffCalls: z.number().int().nonnegative().optional(),
     /**
      * Cached match verdicts SERVED although the surface's authored context
      * (purpose, at/to, the states) had moved since the verdict was stored. The
@@ -1004,7 +932,6 @@ export const GuardGenerateReportSchema = z
      * reads as "everything was adjudicated".
      */
     unadjudicated: z.array(GuardUnadjudicatedStageSchema).optional(),
-    orphaned: z.array(GuardOrphanedSectionSchema),
     /**
      * Birth passes that SURVIVED to a reported bucket, counted once per surviving
      * candidate: for a fresh generate, `birthPassed === written('passing').length
@@ -1014,12 +941,6 @@ export const GuardGenerateReportSchema = z
      * a superset of the result AND tolerant reads of older files keep parsing.
      */
     birthPassed: z.number().int().nonnegative().optional(),
-    /**
-     * Ready-but-held scenarios from a pre-flow (per-section, all-or-nothing)
-     * generate. Never written any more — persist is per scenario and independent —
-     * and optional, so both the older reports carrying it and every new one parse.
-     */
-    heldSections: z.array(GuardHeldSectionSchema).optional(),
     /**
      * Dismissals whose claim text matched nothing in a doc this run re-extracted —
      * stale entries in `scenarios/decisions.json`, surfaced (never silently
@@ -1058,7 +979,7 @@ export const GuardGenerateReportSchema = z
     usage: GuardGenerateUsageSchema.optional(),
     /**
      * Present ONLY when the built entry failed to start — the whole birth phase was
-     * short-circuited, so every changed section stayed unsettled. Optional so older
+     * short-circuited, so every flow stayed unsettled. Optional so older
      * reports (written before this field existed) keep parsing.
      */
     entryPreflight: GuardEntryPreflightSchema.optional(),
@@ -1121,7 +1042,6 @@ export function findingFromDiagnosis(
 ): GuardBirthFinding {
   return {
     doc: d.doc,
-    anchor: d.anchor,
     scenarioId: scenario.id,
     committed: true,
     file: d.file,
@@ -1132,6 +1052,7 @@ export function findingFromDiagnosis(
     ...(d.stdout !== undefined ? { stdout: d.stdout } : {}),
     ...(d.stderr !== undefined ? { stderr: d.stderr } : {}),
     ...(d.evidencePath !== undefined ? { evidencePath: d.evidencePath } : {}),
+    ...(d.claimId !== undefined ? { claimId: d.claimId } : {}),
     ...(d.claim !== undefined ? { claim: d.claim } : {}),
     flowId,
     // The (flow, surface) pair a report row is keyed by is the surface the flow was

@@ -4,20 +4,18 @@
  * `scenarios/manifest.json`, `guard/LATEST.json`, and `guard/result.json`; these
  * functions only shape the parsed structures.
  *
- * Driver-scoped tallies (`classification`, `coverageGapsByKind`) are keyed off the
- * driver registry, so a new driver joins the counts by adding a registry row.
+ * Driver-scoped tallies (`coverageGapsByKind`) are keyed off the driver
+ * registry, so a new driver joins the counts by adding a registry row.
  */
 
 import {
   awaitingDriverIds,
-  guardDriverIds,
   type GuardDriverId,
 } from './drivers.js'
 import {
   GUARD_COVERAGE_PLAIN_ORDER,
   guardCoveragePlainStatus,
   worstCoverageStatus,
-  worstCoveragePlainStatus,
   type GuardCoveragePlainStatus,
   type GuardCoverageStatus,
 } from './dashboard.js'
@@ -32,12 +30,7 @@ import {
   type GuardUnadjudicatedStage,
 } from './report.js'
 import type { StageTransportTally } from '../llm/tally.js'
-import {
-  guardManifestSections,
-  type GuardManifest,
-  type GuardManifestFlow,
-  type GuardManifestGap,
-} from './manifest.js'
+import type { GuardManifest, GuardManifestFlow, GuardManifestGap } from './manifest.js'
 import type {
   GuardLatest,
   GuardOutcome,
@@ -68,31 +61,6 @@ export interface GuardFlowsCoverageSummary {
    * derivation the dashboard's Flows list uses.
    */
   byStatus: Record<GuardCoveragePlainStatus, number>
-}
-
-/** Section-coverage rollup from `scenarios/manifest.json`. */
-export interface GuardCoverageSummary {
-  /** Sections the manifest's flows bind. */
-  totalSections: number
-  /** Sections whose flows own at least one scenario. */
-  withScenarios: number
-  /**
-   * Testability-classification counts: one per driver id (registry-derived) plus
-   * `untestable` and `unclassified` (recorded without a verdict). Derived from the
-   * flows binding each section: a section counts under the driver its flows'
-   * scenarios run on, else under the driver an `awaiting-driver` gap names.
-   */
-  classification: Record<GuardDriverId, number> & { untestable: number; unclassified: number }
-  /**
-   * The sections counted under the FIVE coverage words, each section taking the
-   * worst status of the flows that bind it — the coverage line a reader sees.
-   * `withScenarios` says how many sections own a test; this says what is KNOWN
-   * about them, which is a different (and more honest) question: a section whose
-   * every test has never executed is `never-run`, not a green.
-   */
-  byStatus: Record<GuardCoveragePlainStatus, number>
-  /** The flow-led rollup over the same manifest. */
-  flows: GuardFlowsCoverageSummary
 }
 
 /** Last-run rollup from `guard/LATEST.json`. */
@@ -147,16 +115,6 @@ export interface GuardLastGenerateSummary {
   fidelityRejections: number
   errors: number
   /**
-   * Ready-but-held scenarios: birth-passed candidates a section's unsettled state
-   * withheld (the `M` in `N written · M ready but held (F findings · E errors)`).
-   * `heldByFindings`/`heldByErrors` are the blockers OF the held sections — the
-   * findings/errors that hold those scenarios back (a finding/error in a section
-   * with no ready work counts in neither). 0 on older reports (no `heldSections`).
-   */
-  readyButHeld: number
-  heldByFindings: number
-  heldByErrors: number
-  /**
    * Stages that lost LLM calls, so a partially failed generate never reads as a
    * clean one (and an `llm-failed` abort names the stage that lost everything).
    * Empty when every call landed — or when the report predates the field.
@@ -175,10 +133,8 @@ export interface GuardLastGenerateSummary {
  * The ALL-claims tally: every claim of every kept spec doc, counted under the
  * five coverage words through the SAME per-claim derivation the Claims view
  * renders — so the overview bar and the claim list can never disagree, and it
- * always sums to the real claim count. This is the whole-corpus truth the
- * manifest-scoped `GuardCoverageSummary.byStatus` is not: that one counts only
- * flow-bound sections, so a Blocked or Not testable claim no flow carries is
- * invisible to it by construction.
+ * always sums to the real claim count — the whole-corpus truth, where the
+ * manifest's flow rollup counts only the flows that bind something.
  */
 export interface GuardClaimTotals {
   /** Every claim across the kept docs — the bar's denominator. */
@@ -187,7 +143,8 @@ export interface GuardClaimTotals {
 }
 
 export interface GuardStatusSummary {
-  coverage: GuardCoverageSummary | null
+  /** The flow-led rollup over the manifest; null without a manifest. */
+  flows: GuardFlowsCoverageSummary | null
   /** Null when the caller could not derive it (no corpus / doc reads unavailable). */
   claims: GuardClaimTotals | null
   lastRun: GuardLastRunSummary | null
@@ -202,20 +159,13 @@ export function composeGuardStatus(
   claims: GuardClaimTotals | null = null,
 ): GuardStatusSummary {
   return {
-    coverage: manifest ? summarizeCoverage(manifest, latest) : null,
+    flows: manifest ? summarizeFlows(manifest, runOutcomeLookup(latest)) : null,
     claims,
     lastRun: latest
       ? { ranAt: latest.run.ranAt, branch: latest.run.branch, commit: latest.run.commit, summary: latest.summary }
       : null,
     lastGenerate: result ? summarizeGenerate(result) : null,
   }
-}
-
-/** A zeroed per-driver classification record (plus untestable + unclassified). */
-function emptyClassification(): GuardCoverageSummary['classification'] {
-  const byDriver = {} as Record<GuardDriverId, number>
-  for (const id of guardDriverIds) byDriver[id] = 0
-  return { ...byDriver, untestable: 0, unclassified: 0 }
 }
 
 /**
@@ -255,82 +205,6 @@ export function guardUnadjudicatedEffect(entry: GuardUnadjudicatedStage): string
  */
 export const GUARD_UNADJUDICATED_REMEDY =
   'The tests are committed and their flows were left unsettled, so re-running Flow generation once the model is reachable adjudicates them — authoring is cached, so the re-run pays for the verdicts, not for writing the tests again.'
-
-/** What a section's flows say about the driver it would be tested on. */
-interface SectionSurfaces {
-  /**
-   * Drivers the section's flows actually own a scenario on — the UNION over each
-   * scenario's own drivers, so a test that drives the UI and reads the result over
-   * HTTP puts its section under both.
-   */
-  scenarios: Set<GuardDriverId>
-  /** Drivers an `awaiting-driver` gap on the section's flows waits for. */
-  awaiting: Set<GuardDriverId>
-  /** True when a flow binding this section settled as untestable / no-claim. */
-  untestable: boolean
-}
-
-/** The manifest's per-section surface view, keyed `doc\0anchor`. */
-function sectionSurfaces(manifest: GuardManifest): Map<string, SectionSurfaces> {
-  const bySection = new Map<string, SectionSurfaces>()
-  for (const flow of manifest.flows) {
-    for (const binding of flow.bindings) {
-      const key = `${binding.doc}\0${binding.anchor}`
-      let view = bySection.get(key)
-      if (!view) {
-        view = { scenarios: new Set(), awaiting: new Set(), untestable: false }
-        bySection.set(key, view)
-      }
-      for (const s of flow.scenarios) for (const driver of s.drivers) view.scenarios.add(driver)
-      for (const gap of flow.gaps) {
-        if (gap.kind === 'awaiting-driver' && gap.driver) view.awaiting.add(gap.driver)
-        else if (gap.kind === 'untestable' || gap.kind === 'no-claim') view.untestable = true
-      }
-    }
-  }
-  return bySection
-}
-
-/** The first driver of `candidates` in registry order — the section's primary surface. */
-function primaryDriver(candidates: ReadonlySet<GuardDriverId>): GuardDriverId | null {
-  for (const id of guardDriverIds) if (candidates.has(id)) return id
-  return null
-}
-
-function summarizeCoverage(manifest: GuardManifest, latest: GuardLatest | null): GuardCoverageSummary {
-  const classification = emptyClassification()
-  const sections = guardManifestSections(manifest)
-  const surfaces = sectionSurfaces(manifest)
-  const outcomeOf = runOutcomeLookup(latest)
-  const flowStatus = new Map(
-    manifest.flows.map((f) => [f.flowId, manifestFlowCoverageStatus(f, outcomeOf)] as const),
-  )
-  const byStatus = emptyPlainTotals()
-  let withScenarios = 0
-  for (const s of sections) {
-    if (s.scenarioIds.length > 0) withScenarios++
-    // Each section counts ONCE, under the surface that best describes it: the
-    // driver its flows' scenarios run on, else the driver they await, else
-    // untestable — and `unclassified` only when the flows recorded neither.
-    const view = surfaces.get(`${s.doc}\0${s.anchor}`)
-    const driver = view && (primaryDriver(view.scenarios) ?? primaryDriver(view.awaiting))
-    if (driver) classification[driver]++
-    else if (view?.untestable) classification.untestable++
-    else classification.unclassified++
-    // …and ONCE more under its coverage WORD: the worst of the flows binding it,
-    // by the one precedence every guard rollup uses.
-    byStatus[
-      worstCoveragePlainStatus(s.flowIds.map((id) => flowStatus.get(id) ?? 'unguarded'))
-    ]++
-  }
-  return {
-    totalSections: sections.length,
-    withScenarios,
-    classification,
-    byStatus,
-    flows: summarizeFlows(manifest, outcomeOf),
-  }
-}
 
 /** A zeroed count per coverage word. */
 function emptyPlainTotals(): Record<GuardCoveragePlainStatus, number> {
@@ -426,12 +300,6 @@ function summarizeGenerate(r: GuardGenerateReport): GuardLastGenerateSummary {
       }
     }
   }
-  const heldSections = r.heldSections ?? []
-  const heldKeys = new Set(heldSections.map((h) => `${h.doc}\0${h.anchor}`))
-  const readyButHeld = heldSections.reduce((n, h) => n + h.readyScenarios.length, 0)
-  const heldByFindings = r.birthFindings.filter((f) => heldKeys.has(`${f.doc}\0${f.anchor}`)).length
-  const heldByErrors = r.errors.filter((e) => heldKeys.has(`${e.doc}\0${e.anchor}`)).length
-
   return {
     generatedAt: r.generatedAt,
     status: r.status,
@@ -447,9 +315,6 @@ function summarizeGenerate(r: GuardGenerateReport): GuardLastGenerateSummary {
     birthFindings: r.birthFindings.length,
     fidelityRejections: r.birthFindings.filter((f) => f.kind === 'fidelity').length,
     errors: r.errors.length,
-    readyButHeld,
-    heldByFindings,
-    heldByErrors,
     llmFailures: r.llmFailures ?? [],
     unadjudicated: r.unadjudicated ?? [],
     ...(r.usage ? { usage: r.usage } : {}),

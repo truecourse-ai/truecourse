@@ -41,27 +41,22 @@ const latest: GuardLatest = {
     {
       id: 'a.web.1',
       title: 'signs in',
-      binds: { doc: 'docs/auth.md', section: 'sign-in', fingerprint: 'sha256:x', sentences: ['sign-in'] },
+      binds: { doc: 'docs/auth.md', sentences: ['sign-in'] },
       outcome: 'fail',
       durationMs: 5,
     },
   ],
-  sections: [],
 };
 
 const report: GuardGenerateReport = {
   generatedAt: '2026-02-02T00:00:00Z',
   status: 'ok',
-  sectionsTotal: 1,
-  sectionsChanged: 1,
-  skippedUnchanged: 0,
   noChanges: false,
   written: [],
   coverageGaps: [],
   birthFindings: [],
   errors: [],
   extractionFailures: [],
-  orphaned: [],
 };
 
 describe('PgGuardStore evidence bytes', () => {

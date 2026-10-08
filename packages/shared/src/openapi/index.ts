@@ -6,8 +6,8 @@
  * method on a path) becomes a bindable section that flows through the existing
  * extract → author → birth guard pipeline unchanged, and `guard run`'s
  * stale/orphan detection works on it. This module is imported by BOTH the guard
- * runner's section index (which the generator also uses) and spec-scan discovery,
- * so detection and canonical serialization have exactly one implementation.
+ * generator's document plan and spec-scan discovery, so detection and canonical
+ * serialization have exactly one implementation.
  *
  * It is a SUBPATH export (`@truecourse/shared/openapi`), deliberately kept OUT of
  * the package root so the node-free dashboard client never pulls `js-yaml` into
@@ -168,9 +168,9 @@ export class OpenApiOversizeError extends Error {
 
 /**
  * Slice an OpenAPI document into its operation sections, in document order.
- * Returns `[]` when the content is not an OpenAPI doc or declares no paths. Both
- * the guard runner's section index and (via it) the generator go through this
- * function, so generate and run derive byte-identical identities.
+ * Returns `[]` when the content is not an OpenAPI doc or declares no paths. The
+ * guard generator's document plan and the interface service both go through this
+ * function, so they derive byte-identical operations.
  *
  * With a {@link RefResolutionContext} a pre-pass inlines external `$ref` targets
  * (split specs) before the in-file resolver runs; without one, external refs are

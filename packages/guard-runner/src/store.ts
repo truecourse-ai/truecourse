@@ -26,8 +26,8 @@ import {
   scenariosDir,
 } from '@truecourse/shared/work-tree'
 import {
+  ClaimsFileSchema,
   GuardAutoResolutionsSchema,
-  GuardClaimsFileSchema,
   GuardFlowsFileSchema,
   GuardGenerateReportSchema,
   GuardHistorySchema,
@@ -37,8 +37,8 @@ import {
   InterfacesFragmentSchema,
   INTERFACE_READABLE_KINDS,
   rootPlaceOf,
+  type ClaimsFile,
   type GuardAutoResolutions,
-  type GuardClaimsFile,
   type GuardFlowsFile,
   type GuardGenerateReport,
   type GuardHistory,
@@ -72,7 +72,6 @@ export {
   guardResultPath,
   guardRunPath,
   guardRunsDir,
-  guardSectionsPath,
   guardSetupFindingsPath,
   guardSetupPath,
   guardWorldDirtyMarkerPath,
@@ -439,17 +438,18 @@ export function readGuardFlowsCorpus(repoRoot: string): GuardFlowsFile | null {
 }
 
 /**
- * Read the committed claim corpus, or `null` when it is absent or unparseable. A
- * missing file is "claims have never been extracted here", not a failure: the
- * cross-checks that resolve milestone and milestone-identity references against
- * it simply have nothing to check.
+ * Read the committed claim corpus — the claims of this repository's documents,
+ * as the last generate took them from the scan — or `null` when it is absent or
+ * unparseable. A missing file is "no generate has run here", not a failure: the
+ * cross-checks that resolve milestone references against it simply have nothing
+ * to check.
  */
-export function readGuardClaimsCorpus(repoRoot: string): GuardClaimsFile | null {
-  return readJsonOr(guardClaimsPath(repoRoot), GuardClaimsFileSchema, null)
+export function readGuardClaimsCorpus(repoRoot: string): ClaimsFile | null {
+  return readJsonOr(guardClaimsPath(repoRoot), ClaimsFileSchema, null)
 }
 
 /** Write the claim corpus atomically. */
-export function writeGuardClaims(repoRoot: string, claims: GuardClaimsFile): string {
+export function writeGuardClaims(repoRoot: string, claims: ClaimsFile): string {
   const target = guardClaimsPath(repoRoot)
   atomicWriteJson(target, claims)
   return target

@@ -106,7 +106,7 @@ function commitPriorFlow(r: string): { manifest: string; scenario: string; file:
       {
         flowId: 'version',
         flowFingerprint: 'fp-version',
-        bindings: [{ doc: DOC, anchor: 'version', fingerprint: binds.fingerprint, sentences: ['version'] }],
+        bindings: binds,
         scenarios: [{ id: 'version', drivers: ['cli'], status: 'passing' }],
         interfaces: [],
         // A null hash re-detects the flow as work, so the run really does re-author
@@ -160,7 +160,7 @@ describe('flow synthesis losing every session aborts before flows.json is rewrit
     const res = await runGenerate({
       repoRoot: r,
       flowsAreaSession: flowsAreaSessionOf(() => ({
-        flows: [{ title: 'Invented', goal: 'g', milestones: [{ order: 1, doc: DOC, anchor: 'version', claimTitle: 'nothing like a claim', sentences: ['version'] }] }],
+        flows: [{ title: 'Invented', goal: 'g', milestones: [{ order: 1, claimId: `claim::${DOC}::nothing-like-a-claim` }] }],
         noFlowClaims: [],
       })),
     })

@@ -61,9 +61,9 @@ describe('materializeStoredGuardState', () => {
   it('decodes captured report text before writing it into the next work tree', async () => {
     await storeSet();
     const report = {
-      generatedAt: '2026-01-01T00:00:00Z', status: 'ok' as const, sectionsTotal: 1, sectionsChanged: 1,
-      skippedUnchanged: 0, noChanges: false, written: [], birthFindings: [], errors: [], extractionFailures: [], orphaned: [],
-      coverageGaps: [{ doc: 'README.md', anchor: 'download', kind: 'no-interface' as const, reason: '%PDF\u0000\ud800' }],
+      generatedAt: '2026-01-01T00:00:00Z', status: 'ok' as const,
+      noChanges: false, written: [], birthFindings: [], errors: [], extractionFailures: [],
+      coverageGaps: [{ flowId: 'download', kind: 'no-interface' as const, reason: '%PDF\u0000\ud800' }],
     };
     await writeGuardResult({ repoKey: REPO, commitSha: COMMIT }, report);
     await materializeStoredGuardState(REPO, treeDir);

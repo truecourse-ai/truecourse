@@ -57,7 +57,7 @@ describe('the milestone chain', () => {
         {
           order: 1,
           doc: 'docs/conversion.md',
-          anchor: 'conversion-behaviors',
+          claimId: 'claim::docs/conversion.md::conversion-behaviors',
           claimTitle: 'Conversion behaviors', sentences: ['conversion-behaviors'],
           headingText: 'Conversion behaviors',
           live: true,

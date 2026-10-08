@@ -41,8 +41,8 @@ const flow = (id: string, title: string) => ({
   title,
   goal: `${title}.`,
   fingerprint: `sha256:${id}`,
-  milestones: [{ order: 1, doc: DOC, anchor: 'expenses', claimTitle: `${title} works`, sentences: ['expenses'] }],
-  bindings: [{ doc: DOC, anchor: 'expenses', fingerprint: 'sha256:x', sentences: ['expenses'] }],
+  milestones: [{ order: 1, doc: DOC, claimId: `claim::${id}`, claimTitle: `${title} works`, sentences: ['expenses'] }],
+  bindings: [{ doc: DOC, sentences: ['expenses'] }],
   composedOf: [],
   synthesisInputsHash: 'sha256:s',
 });
@@ -99,16 +99,12 @@ const TESTS: FlowTestsFile = {
 const REPORT: GuardGenerateReport = {
   generatedAt: '2026-10-02T12:00:00.000Z',
   status: 'ok',
-  sectionsTotal: 1,
-  sectionsChanged: 1,
-  skippedUnchanged: 0,
   noChanges: false,
   written: [],
   coverageGaps: [],
   birthFindings: [],
   errors: [],
   extractionFailures: [],
-  orphaned: [],
 };
 
 let client: PGlite;
@@ -210,7 +206,6 @@ describe('flows proven by a Playwright test', () => {
       run: { runId: 'run-2', ranAt, branch: 'main', commit: COMMIT, recipeFingerprint: 'product-world' },
       summary: { total: 3, pass: 1, fail: 1, stale: 0, orphaned: 0, error: 1, blocked: 0 },
       scenarios: [],
-      sections: [],
       flowTests: [
         // Accepted failing, and the product now does what the documents say.
         ran('edit-expense', 'failing', 'pass'),

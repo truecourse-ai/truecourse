@@ -21,10 +21,10 @@ import {
   type GuardScenario,
   type Interface,
 } from '@truecourse/shared'
-import { slugifyHeading, scenariosDir, loadScenarios } from '@truecourse/guard-runner'
+import { slugifyHeading } from '@truecourse/shared'
+import { scenariosDir, loadScenarios } from '@truecourse/guard-runner'
 import { RawGeneratedScenarioSchema, rawScenarioSchemaFor, type RawGeneratedScenario } from './schemas.js'
 import { flattenZodError } from './validate.js'
-import type { SectionInput } from './section-plan.js'
 
 /** The leaf heading segment of an anchor — the id stem (`a/b/rate-limit` → `rate-limit`). */
 export function anchorLeaf(anchor: string): string {
@@ -45,18 +45,18 @@ export function assignScenarioId(flowId: string, _surface: GuardDriverId, used: 
   }
 }
 
-/** The directory a flow's generated scenarios land in: its primary section's area,
- *  else that section's doc. A flow spanning areas files under the FIRST milestone's. */
-export function areaOrDocSlug(section: SectionInput): string {
-  if (section.areaTags.length > 0) return slugifyHeading(section.areaTags[0]) || 'area'
-  const base = path.basename(section.doc).replace(/\.[^.]+$/, '')
+/** The directory a flow's generated scenarios land in: its primary document's area,
+ *  else that document. A flow spanning areas files under the FIRST milestone's. */
+export function areaOrDocSlug(primary: { doc: string; areaTags: readonly string[] }): string {
+  if (primary.areaTags.length > 0) return slugifyHeading(primary.areaTags[0]) || 'area'
+  const base = path.basename(primary.doc).replace(/\.[^.]+$/, '')
   return slugifyHeading(base) || 'doc'
 }
 
 /**
  * Build the final scenario for one (flow, surface): engine-assigned `id`, the
  * flow's id+fingerprint, the interface path it grounds on (ids + fingerprints), and
- * the flow's section bindings DENORMALIZED into `binds` so the runner resolves
+ * the flow's bindings DENORMALIZED into `binds` so the runner resolves
  * staleness with no flow lookup. The model's behavioral fields (title, setup,
  * steps with their `milestone` annotations, normalize) are kept as authored.
  * Throws if the result fails the strict schema.
@@ -102,7 +102,7 @@ export function buildFlowScenario(opts: {
       path: interfaces.map((j) => j.id),
       fingerprints: interfaces.map((j) => j.fingerprint || interfaceFingerprint(j)),
     },
-    binds: flow.bindings.map((b) => ({ doc: b.doc, section: b.anchor, fingerprint: b.fingerprint, sentences: [...b.sentences] })),
+    binds: flow.bindings.map((b) => ({ doc: b.doc, sentences: [...b.sentences] })),
     ...(surface === 'api' && server && server !== defaultServer ? { server } : {}),
     ...(raw.world ? { world: raw.world } : {}),
     ...(raw.setup ? { setup: raw.setup } : {}),

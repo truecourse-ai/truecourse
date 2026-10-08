@@ -92,7 +92,8 @@ it('blocks saved ambiguous request-count evidence while an independent scenario 
   const root = makeTempRepo(); repos.push(root)
   const serve = ['node', path.resolve('tests/fixtures/guard-provider-control/server.mjs')]
   writeApiRecipe(root, { serve, healthPath: '/health' })
-  const milestones = [{ order: 1, doc: 'docs/spec.md', anchor: 'cli/version', claimTitle: 'Conversion requests', sentences: ['cli/version'], proofDrivers: ['api'], verification: {
+  const bound = specBinds('cli/version')[0]
+  const milestones = [{ order: 1, doc: bound.doc, claimId: 'claim::docs/spec.md::conversion-requests', claimTitle: 'Conversion requests', sentences: bound.sentences, proofDrivers: ['api'], verification: {
     scope: 'api', method: 'behavior', observable: 'Request evidence', cases: [
       { id: 'count', claim: 'Count requests', method: 'behavior', requires: ['http', 'provider-control'], conditions: [], providerControls: [{ service: 'provider', operations: ['call-count'] }] },
       { id: 'health', claim: 'Health responds', method: 'behavior', requires: ['http'], conditions: [] },
@@ -100,7 +101,7 @@ it('blocks saved ambiguous request-count evidence while an independent scenario 
   } }]
   const corpus = GuardFlowsFileSchema.parse({ version: 1, generatedAt: new Date().toISOString(), flows: [{
     id: 'convert', title: 'Convert', goal: 'Convert', fingerprint: 'sha256:temporary', milestones,
-    bindings: [{ doc: 'docs/spec.md', anchor: 'cli/version', fingerprint: specBinds('cli/version')[0].fingerprint, sentences: ['cli/version'] }], composedOf: [], synthesisInputsHash: 'inputs',
+    bindings: [bound], composedOf: [], synthesisInputsHash: 'inputs',
   }] })
   corpus.flows[0].fingerprint = flowFingerprint(corpus.flows[0].milestones)
   fs.mkdirSync(path.join(root, '.truecourse/scenarios'), { recursive: true })

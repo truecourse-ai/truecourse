@@ -190,7 +190,7 @@ export function GuardCoverageOverview({
     };
   }, [repoId, reloadKey, cacheKey]);
 
-  const coverage = status?.coverage ?? null;
+  const flows = status?.flows ?? null;
   const claimTotals = status?.claims ?? null;
   const lastGenerate = status?.lastGenerate ?? null;
   const lastRun = status?.lastRun ?? null;
@@ -246,20 +246,18 @@ export function GuardCoverageOverview({
           <p className="mt-0.5 text-[11px] text-muted-foreground">
             {docsCount} document{docsCount === 1 ? '' : 's'}
             {claimTotals ? ` · ${claimTotals.total} claim${claimTotals.total === 1 ? '' : 's'}` : ''}
-            {coverage ? ` · ${coverage.withScenarios} with tests` : ''}
             {''}
           </p>
         </div>
 
-        {coverage ? (
+        {flows ? (
           <>
-            {/* The flow-bound summary stands in on servers without the tally. */}
             <CompositionBar
               label="Claims"
-              segments={fiveWordSegments(claimTotals?.byStatus ?? coverage.byStatus)}
+              segments={claimTotals ? fiveWordSegments(claimTotals.byStatus) : []}
               {...(claimNotes ? { note: claimNotes } : {})}
             />
-            <CompositionBar label="Flows" segments={fiveWordSegments(coverage.flows.byStatus)} />
+            <CompositionBar label="Flows" segments={fiveWordSegments(flows.byStatus)} />
             <CompositionBar label="Tests" segments={testSegments} />
 
             <CompositionBar

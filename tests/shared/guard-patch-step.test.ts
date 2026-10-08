@@ -24,7 +24,7 @@ import {
   stepCaptureNames,
 } from '@truecourse/shared'
 
-const BINDS = [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x', sentences: ['a/b'] }]
+const BINDS = [{ doc: 'docs/spec.md', sentences: ['a/b'] }]
 
 /** A scenario whose one step patches a file the program itself created. */
 const PATCH_SCENARIO = {

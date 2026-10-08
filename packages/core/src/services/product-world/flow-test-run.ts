@@ -165,7 +165,6 @@ export function flowTestRunLatest(run: {
       blocked: 0,
     },
     scenarios: [],
-    sections: [],
     flowTests: run.flowTests,
   };
 }

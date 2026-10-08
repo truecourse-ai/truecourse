@@ -1,10 +1,8 @@
 {
  "tests/fixtures/doc-sentences/design-system.md": {
-  "markdown": true,
   "sections": [
    {
     "anchor": "design-system-2",
-    "fingerprint": "sha256:9081e1f251b8af68bf090f8454323a4a609be554f06e455081fe9f6cefabe1fb",
     "headingText": "design-system",
     "level": 0,
     "startLine": 1,
@@ -14,7 +12,6 @@
    },
    {
     "anchor": "design-system",
-    "fingerprint": "sha256:7f95396750add957ccc866ebeb021fbb7d429b875ed4a2a9a4ef31dfdf708660",
     "headingText": "Design System",
     "level": 1,
     "startLine": 51,
@@ -24,7 +21,6 @@
    },
    {
     "anchor": "design-system/buttons",
-    "fingerprint": "sha256:b7099b22335dd5670c97bed7b9a0012e1b5aac5c9547b15da76089f74a417cf1",
     "headingText": "Buttons",
     "level": 2,
     "startLine": 55,
@@ -34,7 +30,6 @@
    },
    {
     "anchor": "design-system/dashboard",
-    "fingerprint": "sha256:ef463258527be8da8ad50b4ed73445bae9fb441087594aa288dc8f4deffec237",
     "headingText": "Dashboard",
     "level": 2,
     "startLine": 64,
@@ -44,7 +39,6 @@
    },
    {
     "anchor": "design-system/color",
-    "fingerprint": "sha256:d5f4c30955965a6730d3eb3139aa4167c1d3ed48deab43c269c571cda50ad61f",
     "headingText": "Color",
     "level": 2,
     "startLine": 68,
@@ -55,11 +49,9 @@
   ]
  },
  "tests/fixtures/doc-sentences/getting-started.mdx": {
-  "markdown": true,
   "sections": [
    {
     "anchor": "introduction-to-reactive-resume",
-    "fingerprint": "sha256:bf91d6e037402a511649c044bc782cf4dbef966770a509de6b5360f9e0b132d3",
     "headingText": "Introduction to Reactive Resume",
     "level": 0,
     "startLine": 1,
@@ -69,7 +61,6 @@
    },
    {
     "anchor": "what-is-reactive-resume",
-    "fingerprint": "sha256:daafcd993f36dd068e9f5d6cc918e366a07b6210d45ce73bf479465713614860",
     "headingText": "What is Reactive Resume?",
     "level": 2,
     "startLine": 10,
@@ -79,7 +70,6 @@
    },
    {
     "anchor": "key-features",
-    "fingerprint": "sha256:98592ff7c9c94c33b39a787f62f52b24370d5abafae7b3e161c6152e6f08cc13",
     "headingText": "Key features",
     "level": 2,
     "startLine": 29,
@@ -89,7 +79,6 @@
    },
    {
     "anchor": "getting-started",
-    "fingerprint": "sha256:10f4b4adf74c9a493854227ac68fc9c59ec58a45fa8d1d929d43baf9abf0ce83",
     "headingText": "Getting started",
     "level": 2,
     "startLine": 64,
@@ -99,7 +88,6 @@
    },
    {
     "anchor": "tech-stack",
-    "fingerprint": "sha256:85b04d442de1217eebf6fefee1dcfc341dde3f9a5c7190fdd0d240ae439a368b",
     "headingText": "Tech stack",
     "level": 2,
     "startLine": 77,
@@ -109,7 +97,6 @@
    },
    {
     "anchor": "community-support",
-    "fingerprint": "sha256:cbe311079984e1a83df5b98e13795f39bf7f359ab35261c1bbf9c716e62ca1d1",
     "headingText": "Community & support",
     "level": 2,
     "startLine": 91,
@@ -120,11 +107,9 @@
   ]
  },
  "tests/fixtures/doc-sentences/json-resume-schema.mdx": {
-  "markdown": true,
   "sections": [
    {
     "anchor": "json-resume-schema",
-    "fingerprint": "sha256:e7faaaeb59e7861c1fa17ad3a7968c8bce20c681038f7f786909ff3719e8a5ed",
     "headingText": "JSON Resume schema",
     "level": 0,
     "startLine": 1,
@@ -134,7 +119,6 @@
    },
    {
     "anchor": "the-vision",
-    "fingerprint": "sha256:7e09d2f9821f486a85ec0853508f0d2582e1d21099f3cf215944484d9f30af86",
     "headingText": "The vision",
     "level": 2,
     "startLine": 6,
@@ -144,7 +128,6 @@
    },
    {
     "anchor": "the-schema-endpoint",
-    "fingerprint": "sha256:b83eba9d16eb8103395899f088e56bf3da3f6cc9de06b55007d6b225568efcf1",
     "headingText": "The schema endpoint",
     "level": 2,
     "startLine": 21,
@@ -154,7 +137,6 @@
    },
    {
     "anchor": "schema-dialect-and-document-shape",
-    "fingerprint": "sha256:bdc755b2338177b25e6d0b0c651af26c1d014dc932fcd53ed149b834104f5179",
     "headingText": "Schema dialect and document shape",
     "level": 2,
     "startLine": 34,
@@ -164,7 +146,6 @@
    },
    {
     "anchor": "using-the-schema",
-    "fingerprint": "sha256:ab811464550b8c1a2b3265d3f9723abd8574a0e36de6a0b520ca0b65d229bfbd",
     "headingText": "Using the schema",
     "level": 2,
     "startLine": 48,
@@ -174,7 +155,6 @@
    },
    {
     "anchor": "using-the-schema/validating-resume-data",
-    "fingerprint": "sha256:5c470974b61820295acc6ac3bbe87235d32a6e4955b3456205b5a4721398d5d5",
     "headingText": "Validating resume data",
     "level": 3,
     "startLine": 50,
@@ -184,7 +164,6 @@
    },
    {
     "anchor": "using-the-schema/ide-autocompletion",
-    "fingerprint": "sha256:d0f4734889155fd085205c331511e19d6d0a123bbae44c8e0d25e39ca4837f66",
     "headingText": "IDE autocompletion",
     "level": 3,
     "startLine": 67,
@@ -194,7 +173,6 @@
    },
    {
     "anchor": "using-the-schema/building-integrations",
-    "fingerprint": "sha256:abeb124ac4c42a0f9492fb3c7498ac639100559b17422c644c3d08bee4ccfdb0",
     "headingText": "Building integrations",
     "level": 3,
     "startLine": 84,
@@ -204,7 +182,6 @@
    },
    {
     "anchor": "schema-structure-overview",
-    "fingerprint": "sha256:883d6e4a0d39b64815ddd60ef2c033957b1726d55b86c2f1c7506fd28d796925",
     "headingText": "Schema structure overview",
     "level": 2,
     "startLine": 93,
@@ -214,7 +191,6 @@
    },
    {
     "anchor": "for-developers-and-job-portals",
-    "fingerprint": "sha256:ed7487ec95b41af1a7bde3f25f79883472ea7cde183ec780207d93bb8c0807f8",
     "headingText": "For developers and job portals",
     "level": 2,
     "startLine": 133,
@@ -224,7 +200,6 @@
    },
    {
     "anchor": "complete-json-schema",
-    "fingerprint": "sha256:786cd085e98d3a4aef98fb21bd79dc43c09e9f8f6232481ac369c923d288d549",
     "headingText": "Complete JSON Schema",
     "level": 2,
     "startLine": 144,
@@ -235,11 +210,9 @@
   ]
  },
  "tests/fixtures/doc-sentences/quickstart.mdx": {
-  "markdown": true,
   "sections": [
    {
     "anchor": "quickstart",
-    "fingerprint": "sha256:e58a37ba95f8bb0b4c39eeb65136a722838ca29b9c12f46e9277262a3732901c",
     "headingText": "Quickstart",
     "level": 0,
     "startLine": 1,
@@ -249,7 +222,6 @@
    },
    {
     "anchor": "options",
-    "fingerprint": "sha256:697ac21b98ecaf90dafc9b695af31d1f4ccd474f325b836841a724be1254af42",
     "headingText": "Options",
     "level": 2,
     "startLine": 6,
@@ -259,7 +231,6 @@
    },
    {
     "anchor": "using-the-cloud-version",
-    "fingerprint": "sha256:c8f1dbd25e8ca1fd81b6e03e98684c0e3527734eec7072ce63ee8d56507cc532",
     "headingText": "Using the cloud version",
     "level": 2,
     "startLine": 21,
@@ -269,7 +240,6 @@
    },
    {
     "anchor": "self-host-with-docker",
-    "fingerprint": "sha256:a6098f3c78113be6b8065faad93229cfd1debb189e9e1a92bdf58b32af7908ef",
     "headingText": "Self-host with Docker",
     "level": 2,
     "startLine": 50,
@@ -279,7 +249,6 @@
    },
    {
     "anchor": "self-host-with-docker/prerequisites",
-    "fingerprint": "sha256:8b4384b009bd001987838b72935681f45b6c2c023a2b0dd01696eba76f97c34f",
     "headingText": "Prerequisites",
     "level": 3,
     "startLine": 58,
@@ -289,7 +258,6 @@
    },
    {
     "anchor": "self-host-with-docker/quick-deployment",
-    "fingerprint": "sha256:47ff9600ced6c6f125c5664a5750e300e972dd44c56a74d8c9fdf6543efcf311",
     "headingText": "Quick deployment",
     "level": 3,
     "startLine": 70,
@@ -299,7 +267,6 @@
    },
    {
     "anchor": "self-host-with-docker/docker-compose-services",
-    "fingerprint": "sha256:09d6752c9ab5098320d54cfd031b951321ed15837d104200c7181bd363b94367",
     "headingText": "Docker Compose services",
     "level": 3,
     "startLine": 133,
@@ -310,11 +277,9 @@
   ]
  },
  "tests/fixtures/doc-sentences/readme.md": {
-  "markdown": true,
   "sections": [
    {
     "anchor": "readme",
-    "fingerprint": "sha256:bd92db6caac5b17713f582f1f3b9eb2e86a4851311b2fab208ec3a80ebdda4a6",
     "headingText": "readme",
     "level": 0,
     "startLine": 1,
@@ -324,7 +289,6 @@
    },
    {
     "anchor": "features",
-    "fingerprint": "sha256:d52497682c760240f411b40362e1ab56ca4422fafda1e2c914cea9c2c0f948f5",
     "headingText": "Features",
     "level": 2,
     "startLine": 45,
@@ -334,7 +298,6 @@
    },
    {
     "anchor": "templates",
-    "fingerprint": "sha256:9477c2d1b57738383b029a1695cf73fb65dfbc72529168bac55539551a9f49da",
     "headingText": "Templates",
     "level": 2,
     "startLine": 78,
@@ -345,11 +308,9 @@
   ]
  },
  "tests/fixtures/doc-sentences/schema-catalog.md": {
-  "markdown": true,
   "sections": [
    {
     "anchor": "reactive-resume-schema-reference",
-    "fingerprint": "sha256:2b55f64fe3967e4244ec9341c62a0b9a719b49ff81cef48eb7f38ea738b52195",
     "headingText": "Reactive Resume Schema Reference",
     "level": 1,
     "startLine": 1,
@@ -359,7 +320,6 @@
    },
    {
     "anchor": "reactive-resume-schema-reference/required-top-level-fields",
-    "fingerprint": "sha256:52680c2d7fd680f9381d795e0bd1b73d23bfc92aacf83be833563d72c08cd44c",
     "headingText": "Required top-level fields",
     "level": 2,
     "startLine": 7,
@@ -369,7 +329,6 @@
    },
    {
     "anchor": "reactive-resume-schema-reference/union-variant-shapes",
-    "fingerprint": "sha256:5aa28219bcc45f81172e9cbb43377128e00eeba79741609c80b16d6280534529",
     "headingText": "Union variant shapes",
     "level": 2,
     "startLine": 11,
@@ -379,7 +338,6 @@
    },
    {
     "anchor": "reactive-resume-schema-reference/field-catalog",
-    "fingerprint": "sha256:849f64b8182a34e6d235405b22a74b2bfb83319c78b6d29eb9e7885eca1e4057",
     "headingText": "Field catalog",
     "level": 2,
     "startLine": 32,
@@ -390,11 +348,9 @@
   ]
  },
  "tests/fixtures/doc-sentences/selecting-page-format.mdx": {
-  "markdown": true,
   "sections": [
    {
     "anchor": "example-pdfs",
-    "fingerprint": "sha256:bef356b0b48ec01fe7b8272b31ccc9f21f44ade4c908388c8f7f443090ad5435",
     "headingText": "Example PDFs",
     "level": 2,
     "startLine": 1,
@@ -404,78 +360,12 @@
    },
    {
     "anchor": "frequently-asked-questions",
-    "fingerprint": "sha256:f5d616341271acfc4f3793b5acefbe2127f15ecd786a3b3bf235804f048ef8ae",
     "headingText": "Frequently asked questions",
     "level": 2,
     "startLine": 26,
     "endLine": 51,
     "ownText": "## Frequently asked questions\n\n<AccordionGroup>\n  <Accordion title=\"Does Free-Form work with ATS systems?\">\n    Yes. An ATS parses the text in your PDF, not the page dimensions. Free-Form resumes work with applicant tracking systems.\n  </Accordion>\n\n<Accordion title=\"Can I switch formats after creating my resume?\">\n  Yes. You can change the format at any time from the Page section in the right sidebar. Your content is preserved.\n  Only the layout changes.\n</Accordion>\n\n<Accordion title=\"What if a job posting asks for a 'one-page resume'?\">\n  If the employer asks for a one-page resume and expects a traditional format, use A4 or Letter and fit your content on\n  a single page. See [Fitting content on a page](/guides/fitting-content-on-a-page) for tips.\n</Accordion>\n\n<Accordion title=\"Does Free-Form affect the file size?\">\n  Slightly. A longer single page may produce a marginally larger PDF than a paginated version of the same content, but\n  the difference is negligible for typical resume lengths.\n</Accordion>\n\n  <Accordion title=\"Which format should I use for LinkedIn?\">\n    LinkedIn doesn't display uploaded resumes in their original format; it extracts the content. Free-Form works fine for LinkedIn uploads.\n  </Accordion>\n</AccordionGroup>\n",
     "fullText": "## Frequently asked questions\n\n<AccordionGroup>\n  <Accordion title=\"Does Free-Form work with ATS systems?\">\n    Yes. An ATS parses the text in your PDF, not the page dimensions. Free-Form resumes work with applicant tracking systems.\n  </Accordion>\n\n<Accordion title=\"Can I switch formats after creating my resume?\">\n  Yes. You can change the format at any time from the Page section in the right sidebar. Your content is preserved.\n  Only the layout changes.\n</Accordion>\n\n<Accordion title=\"What if a job posting asks for a 'one-page resume'?\">\n  If the employer asks for a one-page resume and expects a traditional format, use A4 or Letter and fit your content on\n  a single page. See [Fitting content on a page](/guides/fitting-content-on-a-page) for tips.\n</Accordion>\n\n<Accordion title=\"Does Free-Form affect the file size?\">\n  Slightly. A longer single page may produce a marginally larger PDF than a paginated version of the same content, but\n  the difference is negligible for typical resume lengths.\n</Accordion>\n\n  <Accordion title=\"Which format should I use for LinkedIn?\">\n    LinkedIn doesn't display uploaded resumes in their original format; it extracts the content. Free-Form works fine for LinkedIn uploads.\n  </Accordion>\n</AccordionGroup>\n"
-   }
-  ]
- },
- "tests/fixtures/guard-fixture-api/openapi.yaml": {
-  "markdown": false,
-  "sections": [
-   {
-    "anchor": "paths/get-gethealth",
-    "fingerprint": "sha256:df94b02fba439074932b273d5b3e9ee23cd35370deef5b812172018b6fa72e0a",
-    "headingText": "GET /health",
-    "level": 1,
-    "startLine": 1,
-    "endLine": 165,
-    "ownText": "{\"method\":\"get\",\"operation\":{\"description\":\"Returns status 200 with an ok flag set to true when the service is up.\",\"operationId\":\"getHealth\",\"responses\":{\"200\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"ok\":{\"type\":\"boolean\"}},\"type\":\"object\"}}},\"description\":\"The service is healthy.\"}},\"summary\":\"Liveness probe\"},\"path\":\"/health\"}",
-    "fullText": "{\"method\":\"get\",\"operation\":{\"description\":\"Returns status 200 with an ok flag set to true when the service is up.\",\"operationId\":\"getHealth\",\"responses\":{\"200\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"ok\":{\"type\":\"boolean\"}},\"type\":\"object\"}}},\"description\":\"The service is healthy.\"}},\"summary\":\"Liveness probe\"},\"path\":\"/health\"}"
-   },
-   {
-    "anchor": "paths/get-listtodos",
-    "fingerprint": "sha256:172ebde7981612f1794745fe221bd84d788489e24f3e1788ed9e04fe7c0e11ec",
-    "headingText": "GET /todos",
-    "level": 1,
-    "startLine": 1,
-    "endLine": 165,
-    "ownText": "{\"method\":\"get\",\"operation\":{\"description\":\"Returns status 200 with a todos array holding every todo currently stored.\",\"operationId\":\"listTodos\",\"responses\":{\"200\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"todos\":{\"items\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"id\":{\"type\":\"integer\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"},\"type\":\"array\"}},\"type\":\"object\"}}},\"description\":\"The full todo list.\"}},\"summary\":\"List all todos\"},\"path\":\"/todos\"}",
-    "fullText": "{\"method\":\"get\",\"operation\":{\"description\":\"Returns status 200 with a todos array holding every todo currently stored.\",\"operationId\":\"listTodos\",\"responses\":{\"200\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"todos\":{\"items\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"id\":{\"type\":\"integer\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"},\"type\":\"array\"}},\"type\":\"object\"}}},\"description\":\"The full todo list.\"}},\"summary\":\"List all todos\"},\"path\":\"/todos\"}"
-   },
-   {
-    "anchor": "paths/post-createtodo",
-    "fingerprint": "sha256:4ef22c8dfa3f135bc28ce72a5e6be6371b6b34301add4b40b720d251e9e4277e",
-    "headingText": "POST /todos",
-    "level": 1,
-    "startLine": 1,
-    "endLine": 165,
-    "ownText": "{\"method\":\"post\",\"operation\":{\"description\":\"Creates a todo from a JSON body carrying a non-empty title. Returns status 201 with the created todo. A missing or empty title is a status 400 with an error of \\\"title is required\\\".\",\"operationId\":\"createTodo\",\"requestBody\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"title\":{\"type\":\"string\"}},\"required\":[\"title\"],\"type\":\"object\"}}},\"required\":true},\"responses\":{\"201\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"id\":{\"type\":\"integer\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"The created todo.\"},\"400\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"error\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"The title was missing or empty.\"}},\"summary\":\"Create a todo\"},\"path\":\"/todos\"}",
-    "fullText": "{\"method\":\"post\",\"operation\":{\"description\":\"Creates a todo from a JSON body carrying a non-empty title. Returns status 201 with the created todo. A missing or empty title is a status 400 with an error of \\\"title is required\\\".\",\"operationId\":\"createTodo\",\"requestBody\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"title\":{\"type\":\"string\"}},\"required\":[\"title\"],\"type\":\"object\"}}},\"required\":true},\"responses\":{\"201\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"id\":{\"type\":\"integer\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"The created todo.\"},\"400\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"error\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"The title was missing or empty.\"}},\"summary\":\"Create a todo\"},\"path\":\"/todos\"}"
-   },
-   {
-    "anchor": "paths/get-gettodo",
-    "fingerprint": "sha256:452ceb4c9ddb79786be4820b4b6b011fbbbd0e013e7e2ced888b14df34476ab7",
-    "headingText": "GET /todos/{id}",
-    "level": 1,
-    "startLine": 1,
-    "endLine": 165,
-    "ownText": "{\"method\":\"get\",\"operation\":{\"description\":\"Returns status 200 with the todo of the given id, or status 404 with an error of \\\"todo not found\\\" when no todo has that id.\",\"operationId\":\"getTodo\",\"parameters\":[{\"in\":\"path\",\"name\":\"id\",\"required\":true,\"schema\":{\"type\":\"integer\"}}],\"responses\":{\"200\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"id\":{\"type\":\"integer\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"The requested todo.\"},\"404\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"error\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"No todo has that id.\"}},\"summary\":\"Fetch one todo\"},\"path\":\"/todos/{id}\"}",
-    "fullText": "{\"method\":\"get\",\"operation\":{\"description\":\"Returns status 200 with the todo of the given id, or status 404 with an error of \\\"todo not found\\\" when no todo has that id.\",\"operationId\":\"getTodo\",\"parameters\":[{\"in\":\"path\",\"name\":\"id\",\"required\":true,\"schema\":{\"type\":\"integer\"}}],\"responses\":{\"200\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"id\":{\"type\":\"integer\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"The requested todo.\"},\"404\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"error\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"No todo has that id.\"}},\"summary\":\"Fetch one todo\"},\"path\":\"/todos/{id}\"}"
-   },
-   {
-    "anchor": "paths/delete-deletetodo",
-    "fingerprint": "sha256:f8fdc1373a965190899056ce4271131f29f293797b6d3fd18deb1c6cbbecd50b",
-    "headingText": "DELETE /todos/{id}",
-    "level": 1,
-    "startLine": 1,
-    "endLine": 165,
-    "ownText": "{\"method\":\"delete\",\"operation\":{\"description\":\"Deletes the todo and returns status 204 with an empty body, or status 404 when it does not exist.\",\"operationId\":\"deleteTodo\",\"parameters\":[{\"in\":\"path\",\"name\":\"id\",\"required\":true,\"schema\":{\"type\":\"integer\"}}],\"responses\":{\"204\":{\"description\":\"The todo was deleted.\"},\"404\":{\"description\":\"No todo has that id.\"}},\"summary\":\"Delete a todo\"},\"path\":\"/todos/{id}\"}",
-    "fullText": "{\"method\":\"delete\",\"operation\":{\"description\":\"Deletes the todo and returns status 204 with an empty body, or status 404 when it does not exist.\",\"operationId\":\"deleteTodo\",\"parameters\":[{\"in\":\"path\",\"name\":\"id\",\"required\":true,\"schema\":{\"type\":\"integer\"}}],\"responses\":{\"204\":{\"description\":\"The todo was deleted.\"},\"404\":{\"description\":\"No todo has that id.\"}},\"summary\":\"Delete a todo\"},\"path\":\"/todos/{id}\"}"
-   },
-   {
-    "anchor": "paths/patch-updatetodo",
-    "fingerprint": "sha256:5a46ea14e4f2b674ebba568ecd0da6b0346b5b74560e581757b23e383afda626",
-    "headingText": "PATCH /todos/{id}",
-    "level": 1,
-    "startLine": 1,
-    "endLine": 165,
-    "ownText": "{\"method\":\"patch\",\"operation\":{\"description\":\"Updates the done and/or title of the todo, returning status 200 with the updated todo, or status 404 when no todo has that id.\",\"operationId\":\"updateTodo\",\"parameters\":[{\"in\":\"path\",\"name\":\"id\",\"required\":true,\"schema\":{\"type\":\"integer\"}}],\"requestBody\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"}}}},\"responses\":{\"200\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"id\":{\"type\":\"integer\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"The updated todo.\"},\"404\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"error\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"No todo has that id.\"}},\"summary\":\"Update a todo\"},\"path\":\"/todos/{id}\"}",
-    "fullText": "{\"method\":\"patch\",\"operation\":{\"description\":\"Updates the done and/or title of the todo, returning status 200 with the updated todo, or status 404 when no todo has that id.\",\"operationId\":\"updateTodo\",\"parameters\":[{\"in\":\"path\",\"name\":\"id\",\"required\":true,\"schema\":{\"type\":\"integer\"}}],\"requestBody\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"}}}},\"responses\":{\"200\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"done\":{\"type\":\"boolean\"},\"id\":{\"type\":\"integer\"},\"title\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"The updated todo.\"},\"404\":{\"content\":{\"application/json\":{\"schema\":{\"properties\":{\"error\":{\"type\":\"string\"}},\"type\":\"object\"}}},\"description\":\"No todo has that id.\"}},\"summary\":\"Update a todo\"},\"path\":\"/todos/{id}\"}"
    }
   ]
  }

@@ -1,21 +1,20 @@
 /**
  * The guard drift/report shaping helpers — pure, deterministic, and the client
  * mirror of the core composition, so they get their own fast unit test: drift
- * ordering (fail → error → stale → orphaned, stable within tier), the report
- * settled/unsettled split, gap-by-kind + the full blocked-on tally, and error
- * pattern grouping.
+ * ordering (fail → error → stale → orphaned, stable within tier), and
+ * gap-by-kind + the full blocked-on tally.
  */
 
 import { describe, it, expect } from 'vitest';
 import type { GuardGenerateReport, GuardScenarioResult } from '@truecourse/shared';
-import { GUARD_DRIFT_ORDER, formatGuardDuration, orderGuardDrifts, sectionLeaf, shortFingerprint } from '@/lib/guard-drifts';
-import { blockedOnTally, gapsByKind, settledCounts } from '@/lib/guard-report';
+import { GUARD_DRIFT_ORDER, formatGuardDuration, orderGuardDrifts, shortFingerprint } from '@/lib/guard-drifts';
+import { blockedOnTally, gapsByKind } from '@/lib/guard-report';
 
 function scn(id: string, outcome: GuardScenarioResult['outcome']): GuardScenarioResult {
   return {
     id,
     title: id,
-    binds: { doc: 'docs/spec.md', section: id, fingerprint: 'sha256:x', sentences: [id] },
+    binds: { doc: 'docs/spec.md', sentences: [id] },
     outcome,
     durationMs: 1,
   };
@@ -64,11 +63,7 @@ describe('formatGuardDuration', () => {
   });
 });
 
-describe('sectionLeaf / shortFingerprint', () => {
-  it('takes the trailing heading of an anchor', () => {
-    expect(sectionLeaf('cli/version/flags')).toBe('flags');
-    expect(sectionLeaf('whole-doc')).toBe('whole-doc');
-  });
+describe('shortFingerprint', () => {
   it('strips the sha256 prefix and clips', () => {
     expect(shortFingerprint('sha256:9f2caabbccddeeff00')).toBe('9f2caabbccdd');
   });
@@ -77,41 +72,18 @@ describe('sectionLeaf / shortFingerprint', () => {
 const REPORT: GuardGenerateReport = {
   generatedAt: '2026-07-07T00:00:00.000Z',
   status: 'ok',
-  sectionsTotal: 20,
-  sectionsChanged: 10,
-  skippedUnchanged: 10,
   noChanges: false,
   written: [],
   coverageGaps: [
-    { doc: 'd', anchor: 'a1', kind: 'no-claim', reason: 'nothing assertable' },
-    { doc: 'd', anchor: 'a2', kind: 'awaiting-driver', driver: 'tui', reason: 'browser UI boundary' },
-    { doc: 'd', anchor: 'a3', kind: 'blocked-on', reason: 'blocked on git: needs a repo' },
-    { doc: 'd', anchor: 'a4', kind: 'blocked-on', reason: 'blocked on git, db: needs both' },
+    { flowId: 'f1', kind: 'no-claim', reason: 'nothing assertable' },
+    { flowId: 'f2', kind: 'awaiting-driver', driver: 'tui', reason: 'browser UI boundary' },
+    { flowId: 'f3', kind: 'blocked-on', reason: 'blocked on git: needs a repo' },
+    { flowId: 'f4', kind: 'blocked-on', reason: 'blocked on git, db: needs both' },
   ],
-  birthFindings: [
-    { doc: 'd', anchor: 'sec/x', title: 't1', step: 1, expected: 'e', actual: 'a' },
-    { doc: 'd', anchor: 'sec/y', title: 't2', step: 1, expected: 'e', actual: 'a' },
-  ],
-  errors: [
-    { doc: 'd', anchor: 'sec/x', message: 'invalid verb "frobnicate" at step 3' },
-    { doc: 'd', anchor: 'sec/z', message: 'invalid verb "wibble" at step 9' },
-    { doc: 'd', anchor: 'sec/w', message: 'schema mismatch on setup.files' },
-  ],
+  birthFindings: [],
+  errors: [],
   extractionFailures: [],
-  orphaned: [],
 };
-
-describe('settledCounts', () => {
-  it('splits changed sections into settled and unsettled (birth findings + errors)', () => {
-    // unsettled distinct (doc,anchor): sec/x, sec/y (findings) + sec/z, sec/w (errors) = 4
-    // (sec/x appears in both a finding and an error → counted once)
-    const c = settledCounts(REPORT);
-    expect(c.changed).toBe(10);
-    expect(c.unsettled).toBe(4);
-    expect(c.settled).toBe(6);
-    expect(c.unchanged).toBe(10);
-  });
-});
 
 describe('gapsByKind / blockedOnTally', () => {
   it('counts gaps by kind', () => {

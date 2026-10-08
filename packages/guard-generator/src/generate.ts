@@ -13,7 +13,7 @@ import { navigationGroundingProblem } from './proof-grounding.js'
 import { resolvePrerequisites } from '@truecourse/guard-runner'
 import { bindScenarioPrerequisites, scenarioCasePrerequisiteProblems, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowPrerequisiteShapeFingerprint, flowInvocationGaps } from './prerequisites.js'
 import { outcomeCorrection, reconcileRemaining, type RepairIssue } from './worker-repair.js'
-import { GUARD_OBSERVATION_CAPABILITIES, isCreditsExhausted, verificationRequirements, scenarioFullFlowDefect, type GuardEvidenceProofContext, type GuardCaseEvidence } from '@truecourse/shared'
+import { GUARD_OBSERVATION_CAPABILITIES, isCreditsExhausted, verificationRequirements, scenarioFullFlowDefect, sectionOfSentences, type GuardEvidenceProofContext, type GuardCaseEvidence } from '@truecourse/shared'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 /**
  * `guard generate` orchestration — the LLM pipeline that turns spec FLOWS into
@@ -24,9 +24,9 @@ import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
  *
  *   1. recipe   load `recipe.json`, or discover + verify one (proposal-only LLM —
  *               the one-shot deliberately KEPT).
- *   2. index    deterministic doc universe + section index + change detection.
- *   3. extract  one `guard-generate.extract` agent session per document →
- *               claims + untestable notes, anchors snapped to the live index.
+ *   2. index    deterministic doc universe + which documents changed.
+ *   3. claims   the scan's claims for the universe's documents, checked against
+ *               the live sentences and written as `scenarios/claims.json`.
  *               Claims are no longer the generation unit — they are the
  *               milestone vocabulary.
  *   4. interfaces deterministic, free: the app's own surfaces, mapped from the tree.
@@ -131,7 +131,6 @@ import {
   composeBlockedOnReason,
   bindRealizes,
   claimIdDoc,
-  claimIdentityKey,
   firstInvalidMatchPattern,
   guardDriver,
   guardScenarioDrivers,
@@ -183,9 +182,7 @@ import {
 } from '@truecourse/shared'
 import {
   planGuardWork,
-  collectWorkDocs,
   hasGuardUniverse,
-  sectionInputsKey,
   legacyFlowGenerationInputsHash,
   flowGenerationInputComponents,
   flowInterfaceFingerprintBag,
@@ -199,7 +196,7 @@ import {
 import { LEGACY_WORLD_CLASSIFY_PROMPT_FINGERPRINT } from './legacy-prompt-fingerprints.js'
 import { buildOperationIndex, matchedRequestSchemas, parseOperationSection, type OperationEntry } from './openapi-enrich.js'
 import { writeClaimsCorpus } from './claims-persist.js'
-import { claimAreaInputs, dismissedReason, docTreesOf, oneLine, placeClaims, readSpecClaims } from './claims-input.js'
+import { claimAreaInputs, dismissedReason, oneLine, placeClaims, readSpecClaims } from './claims-input.js'
 import { readSuppressedClaims } from './suppression.js'
 import {
   resolveSectionAuth,
@@ -232,7 +229,6 @@ import {
   synthesizeFlows,
   isFlowSynthesisWipeout,
   buildFlowAreas,
-  flowSectionKey,
   type FlowAreaDocInput,
   type FlowClaimInput,
   type FlowsAreaSessionSeam,
@@ -291,7 +287,6 @@ import {
 } from './serialize.js'
 
 /** Sentinel anchor for the single entry-preflight error — it belongs to no section. */
-const ENTRY_PREFLIGHT_ANCHOR = '(entry preflight)'
 
 /** One world-classify call covers at most this many flows — a single batched
  *  call over a whole corpus is the call most likely to time out, and a lost
@@ -367,7 +362,6 @@ export interface GeneratedScenarioInfo {
   title: string
   /** The scenario's PRIMARY binding — its flow's first milestone's section. */
   doc: string
-  anchor: string
   /** Repo-relative path of the written `.yaml`. */
   file: string
   /** The flow this scenario realizes. */
@@ -439,16 +433,6 @@ export interface GuardGenerateResult {
      */
     warnings?: string[]
   }
-  sectionsTotal: number
-  /** Sections whose text moved since the last generate, plus sections no flow binds. */
-  sectionsChanged: number
-  skippedUnchanged: number
-  /** Of `sectionsChanged`, the sections whose edit the claim-diff gate judged
-   *  cosmetic: their document's prior extraction was reused and no flow
-   *  re-authored for them. Absent on the abort results. */
-  cosmeticSections?: number
-  /** Live claim-diff gate calls this run made (cache hits excluded). */
-  claimDiffCalls?: number
   /** Cached match verdicts served although the surface's authored prose had
    *  moved under them. Absent on the abort results. */
   matchContextMoved?: number
@@ -483,7 +467,6 @@ export interface GuardGenerateResult {
    * every verdict landed.
    */
   unadjudicated: GuardUnadjudicatedStage[]
-  orphaned: { doc: string; anchor: string; scenarioIds: string[] }[]
   /**
    * Birth outcomes that PASSED across both validation rounds. A birth pass is
    * written unless the fidelity reviewer flags it, so `written` differs from this
@@ -697,7 +680,8 @@ export interface GenerateGuardsOptions {
    */
   fromScratch?: boolean
   // --- progress hooks ---
-  onPlan?: (total: number, work: number) => void
+  /** The doc universe as planned: how many documents, and how many changed since the last generate. */
+  onPlan?: (docs: number, changed: number) => void
   /** The claims read and placed: how many, from how many documents. */
   onClaims?: (claims: number, docs: number) => void
   /** Interface mapping settled: how many interfaces were derived, across all surfaces. */
@@ -767,8 +751,7 @@ function defaultConcurrency(): number {
  * The per-(flow, surface) cache-key recipe of the flow-worker session — the
  * retired one-shot `authorCacheKey`'s exact structure, with the
  * prompt fingerprint passed in. The key moves when the flow's milestone
- * composition changes, when any bound section's content key moves (text, a
- * suppressed quote, a referenced OpenAPI schema, its security context), when the
+ * composition changes (a reworded sentence is a new claim id), when the
  * realization plan's interfaces move, when the recipe or the format version
  * changes, or when the session prompt changes. Nothing else re-authors.
  * Exported for `@truecourse/core`, which owns the session prompts and therefore
@@ -778,7 +761,6 @@ export function workerCacheKey(
   stage: string,
   flow: Pick<GuardFlow, 'fingerprint'>,
   surface: GuardDriverId,
-  sectionKeys: readonly string[],
   interfaceFingerprints: readonly string[],
   /** The recipe the session can read: its surface's slice, the whole roster it
    *  may draw fixtures from, and every preparation profile it may choose. */
@@ -790,7 +772,6 @@ export function workerCacheKey(
     recipe,
     surface,
     flow.fingerprint,
-    [...sectionKeys].sort().join('~'),
     [...interfaceFingerprints].sort().join('~'),
   ]
   // Edit mode appends the briefed priors; absent, the key is byte-identical to
@@ -875,8 +856,6 @@ export interface FlowWorkerToolReport {
 export interface WorkerFidelityInput {
   proofContext: GuardEvidenceProofContext
   flowFingerprint: string
-  /** The flow's bound section content keys (the fidelity key's section half). */
-  sectionKeys: readonly string[]
   /** The scenario's BEHAVIORAL identity — the same JSON `scenarioBehavior`
    *  string the one-shot fidelity cache keyed on. */
   scenarioBehavior: string
@@ -899,7 +878,6 @@ export type WorkerFidelityJudge = (input: WorkerFidelityInput) => Promise<Worker
  *  {@link workerCacheKey} — every behavior-affecting input, nothing else. */
 export interface FlowWorkerCacheMaterial {
   flowFingerprint: string
-  sectionKeys: readonly string[]
   interfaceFingerprints: readonly string[]
   /** This surface's recipe slice. */
   recipeSlice: string
@@ -1173,21 +1151,18 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       : {}),
   }
 
-  // 2. Index — the deterministic section universe + spec-side change detection.
+  // 2. Index — the deterministic doc universe + which documents changed.
   const plan = planGuardWork(repoRoot, recipeFingerprint)
-  // The cross-doc OpenAPI operation index, built once from the whole
-  // section universe. api authoring matches its sections against it to inject the
-  // authoritative request-body schemas.
-  const opIndex = buildOperationIndex(plan.sections, plan.basePaths)
-  options.onPlan?.(plan.sections.length, plan.work.length)
-  for (const section of plan.work) fact('index', `${section.doc}#${section.anchor}: changed`)
-  const unchangedSections = plan.sections.length - plan.work.length
-  if (unchangedSections > 0) {
-    fact('index', `${unchangedSections} section${unchangedSections === 1 ? '' : 's'} unchanged`)
-  }
-  const orphanedSections = plan.orphaned.map((e) => ({ doc: e.doc, anchor: e.anchor, scenarioIds: e.scenarioIds }))
-  for (const orphan of orphanedSections) {
-    fact('index', `${orphan.doc}#${orphan.anchor}: orphaned, the section no longer exists`)
+  const docs = plan.docs
+  // The cross-doc OpenAPI operation index, built once from the whole universe.
+  // api authoring matches its sections against it to inject the authoritative
+  // request-body schemas.
+  const opIndex = buildOperationIndex(docs.flatMap((d) => d.sections), plan.basePaths)
+  options.onPlan?.(docs.length, plan.changedDocs.size)
+  for (const doc of plan.changedDocs) fact('index', `${doc}: changed`)
+  const unchangedDocs = docs.length - plan.changedDocs.size
+  if (unchangedDocs > 0) {
+    fact('index', `${unchangedDocs} document${unchangedDocs === 1 ? '' : 's'} unchanged`)
   }
 
   const limit = pLimit(Math.max(1, options.concurrency ?? defaultConcurrency()))
@@ -1245,13 +1220,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
 
   // 3. Claims — what the scan read from the slice's documents, materialized
   // into the tree as specs/claims.json. The whole universe is read: a flow
-  // spans sections, and its area's synthesis needs the complete claim
-  // inventory, not only the changed sections'.
-  const docs = collectWorkDocs(repoRoot, { ...plan, work: plan.sections })
+  // spans documents, and its area's synthesis needs the complete claim
+  // inventory, not only the changed documents'.
   // Doc path → its raw text: the OpenAPI security resolution the api authoring prompt
   // carries needs the WHOLE document (schemes + the doc-level `security` fallback).
   const docText = new Map(docs.map((d) => [d.doc, d.content]))
-  const sectionByKey = new Map(plan.sections.map((s) => [flowSectionKey(s.doc, s.anchor), s]))
+  const docByPath = new Map(docs.map((d) => [d.doc, d]))
   const prerequisiteResolution = resolvePrerequisites(repoRoot, recipe?.api?.externals)
 
   // A credential's `satisfies` naming a scheme NO OpenAPI doc in
@@ -1285,15 +1259,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const sessionLossHead = (s: GuardSessionSummary): string =>
     `every session of the \`${s.kind}\` kind failed (${s.failed} of ${s.ran})${s.firstError ? `. First failure: ${s.firstError}` : ''}`
 
-  // Each claim is placed under the section whose own text holds its first
-  // sentence: the anchor flows bind until bindings go by sentence. A claim the
-  // live document no longer holds is reported, never placed; one read from a
+  // Each claim is checked against its live document. A claim the document no
+  // longer holds the sentences of is reported, never composed; one read from a
   // sentence a resolved conflict rejected is dropped by its key.
   const docSet = new Set(docs.map((d) => d.doc))
-  const treeOf = docTreesOf(repoRoot, docSet)
   const placement = placeClaims(
     (readSpecClaims(repoRoot)?.claims ?? []).filter((c) => docSet.has(c.doc)),
-    (doc) => (docSet.has(doc) ? treeOf(doc) : null),
+    (doc) => docByPath.get(doc)?.tree ?? null,
   )
   for (const { claim, missing } of placement.unplaced) {
     extractionFailures.push({
@@ -1302,22 +1274,17 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     })
   }
   const suppressed = new Set(readSuppressedClaims(repoRoot).map((s) => `${s.doc}\0${s.sentence}`))
-  // Claim inventory per document, plus the claim-level coverage gaps the claims
-  // themselves settle (dismissed, untestable, no-claim).
+  // Claim inventory per document.
   const inventory = claimAreaInputs({
     docs,
-    placed: placement.placed,
-    areaTagsByDoc: new Map(plan.sections.map((s) => [s.doc, s.areaTags])),
+    claims: placement.live,
     dismissals: dismissalByKey,
     suppressed,
   })
-  coverageGaps.push(...inventory.gaps)
   for (const line of inventory.lines) fact('extract', line)
   const areaInputs = inventory.inputs
-  const liveClaimIds = inventory.claimIds
-  // A flow milestone names its claim by identity; the dismissal ledger by id.
-  const claimIdByIdentity = new Map(placement.placed.map((p) => [claimIdentityKey(p.claim.doc, p.anchor, p.claim.statement), p.claim.id]))
-  options.onClaims?.(placement.placed.length, docs.length)
+  const liveClaimIds = new Set(placement.live.map((c) => c.id))
+  options.onClaims?.(placement.live.length, docs.length)
 
   // Orphan honesty: a dismissal naming a claim the scan no longer reads from
   // its document is stale — surfaced so it is never silently honored.
@@ -1331,7 +1298,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // The claim corpus every claim reference resolves against at load time
   // (`scenarios/claims.json`), written whole from the scan's claims BEFORE
   // synthesis writes the flows naming them.
-  writeClaimsCorpus(repoRoot, placement.placed, new Date().toISOString())
+  writeClaimsCorpus(repoRoot, placement.live, new Date().toISOString())
 
   // 4. Interfaces — deterministic, free, and independent of everything spec-side.
   // Recipe discovery ranks its health path over the same walk, so on a repo it
@@ -1393,7 +1360,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     epicSession: options.flowsEpicSession,
     sessionGrounding: flowsGrounding,
     sessionDocs: docs,
-    sectionFingerprints: new Map(plan.sections.map((s) => [flowSectionKey(s.doc, s.anchor), s.fingerprint])),
     // `flows.json` is a durable output, so single-step mode writes it only when
     // the FINAL step runs — `only: 'flows'` computes the corpus, caches the
     // sessions that produced it, and leaves the committed file alone.
@@ -1420,13 +1386,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const known = {
       recipe: recipeMeta,
       recipeFingerprint,
-      sectionsTotal: plan.sections.length,
-      sectionsChanged: plan.work.length,
-      skippedUnchanged: plan.sections.length - plan.work.length,
       coverageGaps,
       errors,
       extractionFailures,
-      orphaned: orphanedSections,
       orphanedDismissals,
       llmFailures: [...leafTallies(), ...sessionTallies],
     }
@@ -1455,10 +1417,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       continue
     }
     dismissedFlowCount++
-    const primary = primarySection(flow, sectionByKey)
     coverageGaps.push({
-      doc: primary?.doc ?? flow.milestones[0].doc,
-      anchor: primary?.anchor ?? flow.milestones[0].anchor,
       kind: 'dismissed',
       flowId: flow.id,
       reason: dismissedReason(flow.title, dismissal.note),
@@ -1493,7 +1452,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const priorFlows = new Map((priorManifest?.flows ?? []).map((f) => [f.flowId, f]))
   // Carried into the final manifest write when a degraded run cannot re-judge
   // the whole universe — see writeWorkingManifest.
-  const priorGapSections = priorManifest?.gapSections
   // A generationInputsHash that is not a real computed hash (a hand-stamped
   // sentinel from a staged corpus) can never match, so its flow re-authors on
   // EVERY generate — silently. Say so once per run; settling writes the real
@@ -1527,9 +1485,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       status: 'ok',
       recipe: recipeMeta,
       recipeFingerprint,
-      sectionsTotal: plan.sections.length,
-      sectionsChanged: plan.work.length,
-      skippedUnchanged: plan.sections.length - plan.work.length,
       // Single-step mode: a warm re-run of the step spends nothing on either
       // the replayed extraction or this step's own sessions.
       noChanges: options.only === 'flows' && synthesis.calls === 0,
@@ -1541,7 +1496,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       llmFailures: [...leafTallies(), ...sessionTallies],
       // The run stops before birth, so neither adjudication stage ever ran.
       unadjudicated: [],
-      orphaned: orphanedSections,
       birthPassed: 0,
       orphanedDismissals,
       orphanedFlowDismissals,
@@ -1655,27 +1609,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       tickMatch(outcome)
     }
 
-    const primary = primarySection(flow, sectionByKey)
-    if (!primary) {
-      // Every milestone's section vanished between synthesis and here (a concurrent
-      // edit): nothing can bind, so the flow is skipped with a stated reason.
-      localErrors.push({
-        doc: flow.milestones[0].doc,
-        anchor: flow.milestones[0].anchor,
-        message: `flow "${flow.id}" binds no live section — re-run generate after re-scanning the corpus`,
-      })
-      localFacts.push(`${flow.id}: skipped, it binds no live section`)
-      return { errors: localErrors, matchCalls: localMatchCalls, matchCallErrors: localMatchCallErrors, contextMoved: localContextMoved, firstMatchError: localFirstMatchError, facts: localFacts }
-    }
-    const sections = new Map<number, SectionInput>()
-    for (const m of flow.milestones) {
-      const s = sectionByKey.get(flowSectionKey(m.doc, m.anchor))
-      if (s) sections.set(m.order, s)
-    }
-    const boundSections = [...new Set(flow.bindings.map((b) => sectionByKey.get(flowSectionKey(b.doc, b.anchor))))].filter(
-      (s): s is SectionInput => s !== undefined,
-    )
-    const sectionKeys = boundSections.map(sectionInputsKey)
+    const primary = primaryDoc(flow, docByPath)
+    const sections = milestoneSections(flow, docByPath)
 
     const plans = new Map<GuardDriverId, RealizationPlan>()
     const gaps: GuardManifestGap[] = []
@@ -1750,7 +1685,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           reason: `Milestone ${gap.milestone}: ${gap.reason}`,
           milestones: [gap.milestone],
           ...(gap.checks ? { obligations: gap.checks.map(caseId => ({ milestone: gap.milestone, caseId })) } : {}),
-          ...(gap.kind === 'mapping' ? { blocker: { kind: 'generation' as const, action: `Run guard interfaces author to map ${gap.checks?.join(', ') ?? gap.milestone}: ${gap.reason}. Source ${flow.milestones.find(m => m.order === gap.milestone)?.doc}#${flow.milestones.find(m => m.order === gap.milestone)?.anchor}; retain existing valid interfaces.` } } : {}),
+          ...(gap.kind === 'mapping' ? { blocker: { kind: 'generation' as const, action: `Run guard interfaces author to map ${gap.checks?.join(', ') ?? gap.milestone}: ${gap.reason}. Source ${flow.milestones.find(m => m.order === gap.milestone)?.doc} (claim ${flow.milestones.find(m => m.order === gap.milestone)?.claimId}); retain existing valid interfaces.` } } : {}),
           ...(gap.kind === 'capability' ? { blocker: { kind: 'unsupported-capability' as const, capabilities: verificationRequirements(flow.milestones.find(m => m.order === gap.milestone)?.verification, gap.checks).filter(c => !(GUARD_OBSERVATION_CAPABILITIES[surface] ?? []).includes(c)) } } : {}),
         })
       }
@@ -1811,7 +1746,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       } else if (outcome.kind === 'error') {
         localMatchCallErrors++
         localFirstMatchError ??= outcome.reason
-        localErrors.push({ flowId: flow.id, doc: primary.doc, anchor: primary.anchor, message: `matching (${surface}) ${outcome.reason}` })
+        localErrors.push({ flowId: flow.id, doc: primary.doc, message: `matching (${surface}) ${outcome.reason}` })
         settlePair(surface, 'no match', `match failed, ${asLine(outcome.reason)}`)
       }
     }
@@ -1829,7 +1764,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     )
     const inputParts: FlowGenerationInputParts = {
       flowFingerprint: flow.fingerprint,
-      sectionKeys,
       assignmentFingerprints: [...plans.values()].map((p) => realizationAssignmentFingerprint(p)),
       interfaceFingerprints: [...plans.values()].flatMap((p) => p.interfaces.map((j) => j.fingerprint)),
       ...(plans.has('web')
@@ -1856,7 +1790,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const inputsHash = flowSettleDigest(inputComponents)
     const legacyHash = legacyFlowGenerationInputsHash({
       flowFingerprint: flow.fingerprint,
-      sectionKeys,
       interfaceFingerprints,
       recipeFingerprint,
     })
@@ -1885,7 +1818,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         flow,
         primary,
         sections,
-        sectionKeys,
         plans,
         serverBySurface,
         gaps,
@@ -1943,13 +1875,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const known = {
       recipe: recipeMeta,
       recipeFingerprint,
-      sectionsTotal: plan.sections.length,
-      sectionsChanged: plan.work.length,
-      skippedUnchanged: plan.sections.length - plan.work.length,
       coverageGaps,
       errors,
       extractionFailures,
-      orphaned: orphanedSections,
       orphanedDismissals,
       orphanedFlowDismissals,
       flows: flowsReport,
@@ -1968,9 +1896,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   for (const w of works) {
     for (const gap of w.gaps) {
       coverageGaps.push({
-        doc: w.primary.doc,
-        anchor: w.primary.anchor,
-        kind: gap.kind,
+                kind: gap.kind,
         reason: gap.reason,
         flowId: w.flow.id,
         surface: gap.surface,
@@ -2100,7 +2026,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         for (const id of suspects) destructiveFlowIds.add(id)
         errors.push({
           doc: '',
-          anchor: '',
           message:
             `world classification lost a chunk of ${chunk.length} flow(s) (${lastError}) — ` +
             `the deterministic fallback scheduled ${suspects.length} suspect flow(s) into the serialized mutator tail`,
@@ -2140,7 +2065,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       for (const t of webTasks) t.errored = true
       errors.push({
         doc: webTasks[0].work.primary.doc,
-        anchor: webTasks[0].work.primary.anchor,
         message:
           `the web surface cannot be driven: ${browser.reason} — ` +
           `${webTasks.length} web flow(s) skipped, left unsettled for the next generate`,
@@ -2246,7 +2170,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       }
       errors.push({
         doc: preflight.entry,
-        anchor: ENTRY_PREFLIGHT_ANCHOR,
         // A dead entry is a REFUSAL, not an authoring miss: nothing was validated and
         // re-running changes nothing until the binary is rebuilt.
         kind: 'refusal',
@@ -2329,9 +2252,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     )
     task.work.gaps.push({ surface: task.surface, kind: 'blocked-on', reason })
     coverageGaps.push({
-      doc: task.work.primary.doc,
-      anchor: task.work.primary.anchor,
-      kind: 'blocked-on',
+            kind: 'blocked-on',
       flowId: task.work.flow.id,
       surface: task.surface,
       reason,
@@ -2408,7 +2329,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         task.errored = true
         errors.push({
           doc: task.work.primary.doc,
-          anchor: task.work.primary.anchor,
           message: `flow worker (${task.surface}) skipped: ${message}`,
         })
         fact('author', `${task.work.flow.id} x ${task.surface}: skipped, the build failed`)
@@ -2655,7 +2575,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             candidate: {
               flow: task.work.flow,
               surface: task.surface,
-              section: task.work.primary,
+              primary: task.work.primary,
               scenario,
               ref: taskKey(task),
             },
@@ -2992,7 +2912,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           // Step 18 — the fidelity CHILD (fresh context is the independence).
           let verdict = await judge({
             flowFingerprint: task.work.flow.fingerprint,
-            sectionKeys: task.work.sectionKeys,
             scenarioBehavior: scenarioBehavior(candidate.scenario),
             proofContext: { milestones: task.work.flow.milestones, steps: candidate.scenario.steps },
             briefing: workerFidelityBriefing(task.work, candidate, condensed),
@@ -3079,7 +2998,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         }
         if (task.work.flow.milestones.some(m => m.verification?.cases?.length)) {
           const verdict = await judge({ flowFingerprint: task.work.flow.fingerprint,
-            sectionKeys: task.work.sectionKeys, scenarioBehavior: scenarioBehavior(candidate.scenario),
+            scenarioBehavior: scenarioBehavior(candidate.scenario),
             proofContext: { milestones: task.work.flow.milestones, steps: candidate.scenario.steps },
             briefing: workerFidelityBriefing(task.work, candidate, condensed) +
               '\nDECLARED EXPECTED FAILURE: review the selected assertion contract, not a claim of passing execution.' })
@@ -3165,7 +3084,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             : {}),
           cacheMaterial: {
             flowFingerprint: task.work.flow.fingerprint,
-            sectionKeys: task.work.sectionKeys,
             interfaceFingerprints: keyFingerprints.fingerprints,
             legacyInterfaceFingerprints: keyFingerprints.legacyFingerprints,
             recipeSlice: recipeSliceOf(task.surface),
@@ -3204,7 +3122,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 ? {
                     priorScenarios,
                     movedInputs: {
-                      sections: movedSectionsFor(task.work),
                       interfaces: movedInterfacesFor(
                         task.plan,
                         priorScenarios.flatMap((p) => priorYamlById.get(p.id)?.scenario ?? []),
@@ -3368,7 +3285,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               const authored = rawScenarioSchemaFor(task.surface).safeParse(scenario)
               if (!authored.success || preflightDefect(task, authored.data)) return false
               const candidate: BirthCandidate = { flow: task.work.flow, surface: task.surface,
-                section: task.work.primary, scenario, ref }
+                primary: task.work.primary, scenario, ref }
               candidates.push({ candidate, yaml: scenarioYaml, expectedReds: [...expectedReds], review,
                 fidelityUnreviewed: false, result: { id: scenario.id, title: scenario.title,
                   binds: scenario.binds[0], outcome: expectedReds.length ? 'fail' : 'pass', durationMs: 0 } })
@@ -3568,13 +3485,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           {
             recipe: recipeMeta,
             recipeFingerprint,
-            sectionsTotal: plan.sections.length,
-            sectionsChanged: plan.work.length,
-            skippedUnchanged: plan.sections.length - plan.work.length,
             coverageGaps,
             errors,
             extractionFailures,
-            orphaned: orphanedSections,
             orphanedDismissals,
             orphanedFlowDismissals,
             flows: flowsReport,
@@ -3616,7 +3529,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             task.errored = true
             errors.push({
               doc: work.primary.doc,
-              anchor: work.primary.anchor,
               kind: 'authoring',
               flowId: work.flow.id,
               surface,
@@ -3641,7 +3553,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 ? { ...errorFrom(capture), surface, message }
                 : {
                     doc: work.primary.doc,
-                    anchor: work.primary.anchor,
                     kind: 'authoring',
                     flowId: work.flow.id,
                     surface,
@@ -3674,7 +3585,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             const incomplete = validateTaskOutcome(state, outcome)
             if (incomplete) {
               task.errored = true
-              errors.push({ doc: work.primary.doc, anchor: work.primary.anchor, kind: 'authoring',
+              errors.push({ doc: work.primary.doc, kind: 'authoring',
                 flowId: work.flow.id, surface, message: incomplete })
               fact('author', `${work.flow.id} x ${surface}: not settled, ${asLine(incomplete)}`)
               continue
@@ -3689,7 +3600,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               task.errored = true
               errors.push({
                 doc: work.primary.doc,
-                anchor: work.primary.anchor,
                 kind: 'authoring',
                 flowId: work.flow.id,
                 surface,
@@ -3706,7 +3616,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               task.errored = true
               errors.push({
                 doc: work.primary.doc,
-                anchor: work.primary.anchor,
                 kind: 'authoring',
                 flowId: work.flow.id,
                 surface,
@@ -3754,9 +3663,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             fact('author', `${work.flow.id} x ${surface}: blocked, ${blockedOn.join('; ')}`)
             work.gaps.push({ surface, kind: 'blocked-on', reason, milestones: outcome.perMilestone!.map((m) => m.order) })
             coverageGaps.push({
-              doc: work.primary.doc,
-              anchor: work.primary.anchor,
-              kind: 'blocked-on',
+                            kind: 'blocked-on',
               flowId: work.flow.id,
               surface,
               reason,
@@ -3768,7 +3675,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             task.errored = true
             errors.push({
               doc: work.primary.doc,
-              anchor: work.primary.anchor,
               kind: 'authoring',
               flowId: work.flow.id,
               surface,
@@ -3803,13 +3709,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           } else {
             const finding: GuardBirthFinding = {
               doc: work.primary.doc,
-              anchor: work.primary.anchor,
               title: work.flow.title,
               step: 1,
               expected: "a scenario that verifies the flow's milestones",
               actual: `the flow worker retired the flow after ${outcome.attempts} attempt(s): ${outcome.lastEvidence}`,
               flowId: work.flow.id,
               surface,
+              claimId: work.flow.milestones[0].claimId,
               claim: work.flow.milestones[0].claimTitle,
               autoResolveEscalation: { count: autoResolveCount(key), source: 'worker' },
             }
@@ -3918,23 +3824,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const settleTotal = changedWorks.length
   const writeWorkingManifest = (): void => {
     const flows = [...workingManifest.values()].sort((a, b) => a.flowId.localeCompare(b.flowId))
-    // The persisted gap record: every LIVE section no flow binds, so the next
-    // planner can tell "seen and deliberately uncovered" from "never seen" —
-    // without it those sections re-enter the work set on every generate. Only a
-    // run that judged the whole universe may recompute it (no extraction
-    // failures, no unsettled areas); a degraded run carries the prior record
-    // forward so pins are never lost to a transient failure. Sections that
-    // vanished or became bound drop out naturally.
-    const wholeUniverseJudged = extractionFailures.length === 0 && synthesis.unsettled.length === 0
-    const boundKeys = new Set(flows.flatMap((f) => f.bindings.map((b) => `${b.doc}\0${b.anchor}`)))
-    const gapSections = wholeUniverseJudged
-      ? plan.sections
-          .filter((s) => !boundKeys.has(`${s.doc}\0${s.anchor}`))
-          .map((s) => ({ doc: s.doc, anchor: s.anchor, fingerprint: s.fingerprint }))
-      : (priorGapSections ?? []).filter((g) => !boundKeys.has(`${g.doc}\0${g.anchor}`))
     // Every document read, with the hash of its text.
     const manifestDocs = docs.map((d) => ({ doc: d.doc, contentHash: docContentHash(d.content) }))
-    writeManifest(repoRoot, { flows, gapSections, docs: manifestDocs })
+    writeManifest(repoRoot, { flows, docs: manifestDocs })
   }
 
   // THE SETTLE INVARIANT, enforced at the one place a flow settles: an entry may
@@ -3947,7 +3839,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     if (entry.generationInputsHash === null || unaccounted.length === 0) return entry
     errors.push({
       doc: entry.bindings[0]?.doc ?? entry.flowId,
-      anchor: entry.bindings[0]?.anchor ?? '',
       message: `flow "${entry.flowId}" planned ${unaccounted.join(', ')} but recorded neither a test nor a gap there — left unsettled for the next generate`,
     })
     return { ...entry, generationInputsHash: null }
@@ -4052,7 +3943,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           id: c.scenario.id,
           title: c.scenario.title,
           doc: work.primary.doc,
-          anchor: work.primary.anchor,
           file,
           flowId: work.flow.id,
           surface,
@@ -4212,7 +4102,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     retiredFlows
       .filter((f) =>
         f.milestones.length > 0 &&
-        f.milestones.every((m) => dismissalByKey.has(claimIdByIdentity.get(claimIdentityKey(m.doc, m.anchor, m.claimTitle)) ?? '')),
+        f.milestones.every((m) => dismissalByKey.has(m.claimId)),
       )
       .map((f) => f.id),
   )
@@ -4246,7 +4136,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       continue
     }
     const oldFlow = retiredFlows.find(f => f.id === flowId) ?? (prior.milestones?.length ? { milestones: prior.milestones } : undefined)
-    const sourceKey = (m: GuardFlow['milestones'][number], caseId?: string) => `${m.doc}\0${m.anchor}\0${m.claimTitle}\0${caseId ?? ''}`
+    const sourceKey = (m: GuardFlow['milestones'][number], caseId?: string) => `${m.claimId}\0${caseId ?? ''}`
     const obligations = (f: { milestones?: GuardFlow['milestones'] }) => (f.milestones ?? []).flatMap(m =>
       m.verification?.cases?.length ? m.verification.cases.map(c => sourceKey(m, c.id)) : [sourceKey(m)])
     const replaced = new Set(synthesis.flows.flatMap(f => {
@@ -4322,7 +4212,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     if (coverageGaps[i].flowId && liveWorkIds.has(coverageGaps[i].flowId!)) coverageGaps.splice(i, 1)
   }
   for (const work of works) for (const gap of work.gaps) coverageGaps.push({
-    doc: work.primary.doc, anchor: work.primary.anchor, flowId: work.flow.id,
+    flowId: work.flow.id,
     surface: gap.surface, kind: gap.kind, reason: gap.reason,
     ...(gap.driver ? { driver: gap.driver } : {}),
     ...(gap.blocker ? { blocker: gap.blocker } : {}),
@@ -4334,9 +4224,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     status: 'ok',
     recipe: recipeMeta,
     recipeFingerprint,
-    sectionsTotal: plan.sections.length,
-    sectionsChanged: plan.work.length,
-    skippedUnchanged: plan.sections.length - plan.work.length,
     // A prune rewrites a committed file, so it is never a no-op run.
     noChanges: changedWorks.length === 0 && removedFlows === 0 && prunedFlows === 0,
     matchContextMoved,
@@ -4348,7 +4235,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     extractionFailures,
     llmFailures: [...leafTallies(), ...sessionTallies],
     unadjudicated,
-    orphaned: orphanedSections,
     birthPassed,
     orphanedDismissals,
     orphanedFlowDismissals,
@@ -4370,12 +4256,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
  *  whether its inputs moved since the manifest. */
 interface FlowWork {
   flow: GuardFlow
-  /** The flow's PRIMARY bound section — its first milestone's, for attribution. */
-  primary: SectionInput
-  /** Milestone order → its live section. */
+  /** The flow's PRIMARY document — its first milestone's, for attribution and filing. */
+  primary: FlowPrimaryDoc
+  /** Milestone order → the live section its claim's sentences sit in, when the document holds them. */
   sections: Map<number, SectionInput>
-  /** Every bound section's content key — the flow hash's spec half. */
-  sectionKeys: string[]
   /** The realization plan per surface that has one. */
   plans: Map<GuardDriverId, RealizationPlan>
   /**
@@ -4417,7 +4301,7 @@ function reopenedFlowsReport(changedWorks: readonly FlowWork[]): NonNullable<Gua
 /** "45 flows re-opened: 45 recipe.manifests, 0 sections, 0 interfaces". The
  *  spec and code inputs are always named, so a zero there reads as a finding. */
 function reopenedFlowsLine(reopened: NonNullable<GuardFlowsReport['reopened']>): string {
-  const counts = { sections: 0, interfaces: 0, ...reopened.byInput }
+  const counts = { flow: 0, interfaces: 0, ...reopened.byInput }
   const parts = Object.entries(counts)
     .sort(([a, x], [b, y]) => y - x || a.localeCompare(b))
     .map(([name, n]) => `${n} ${name}`)
@@ -4445,18 +4329,6 @@ function priorScenariosBySurface(work: FlowWork): Map<GuardDriverId, GuardManife
     const list = out.get(owner)
     if (list) list.push(s)
     else out.set(owner, [s])
-  }
-  return out
-}
-
-/** The bound sections whose text moved since the flow's committed entry. */
-function movedSectionsFor(work: FlowWork): { doc: string; anchor: string; heading: string }[] {
-  const priorFp = new Map((work.prior?.bindings ?? []).map((b) => [flowSectionKey(b.doc, b.anchor), b.fingerprint]))
-  const out: { doc: string; anchor: string; heading: string }[] = []
-  for (const b of work.flow.bindings) {
-    if (priorFp.get(flowSectionKey(b.doc, b.anchor)) === b.fingerprint) continue
-    const section = [...work.sections.values()].find((s) => s.doc === b.doc && s.anchor === b.anchor)
-    out.push({ doc: b.doc, anchor: b.anchor, heading: section?.headingText ?? b.anchor })
   }
   return out
 }
@@ -4527,14 +4399,33 @@ function manifestEntry(
   }
 }
 
-/** The flow's first milestone's live section — the attribution pivot. Null when no
- *  milestone's section survives in the live index. */
-function primarySection(flow: GuardFlow, byKey: ReadonlyMap<string, SectionInput>): SectionInput | null {
-  for (const m of [...flow.milestones].sort((a, b) => a.order - b.order)) {
-    const section = byKey.get(flowSectionKey(m.doc, m.anchor))
-    if (section) return section
+/** A flow's primary document: where its findings and errors are filed, and whose area its tests land under. */
+export interface FlowPrimaryDoc {
+  doc: string
+  areaTags: readonly string[]
+}
+
+/** The flow's first milestone's document — the attribution pivot. */
+function primaryDoc(flow: GuardFlow, docByPath: ReadonlyMap<string, GuardDoc>): FlowPrimaryDoc {
+  const first = [...flow.milestones].sort((a, b) => a.order - b.order)[0]
+  return { doc: first.doc, areaTags: docByPath.get(first.doc)?.areaTags ?? [] }
+}
+
+/**
+ * Milestone order → the live section its claim's sentences sit in: the text the
+ * authoring prompts quote around a claim. A milestone whose document is outside
+ * the universe, or whose sentences the document no longer holds, has none.
+ */
+function milestoneSections(flow: GuardFlow, docByPath: ReadonlyMap<string, GuardDoc>): Map<number, SectionInput> {
+  const sections = new Map<number, SectionInput>()
+  for (const m of flow.milestones) {
+    const doc = docByPath.get(m.doc)
+    if (!doc) continue
+    const section = sectionOfSentences(doc.tree, m.sentences)
+    const input = section && doc.sections.find((s) => s.anchor === section.anchor)
+    if (input) sections.set(m.order, input)
   }
-  return null
+  return sections
 }
 
 /** True when this surface reaches the matcher (runnable, prepared, catalog non-empty). */
@@ -4755,9 +4646,6 @@ function emptyResult(
 ): GuardGenerateResult {
   return {
     status,
-    sectionsTotal: 0,
-    sectionsChanged: 0,
-    skippedUnchanged: 0,
     noChanges: false,
     written: [],
     coverageGaps: [],
@@ -4766,7 +4654,6 @@ function emptyResult(
     extractionFailures: [],
     llmFailures: [],
     unadjudicated: [],
-    orphaned: [],
     birthPassed: 0,
     orphanedDismissals: [],
     orphanedFlowDismissals: [],
@@ -5021,7 +4908,7 @@ function workerFidelityBriefing(work: FlowWork, candidate: BirthCandidate, captu
           claim: m.caseIds && m.verification?.cases ? m.verification.cases.map(c => c.claim).join('; ') : m.claimTitle,
           ...(m.verification ? { verification: m.verification } : {}),
           doc: m.doc,
-          sectionHeading: section?.headingText ?? m.anchor,
+          sectionHeading: section?.headingText ?? m.doc,
           sectionText: section?.fullText || section?.ownText || '',
         }
       }),
@@ -5200,7 +5087,7 @@ function authorMilestones(work: FlowWork, plan: RealizationPlan, surface: GuardD
         claim: m.caseIds && m.verification?.cases ? m.verification.cases.map(c => c.claim).join('; ') : m.claimTitle,
         ...(m.verification ? { verification: m.verification } : {}),
         doc: m.doc,
-        sectionHeading: section?.headingText ?? m.anchor,
+        sectionHeading: section?.headingText ?? m.doc,
         sectionText: section?.fullText || section?.ownText || '',
         ...(m.note ? { note: m.note } : {}),
         realization: [...new Set(realization)],
@@ -5398,8 +5285,7 @@ function toFinding(o: {
     ? o.candidate.flow.milestones.find((m) => m.order === failedMilestone)
     : undefined
   return {
-    doc: milestone?.doc ?? o.candidate.section.doc,
-    anchor: milestone?.anchor ?? o.candidate.section.anchor,
+    doc: milestone?.doc ?? o.candidate.primary.doc,
     scenarioId: scenario.id,
     title: scenario.title,
     step,
@@ -5413,7 +5299,7 @@ function toFinding(o: {
     // finding detail shows the commands it ran; `claim` is the dismissal identity,
     // so the detail's Dismiss action can key on it.
     yaml: serializeScenarioYaml(scenario),
-    ...(milestone ? { claim: milestone.claimTitle } : {}),
+    ...(milestone ? { claimId: milestone.claimId, claim: milestone.claimTitle } : {}),
     flowId: o.candidate.flow.id,
     surface: o.candidate.surface,
     ...(failedMilestone ? { failedMilestone } : {}),
@@ -5448,8 +5334,8 @@ function priorMilestonesPassed(scenario: GuardScenario, failingStep: number, fai
 function diagnosisOf(finding: GuardBirthFinding, file: string): GuardScenarioDiagnosis {
   return {
     doc: finding.doc,
-    anchor: finding.anchor,
     title: finding.title,
+    ...(finding.claimId !== undefined ? { claimId: finding.claimId } : {}),
     ...(finding.claim !== undefined ? { claim: finding.claim } : {}),
     step: finding.step,
     expected: finding.expected,
@@ -5480,8 +5366,7 @@ function errorFrom(o: {
 }): GuardGenerateError {
   const f = o.result.failure
   return {
-    doc: o.candidate.section.doc,
-    anchor: o.candidate.section.anchor,
+    doc: o.candidate.primary.doc,
     kind: 'birth',
     flowId: o.candidate.flow.id,
     message: `birth validation error for "${o.candidate.scenario.title}": ${f?.actual ?? 'unknown'}`,
@@ -5498,8 +5383,7 @@ function errorFrom(o: {
  *  It is the one verdict that still refuses the commit — the test is wrong. */
 function fidelityFinding(candidate: BirthCandidate, mismatch: string): GuardBirthFinding {
   return {
-    doc: candidate.section.doc,
-    anchor: candidate.section.anchor,
+    doc: candidate.primary.doc,
     kind: 'fidelity',
     scenarioId: candidate.scenario.id,
     title: candidate.scenario.title,

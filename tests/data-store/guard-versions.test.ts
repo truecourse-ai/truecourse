@@ -68,16 +68,12 @@ async function saveReport(commit: string, generatedAt: string, evidence: Record<
   const report: GuardGenerateReport = {
     generatedAt,
     status: 'ok',
-    sectionsTotal: 1,
-    sectionsChanged: 1,
-    skippedUnchanged: 0,
     noChanges: false,
     written: [],
     coverageGaps: [],
     birthFindings: [],
     errors: [],
     extractionFailures: [],
-    orphaned: [],
   };
   await store.writeGuardResult({ repoKey: REPO, commitSha: commit }, report, { producedByRun: `gen-${commit}`, model: 'opus' });
   if (Object.keys(evidence).length > 0) {

@@ -36,7 +36,6 @@ vi.mock('../../packages/core/src/services/llm/session-driver.js', () => ({
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import type { ToolContext, SessionOutcome } from '../../packages/agent-loop/src/index'
 import {
-  collectWorkDocs,
   planGuardWork,
   workerCacheKey,
   workerRecipeMaterial,
@@ -101,7 +100,7 @@ function docRepo(): string {
   return r
 }
 
-const docsOf = (r: string): GuardDoc[] => collectWorkDocs(r, planGuardWork(r))
+const docsOf = (r: string): GuardDoc[] => planGuardWork(r).docs
 
 const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex')
 
@@ -130,7 +129,6 @@ function fakeTask(over: Partial<FlowWorkerTask> = {}, flowId = 'create-a-task'):
     epic: false,
     cacheMaterial: {
       flowFingerprint: `fp-${flowId}`,
-      sectionKeys: ['docs/tasks.md#tasks/creating-tasks:abc'],
       interfaceFingerprints: ['iface-1'],
       recipeFingerprint: 'recipe-1',
       mode: 'scratch',
@@ -277,7 +275,6 @@ describe('flowWorkerCacheKey', () => {
         `flow-worker-v${FLOW_WORKER_STAGE_VERSION}`,
         { fingerprint: base.cacheMaterial.flowFingerprint },
         'cli',
-        base.cacheMaterial.sectionKeys,
         base.cacheMaterial.interfaceFingerprints,
         workerRecipeMaterial(base.cacheMaterial),
       ),
@@ -292,7 +289,7 @@ describe('flowWorkerCacheKey', () => {
     const [webLegacy, ...rest] = flowWorkerLegacyCacheKeys(web)
     expect(rest).toEqual([])
     expect(webLegacy).toBe(workerCacheKey(flowWorkerPromptFingerprint('web'), { fingerprint: base.cacheMaterial.flowFingerprint }, 'web',
-      base.cacheMaterial.sectionKeys, ['iface-1', 'whole-catalog'], base.cacheMaterial.recipeFingerprint))
+      ['iface-1', 'whole-catalog'], base.cacheMaterial.recipeFingerprint))
     expect(webLegacy).not.toBe(flowWorkerCacheKey(web))
   })
 
@@ -302,7 +299,6 @@ describe('flowWorkerCacheKey', () => {
       flowWorkerCacheKey({ ...base, surface, cacheMaterial: { ...base.cacheMaterial, ...over } })
 
     expect(move({ flowFingerprint: 'other' })).not.toBe(key)
-    expect(move({ sectionKeys: ['other'] })).not.toBe(key)
     expect(move({ interfaceFingerprints: ['other'] })).not.toBe(key)
     expect(move({ recipeSlice: 'other' })).not.toBe(key)
     expect(move({ roster: 'other' })).not.toBe(key)
@@ -315,14 +311,14 @@ describe('flowWorkerCacheKey', () => {
     expect(flowWorkerCacheKey({ ...base, flowId: 'renamed', workItem: 'flow:renamed:cli' })).toBe(key)
   })
 
-  it('is insensitive to the ORDER of the two sorted lists', () => {
+  it('is insensitive to the ORDER of the interface fingerprints', () => {
     const two = {
       ...base,
-      cacheMaterial: { ...base.cacheMaterial, sectionKeys: ['a', 'b'], interfaceFingerprints: ['x', 'y'] },
+      cacheMaterial: { ...base.cacheMaterial, interfaceFingerprints: ['x', 'y'] },
     }
     const flipped = {
       ...base,
-      cacheMaterial: { ...base.cacheMaterial, sectionKeys: ['b', 'a'], interfaceFingerprints: ['y', 'x'] },
+      cacheMaterial: { ...base.cacheMaterial, interfaceFingerprints: ['y', 'x'] },
     }
     expect(flowWorkerCacheKey(two)).toBe(flowWorkerCacheKey(flipped))
   })
@@ -485,7 +481,6 @@ describe('the flow-worker pool’s cache', () => {
       prior: { scenarios: [{ id: 'create-a-task', yaml: 'prior yaml' }] },
       cacheMaterial: {
         flowFingerprint: 'fp-create-a-task',
-        sectionKeys: ['docs/tasks.md#tasks/creating-tasks:abc'],
         interfaceFingerprints: ['iface-1'],
         recipeFingerprint: 'recipe-1',
         mode: 'edit',
@@ -894,7 +889,6 @@ describe('the flow-worker pool’s waves and progress', () => {
 const FIDELITY_INPUT: WorkerFidelityInput = {
   proofContext: { milestones: [], steps: [] },
   flowFingerprint: 'flow-fp',
-  sectionKeys: ['b', 'a'],
   scenarioBehavior: JSON.stringify({ title: 't', steps: [] }),
   briefing: 'CLAIMS…\n\nCONFIRMATION CAPTURE (the engine ran this scenario in a fresh sandbox just now):\nPASS',
 }
@@ -914,12 +908,12 @@ const childOutcome = (value: unknown): SessionOutcome<never> =>
   }) as unknown as SessionOutcome<never>
 
 describe('fidelitySessionCacheKey', () => {
-  it('is insensitive to sectionKeys order and moves with the scenario behavior', () => {
+  it('moves with the flow and the scenario behavior, and not with the briefing text', () => {
     const key = fidelitySessionCacheKey(FIDELITY_INPUT)
-    expect(fidelitySessionCacheKey({ ...FIDELITY_INPUT, sectionKeys: ['a', 'b'] })).toBe(key)
     expect(fidelitySessionCacheKey({ ...FIDELITY_INPUT, scenarioBehavior: 'other' })).not.toBe(key)
     expect(fidelitySessionCacheKey({ ...FIDELITY_INPUT, flowFingerprint: 'other' })).not.toBe(key)
-    expect(fidelitySessionCacheKey({ ...FIDELITY_INPUT, sectionKeys: ['a'] })).not.toBe(key)
+    const { briefing: _briefing, ...keyed } = FIDELITY_INPUT
+    expect(fidelitySessionCacheKey(keyed)).toBe(key)
   })
 })
 

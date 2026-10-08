@@ -107,7 +107,7 @@ describe('generateGuards — multi-flow attribution', () => {
     ])
     expect(res.birthFindings).toHaveLength(1)
     expect(res.birthFindings[0]).toMatchObject({
-      anchor: 'beta',
+      doc: 'docs/b.md',
       flowId: 'beta',
       surface: 'cli',
       title: 'b-bad',
@@ -147,8 +147,8 @@ describe('generateGuards — multi-flow attribution', () => {
     })
 
     expect(res.birthFindings).toEqual([])
-    expect(res.errors.some((e) => e.anchor === 'alpha')).toBe(true)
-    expect(res.errors.some((e) => e.anchor === 'beta')).toBe(true)
+    expect(res.errors.some((e) => e.flowId === 'alpha' && e.doc === 'docs/a.md')).toBe(true)
+    expect(res.errors.some((e) => e.flowId === 'beta' && e.doc === 'docs/b.md')).toBe(true)
     expect(res.written).toEqual([])
     // Neither flow settled: an infra error leaves the work for the next generate.
     expect(readManifest(r)!.flows.every((f) => f.generationInputsHash === null)).toBe(true)

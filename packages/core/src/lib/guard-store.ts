@@ -135,7 +135,7 @@ export interface GuardStore {
    */
   writeGuardRunCoverage(repoPath: string, run: GuardRunCoverage): Promise<void>;
   /**
-   * Every run of a scope that carries a section summary, oldest first. A run
+   * Every run of a scope that carries a claim summary, oldest first. A run
    * whose summary could not be derived is simply not here.
    */
   readGuardRunCoverage(repoPath: string, scope?: string): Promise<GuardRunCoverage[]>;

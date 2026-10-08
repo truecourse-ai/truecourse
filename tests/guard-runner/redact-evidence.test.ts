@@ -60,7 +60,7 @@ describe('structured credential redaction', () => {
       })
       expect(
         redactScenarioResult(
-          { id: 'pass', title: 'pass', binds: { doc: 'README.md', section: 'pass', sentences: ['pass'] }, outcome: 'pass', durationMs: 1 },
+          { id: 'pass', title: 'pass', binds: { doc: 'README.md', sentences: ['pass'] }, outcome: 'pass', durationMs: 1 },
           redact,
         ),
       ).toMatchObject({ id: 'pass', outcome: 'pass' })
@@ -69,7 +69,7 @@ describe('structured credential redaction', () => {
           {
             id: 'actual',
             title: 'failure',
-            binds: { doc: 'README.md', section: 'pass', sentences: ['pass'] },
+            binds: { doc: 'README.md', sentences: ['pass'] },
             outcome: 'fail',
             durationMs: 1,
             failure: { step: 1, expected: 'pass', actual: 'pass', stdout: 'pass' },

@@ -45,7 +45,6 @@ function makeLatest(runId: string): GuardLatest {
     },
     summary: { total: 2, pass: 1, fail: 1, stale: 0, orphaned: 0, error: 0, blocked: 0 },
     scenarios: [],
-    sections: [],
   }
 }
 
@@ -131,7 +130,7 @@ describe('guard store — LATEST', () => {
       {
         id: 'flow.cli.1',
         title: 'born red',
-        binds: { doc: 'docs/x.md', section: 'x', fingerprint: 'sha256:x', sentences: ['x'] },
+        binds: { doc: 'docs/x.md', sentences: ['x'] },
         outcome: 'fail',
         stage: 'birth',
         durationMs: 12,
@@ -141,7 +140,7 @@ describe('guard store — LATEST', () => {
       {
         id: 'flow.cli.2',
         title: 'from a run',
-        binds: { doc: 'docs/x.md', section: 'y', fingerprint: 'sha256:y', sentences: ['y'] },
+        binds: { doc: 'docs/x.md', sentences: ['y'] },
         outcome: 'pass',
         durationMs: 8,
       },
@@ -161,18 +160,14 @@ describe('guard store — generate report', () => {
     generatedAt: '2026-01-04T00:00:00.000Z',
     status: 'ok',
     recipe: { status: 'exists', entry: ['node', 'dist/index.js'] },
-    sectionsTotal: 3,
-    sectionsChanged: 1,
-    skippedUnchanged: 2,
     noChanges: false,
-    written: [{ id: 'x.1', title: 'X', doc: 'docs/x.md', anchor: 'x', file: '.truecourse/scenarios/x/x.1.yaml' }],
-    coverageGaps: [{ doc: 'docs/x.md', anchor: 'y', kind: 'untestable', reason: 'no CLI-assertable claim' }],
+    written: [{ id: 'x.1', title: 'X', doc: 'docs/x.md', file: '.truecourse/scenarios/x/x.1.yaml' }],
+    coverageGaps: [{ flowId: 'y', kind: 'untestable', reason: 'no CLI-assertable claim' }],
     birthFindings: [
-      { doc: 'docs/x.md', anchor: 'z', title: 'Z fails', step: 1, expected: 'exit 0', actual: 'exit 1' },
+      { doc: 'docs/x.md', title: 'Z fails', step: 1, expected: 'exit 0', actual: 'exit 1' },
     ],
     errors: [],
     extractionFailures: [{ doc: 'docs/broken.md', reason: 'invalid output after re-ask' }],
-    orphaned: [{ doc: 'docs/gone.md', anchor: 'g', scenarioIds: ['g.1'] }],
     usage: { calls: 4, inputTokens: 1200, outputTokens: 800, costUsd: 0.42 },
   }
 
@@ -192,16 +187,12 @@ describe('guard store — generate report', () => {
     const legacy = {
       generatedAt: '2026-01-05T00:00:00.000Z',
       status: 'ok',
-      sectionsTotal: 1,
-      sectionsChanged: 1,
-      skippedUnchanged: 0,
       noChanges: false,
       written: [],
-      coverageGaps: [{ doc: 'docs/x.md', anchor: 'a', kind: 'api', reason: 'needs the api driver' }],
+      coverageGaps: [{ flowId: 'a', kind: 'api', reason: 'needs the api driver' }],
       birthFindings: [],
       errors: [],
       extractionFailures: [],
-      orphaned: [],
     }
     fs.writeFileSync(guardResultPath(r), JSON.stringify(legacy))
     // Tolerant-read convention: schema-invalid → null, never a throw.
@@ -211,7 +202,7 @@ describe('guard store — generate report', () => {
     const migrated = {
       ...legacy,
       coverageGaps: [
-        { doc: 'docs/x.md', anchor: 'a', kind: 'awaiting-driver', driver: 'api', reason: 'needs the api driver' },
+        { flowId: 'a', kind: 'awaiting-driver', driver: 'api', reason: 'needs the api driver' },
       ],
     }
     fs.writeFileSync(guardResultPath(r), JSON.stringify(migrated))

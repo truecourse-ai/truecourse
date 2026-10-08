@@ -916,21 +916,22 @@ describe('the ledger and the document', () => {
     const url = `/api/context/doc?ref=${encodeURIComponent(ref)}`;
     const res = await request(app).get(url).expect(200);
     expect(res.body).toMatchObject({ ref, content: '# A\n\nBody.\n\n## Refunds\n\nTwo days.\n' });
-    // The outline is the sections a flow milestone and a coverage row bind.
+    // The outline: each heading and the lines under it.
     expect(res.body.sections).toEqual([
-      { anchor: 'a', heading: 'A', level: 1, lines: [1, 7] },
-      { anchor: 'a/refunds', heading: 'Refunds', level: 2, lines: [5, 7] },
+      { heading: 'A', level: 1, lines: [1, 7] },
+      { heading: 'Refunds', level: 2, lines: [5, 7] },
     ]);
 
-    const one = await request(app).get(`${url}&section=a%2Frefunds`).expect(200);
+    // A section's text is read by its outline entry's lines.
+    const one = await request(app).get(`${url}&from=5&to=7`).expect(200);
     expect(one.body).toMatchObject({
       ref,
       content: '## Refunds\n\nTwo days.',
-      section: { anchor: 'a/refunds', heading: 'Refunds' },
+      lines: [5, 7],
     });
 
-    const missing = await request(app).get(`${url}&section=nope`).expect(404);
-    expect(missing.body.error).toMatch(/No section "nope".*a\/refunds/);
+    const missing = await request(app).get(`${url}&from=40&to=50`).expect(404);
+    expect(missing.body.error).toMatch(/Lines 40-50 are outside/);
   });
 
   it('needs a ref, and 404s one that names nothing', async () => {

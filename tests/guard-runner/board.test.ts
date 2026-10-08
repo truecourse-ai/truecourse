@@ -149,23 +149,6 @@ describe('the board — a scoped run merges instead of replacing', () => {
     expect(scoped.board).toEqual(merged)
   })
 
-  it('re-rolls the per-section view over the merged set', async () => {
-    const r = repo()
-    writeCorpus(r)
-    await runGuard({ repoRoot: r, skipBuild: true })
-    await runGuard({ repoRoot: r, skipBuild: true, scenarioId: 'ver' })
-
-    const merged = board(r)
-    // Every bound section is still on the board, each with the worst outcome of the
-    // scenarios that bind it — a scoped run must not shrink the coverage view.
-    expect(merged.sections.map((s) => `${s.section}:${s.status}`).sort()).toEqual([
-      'cli/boom:fail',
-      'cli/version:pass',
-      'cli/whoami:pass',
-    ])
-    expect(merged.sections.flatMap((s) => s.scenarioIds).sort()).toEqual(['boom', 'ver', 'who'])
-  })
-
   it('leaves the run snapshot, the evidence dir and the history row scoped to what ran', async () => {
     const r = repo()
     writeCorpus(r)
@@ -200,8 +183,6 @@ describe('the board — a scoped run merges instead of replacing', () => {
     const merged = board(r)
     expect(outcomes(merged)).toEqual({ ver: 'pass', boom: 'fail' })
     expect(merged.summary).toMatchObject({ total: 2, pass: 1, fail: 1 })
-    // …and the section it was the only scenario of goes with it.
-    expect(merged.sections.map((s) => s.section)).toEqual(['cli/boom', 'cli/version'])
   })
 
   it('bootstraps a board holding only what ran when there is no prior LATEST', async () => {
@@ -313,7 +294,7 @@ describe('mergeGuardBoard — the merge itself', () => {
   const row = (id: string, outcome: 'pass' | 'fail'): GuardLatest['scenarios'][number] => ({
     id,
     title: id,
-    binds: { doc: 'docs/spec.md', section: id, fingerprint: `sha256:${id}`, sentences: [id] },
+    binds: { doc: 'docs/spec.md', sentences: [id] },
     outcome,
     durationMs: 1,
   })
@@ -333,12 +314,6 @@ describe('mergeGuardBoard — the merge itself', () => {
       blocked: 0,
     },
     scenarios: rows,
-    sections: rows.map((s) => ({
-      doc: s.binds.doc,
-      section: s.binds.section,
-      status: s.outcome,
-      scenarioIds: [s.id],
-    })),
   })
 
   it('is the run itself when there is no prior board', () => {
@@ -430,7 +405,6 @@ describe('mergeGuardBoard — the merge itself', () => {
       expect(patched.scenarios.find((s) => s.id === 'b')!.adjudication).toBeUndefined()
       // An adjudication is an annotation, never an outcome.
       expect(patched.summary).toBe(board.summary)
-      expect(patched.sections).toBe(board.sections)
       // …and the input is not mutated.
       expect(board.scenarios.find((s) => s.id === 'a')!.adjudication).toBeUndefined()
     })
@@ -458,21 +432,6 @@ describe('mergeGuardBoard — the merge itself', () => {
         )!.adjudication,
       ).toEqual(verdict('m'))
     })
-  })
-
-  it('follows a scenario whose binding moved between runs', () => {
-    const prior = latest('r1', '2026-01-01T00:00:00.000Z', [row('a', 'pass')])
-    const moved = {
-      ...row('a', 'fail'),
-      binds: { doc: 'docs/spec.md', section: 'elsewhere', fingerprint: 'sha256:new', sentences: ['elsewhere'] },
-    }
-    const run = latest('r2', '2026-01-02T00:00:00.000Z', [moved])
-    const merged = mergeGuardBoard(prior, run, new Set(['a']))
-
-    // The old section is not left holding a scenario that no longer binds it.
-    expect(merged.sections).toEqual([
-      { doc: 'docs/spec.md', section: 'elsewhere', status: 'fail', scenarioIds: ['a'] },
-    ])
   })
 })
 

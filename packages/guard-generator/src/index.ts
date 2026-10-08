@@ -45,11 +45,9 @@ export {
 
 export {
   planGuardWork,
-  collectWorkDocs,
   corpusOpenApiDocs,
   hasGuardUniverse,
   readCorpusAreaTags,
-  sectionInputsKey,
   legacyFlowGenerationInputsHash,
   flowGenerationInputComponents,
   flowInterfaceFingerprintBag,
@@ -62,8 +60,8 @@ export {
   type SectionInput,
 } from './section-plan.js'
 
-export { readSpecClaims, placeClaims, docTreesOf, claimAreaInputs, oneLine, dismissedReason } from './claims-input.js'
-export type { PlacedClaim, ClaimPlacement, ClaimAreaInputs, ClaimAreaInputsOptions } from './claims-input.js'
+export { readSpecClaims, placeClaims, claimAreaInputs, oneLine, dismissedReason } from './claims-input.js'
+export type { ClaimPlacement, ClaimAreaInputs, ClaimAreaInputsOptions } from './claims-input.js'
 
 export {
   matchFlow,
@@ -92,7 +90,6 @@ export {
   buildOperationIndex,
   matchOperationsForSection,
   matchedRequestSchemas,
-  matchedSchemaFingerprint,
   type OperationEntry,
 } from './openapi-enrich.js'
 
@@ -128,7 +125,6 @@ export {
   flowAreaClaimsMaterial,
   flowAreaOutlinesMaterial,
   flowEpicDigestsMaterial,
-  flowSectionKey,
   flowsPath,
   readFlowsFile,
   checkFlowSet,

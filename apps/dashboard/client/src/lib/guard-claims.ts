@@ -57,7 +57,7 @@ export function sortGuardClaims(claims: readonly GuardClaimRow[]): GuardClaimRow
     return i === -1 ? GUARD_COVERAGE_STATUS_PRECEDENCE.length : i;
   };
   return [...claims].sort(
-    (a, b) => rank(a) - rank(b) || a.doc.localeCompare(b.doc) || a.claim.localeCompare(b.claim),
+    (a, b) => rank(a) - rank(b) || a.doc.localeCompare(b.doc) || a.statement.localeCompare(b.statement),
   );
 }
 

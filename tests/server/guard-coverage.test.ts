@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { claimWordsByDoc, composeClaimCoverage } from '../../packages/core/src/commands/guard-read';
-import { claimContentHash } from '../../packages/shared/src/guard/claims';
 import { composeBlockedOnReason } from '../../packages/shared/src/guard/report';
+import { claimId, sentenceKey } from '../../packages/shared/src/index';
 import type {
-  GuardClaimsFile,
+  Claim,
+  ClaimsFile,
   GuardCoverageStatus,
   GuardFlowsFile,
   GuardGenerateReport,
@@ -19,9 +20,9 @@ import type {
 
 const DOC = 'docs/spec.md';
 
-const claimOf = (title: string) => {
-  const body = { doc: DOC, anchor: 'spec', title, claim: `${title}.` };
-  return { id: `claim::${DOC}::${title.replace(/\W+/g, '-').toLowerCase()}`, ...body, contentHash: claimContentHash(body) };
+const claimOf = (statement: string, testable: Claim['testable'] = true): Claim => {
+  const sentences = [sentenceKey(`It ${statement}.`)];
+  return { id: claimId(DOC, sentences), doc: DOC, sentences, subject: 'spec', statement, areas: [], testable };
 };
 
 /** One flow per claim, each with the given manifest scenario status and run outcome. */
@@ -34,7 +35,7 @@ const CASES = [
   { title: 'never ran', scenario: 'never-run', outcome: null },
 ] as const;
 
-const claims: GuardClaimsFile = {
+const claims: ClaimsFile = {
   version: 1,
   generatedAt: '2026-08-07T00:00:00.000Z',
   claims: [
@@ -44,18 +45,18 @@ const claims: GuardClaimsFile = {
     claimOf('nothing accounts for'),
     claimOf('was dismissed'),
     claimOf('awaits authoring'),
+    claimOf('is the heart of the product', { reason: 'not-observable' }),
   ],
-  untestable: [{ doc: DOC, anchor: 'spec', text: 'Specs are the heart of the product.', reason: 'states no behaviour' }],
 };
-const byTitle = (title: string) => claims.claims.find((c) => c.title === title)!;
+const byTitle = (title: string) => claims.claims.find((c) => c.statement === title)!;
 
 const flowOf = (title: string) => ({
   id: `flow-${byTitle(title).id}`,
   title: `A user ${title}`,
   goal: title,
   fingerprint: `sha256:${title}`,
-  milestones: [{ order: 1, doc: DOC, anchor: 'spec', claimTitle: title, sentences: ['s'] }],
-  bindings: [{ doc: DOC, anchor: 'spec', fingerprint: 'sha256:s', sentences: ['s'] }],
+  milestones: [{ order: 1, doc: DOC, claimId: byTitle(title).id, claimTitle: title, sentences: byTitle(title).sentences }],
+  bindings: [{ doc: DOC, sentences: byTitle(title).sentences }],
   composedOf: [],
   synthesisInputsHash: 'sha256:i',
 });
@@ -65,8 +66,8 @@ const flows: GuardFlowsFile = {
   generatedAt: '2026-08-07T00:00:00.000Z',
   flows: [...CASES.map((c) => flowOf(c.title)), flowOf('awaits authoring')],
   noFlowClaims: [
-    { doc: DOC, anchor: 'spec', claimTitle: 'is blocked on an interface', reason: 'no `cli/spec` interface has been derived.' },
-    { doc: DOC, anchor: 'spec', claimTitle: 'is not observable', reason: 'unobservable via CLI — nothing prints it.' },
+    { claimId: byTitle('is blocked on an interface').id, reason: 'no `cli/spec` interface has been derived.' },
+    { claimId: byTitle('is not observable').id, reason: 'unobservable via CLI — nothing prints it.' },
   ],
 };
 
@@ -89,31 +90,25 @@ const latest = {
   scenarios: CASES.filter((c) => c.outcome).map((c) => ({
     id: `${flowOf(c.title).id}.cli.1`,
     title: c.title,
-    binds: { doc: DOC, section: 'spec', fingerprint: 'sha256:s', sentences: ['s'] },
+    binds: { doc: DOC, sentences: byTitle(c.title).sentences },
     outcome: c.outcome,
     durationMs: 1,
     ...(c.outcome === 'fail' ? { failure: { step: 1, expected: 'x', actual: 'y' }, evidencePath: '.truecourse/guard/evidence/r1/f' } : {}),
-    ...(c.outcome === 'stale' ? { currentFingerprint: 'sha256:new' } : {}),
   })),
-  sections: [],
 } as unknown as GuardLatest;
 
 const result = {
   generatedAt: '2026-07-06T00:00:00.000Z',
   status: 'ok',
-  sectionsTotal: 1,
-  sectionsChanged: 0,
-  skippedUnchanged: 1,
   noChanges: false,
   written: [],
   coverageGaps: [],
   birthFindings: [],
   // The flow carrying "awaits authoring" could not be authored: no scenario, no gap.
   errors: [
-    { doc: DOC, anchor: 'spec', kind: 'authoring', flowId: flowOf('awaits authoring').id, surface: 'cli', message: 'authoring (cli) call failed' },
+    { doc: DOC, kind: 'authoring', flowId: flowOf('awaits authoring').id, surface: 'cli', message: 'authoring (cli) call failed' },
   ],
   extractionFailures: [],
-  orphaned: [],
 } as unknown as GuardGenerateReport;
 
 const decisions = {
@@ -183,7 +178,8 @@ describe('composeClaimCoverage — every status, keyed by the claim', () => {
       dismissed: 1,
       untestable: 1,
     });
-    expect(view.untestable).toEqual([{ doc: DOC, text: 'Specs are the heart of the product.', reason: 'states no behaviour' }]);
+    const heart = byTitle('is the heart of the product');
+    expect(view.untestable).toEqual([{ id: heart.id, doc: DOC, statement: heart.statement, reason: 'not-observable' }]);
   });
 
   it('folds the claims per document: the document wears its worst word', () => {

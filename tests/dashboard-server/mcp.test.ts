@@ -61,7 +61,7 @@ import { resetSpecStore, saveWorkspaceSpec, setSpecStore } from '@truecourse/cor
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { resetGuardStore as resetCoreGuardStore, setGuardStore, type GuardStore } from '@truecourse/core/lib/guard-store';
 import { writeGuardLatest } from '@truecourse/guard-runner';
-import { sentenceKey, type GuardGenerateReport } from '@truecourse/shared';
+import { claimId, sentenceKey, type GuardGenerateReport } from '@truecourse/shared';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
 import { createAuth, LOCAL_ORG_ID } from '../../apps/dashboard/server/src/auth/index';
 import { createHostedMcpAuth, loadMcpOAuthConfig, type McpAuth } from '../../apps/dashboard/server/src/auth/mcp';
@@ -174,13 +174,12 @@ function failingRun(repoPath: string): void {
       {
         id: 's1',
         title: 'a refund settles',
-        binds: { doc: 'docs/refunds.md', section: 'refunds', fingerprint: 'sha256:x', sentences: ['refunds'] },
+        binds: { doc: 'docs/refunds.md', sentences: ['refunds'] },
         outcome: 'fail',
         durationMs: 1,
         failure: { step: 2, expected: 'exit 0', actual: 'exit 1' },
       },
     ],
-    sections: [],
   });
 }
 
@@ -202,9 +201,9 @@ function writeFlow(repoPath: string): void {
           goal: 'Create and complete a task',
           fingerprint: 'sha256:41ac',
           milestones: [
-            { order: 1, doc: DOC, anchor: 'tasks/creating-tasks', claimTitle: 'Creating a task prints its id', sentences: ['tasks/creating-tasks'] },
+            { order: 1, doc: DOC, claimId: claimId(DOC, ['tasks/creating-tasks']), claimTitle: 'Creating a task prints its id', sentences: ['tasks/creating-tasks'] },
           ],
-          bindings: [{ doc: DOC, anchor: 'tasks/creating-tasks', fingerprint: 'sha256:c', sentences: ['tasks/creating-tasks'] }],
+          bindings: [{ doc: DOC, sentences: ['tasks/creating-tasks'] }],
           composedOf: [],
           synthesisInputsHash: 'sha256:inputs',
         },
@@ -484,7 +483,7 @@ describe('write tools', () => {
 
   const corpusRead = async () => (await request(app).get('/api/context/corpus').expect(200)).body;
 
-  it('reads documents, a section, a flow, its failures and coverage', async () => {
+  it('reads documents, a range of lines, a flow, its failures and coverage', async () => {
     await context.createSource(TEST_ORG, {
       id: SRC_B,
       kind: 'site',
@@ -513,8 +512,10 @@ describe('write tools', () => {
     expect(whole.sections.map((s: { heading: string }) => s.heading)).toEqual(
       expect.arrayContaining(['Cancellation policy', 'Refunds']),
     );
-    const anchor = whole.sections.find((s: { heading: string }) => s.heading === 'Cancellation policy').anchor;
-    const section = await ok(client, 'read_document', { ref: B, section: anchor });
+    // A section's text is read by its outline entry's lines.
+    const { lines } = whole.sections.find((s: { heading: string }) => s.heading === 'Cancellation policy');
+    const section = await ok(client, 'read_document', { ref: B, lines });
+    expect(section.lines).toEqual(lines);
     expect(section.content).toContain('Cancel within 48 hours.');
     expect(section.content).not.toContain('Refunds settle');
 
@@ -682,7 +683,7 @@ describe('write tools', () => {
   });
 
   it('undoes a claim dismissal', async () => {
-    const claim = { claimId: `claim::${DOC}::creating-a-task` };
+    const claim = { claimId: claimId(DOC, ['tasks/creating-tasks']) };
     await request(app).post(`/api/repos/${fixture.project.slug}/guard/dismiss`).send(claim).expect(200);
 
     await ok(client, 'undismiss_claim', { repo: fixture.project.slug, claimId: claim.claimId });

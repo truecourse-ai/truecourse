@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import request from 'supertest';
 import { type Express } from 'express';
+import { claimId } from '@truecourse/shared';
 import { createTestApp, TEST_ORG } from '../helpers/test-app';
 import {
   captureAction,
@@ -49,7 +50,7 @@ describe('Guard dismiss + finding-evidence routes', () => {
     resetGuardStore();
   });
 
-  const claim = { claimId: `claim::${DOC}::version` };
+  const claim = { claimId: claimId(DOC, ['version']) };
 
   it('decisions is empty until something is dismissed', async () => {
     const res = await request(app).get(url('decisions')).expect(200);
@@ -98,8 +99,8 @@ describe('Guard dismiss + finding-evidence routes', () => {
             title: 'Release a version',
             goal: 'Release a version',
             fingerprint: 'sha256:f1',
-            milestones: [{ order: 1, doc: 'docs/release.md', anchor: 'release', claimTitle: 'A release is tagged', sentences: ['release'] }],
-            bindings: [{ doc: 'docs/release.md', anchor: 'release', fingerprint: 'sha256:r', sentences: ['release'] }],
+            milestones: [{ order: 1, doc: 'docs/release.md', claimId: claimId('docs/release.md', ['release']), claimTitle: 'A release is tagged', sentences: ['release'] }],
+            bindings: [{ doc: 'docs/release.md', sentences: ['release'] }],
             composedOf: [],
             synthesisInputsHash: 'sha256:inputs',
           },
@@ -126,8 +127,8 @@ describe('Guard dismiss + finding-evidence routes', () => {
     expect(captureAction).not.toHaveBeenCalled();
   });
 
-  it('dismiss rejects a body missing doc/anchor/title', async () => {
-    await request(app).post(url('dismiss')).send({ doc: DOC, anchor: 'version' }).expect(400);
+  it('dismiss rejects a body with no claim id', async () => {
+    await request(app).post(url('dismiss')).send({ doc: DOC, sentences: ['version'] }).expect(400);
   });
 
   it('finding-evidence serves a birth-evidence transcript addressed by its path', async () => {

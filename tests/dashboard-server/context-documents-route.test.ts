@@ -37,7 +37,7 @@ import { clearTestRegistry } from '../helpers/test-fixture';
 import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
 import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
 import { guardFlowsPath, manifestPath, writeGuardClaims, writeGuardLatest } from '@truecourse/guard-runner';
-import { claimContentHash } from '@truecourse/shared';
+import { claimId } from '@truecourse/shared';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ContextDocumentRow } from '@truecourse/shared';
@@ -50,7 +50,7 @@ const ref = (sourceId: string, name: string): string => `context/${sourceId}/${n
 const REFUNDS = ref(SITE, 'refunds.md');
 const ORPHAN = ref(ONLY, 'nobody.md');
 
-/** A document with one heading: a section the coverage join has something to say about. */
+/** A document with one claim the coverage join has something to say about. */
 const BODY = '# Refunds\n\nA refund settles within two business days.\n';
 
 let app: Express;
@@ -86,19 +86,21 @@ const corpus = (): CuratedCorpus =>
   }) as unknown as CuratedCorpus;
 
 /**
- * A stored run in which the document's one section FAILED: the manifest binds
- * the flow to the section, and the run says the flow's scenario failed there.
+ * A stored run in which the document's one claim FAILED: the flow carries the
+ * claim, and the run says the flow's scenario failed there.
  */
 function failingRun(repoPath: string): void {
-  const binding = { doc: REFUNDS, anchor: 'refunds', fingerprint: 'sha256:x', sentences: ['refunds'] };
+  const binding = { doc: REFUNDS, sentences: ['refunds'] };
+  const id = claimId(REFUNDS, ['refunds']);
   fs.mkdirSync(path.dirname(manifestPath(repoPath)), { recursive: true });
   // The claim the flow carries: coverage is keyed by it.
-  const claim = { doc: REFUNDS, anchor: 'refunds', title: 'a refund settles', claim: 'A refund settles within two business days.' };
   writeGuardClaims(repoPath, {
     version: 1,
     generatedAt: '2026-01-01T00:00:00.000Z',
-    claims: [{ id: `claim::${REFUNDS}::refunds`, ...claim, contentHash: claimContentHash(claim) }],
-    untestable: [],
+    claims: [{
+      id, doc: REFUNDS, sentences: ['refunds'], subject: 'refund',
+      statement: 'A refund settles within two business days.', areas: [], testable: true,
+    }],
   });
   fs.writeFileSync(
     guardFlowsPath(repoPath),
@@ -107,7 +109,7 @@ function failingRun(repoPath: string): void {
       generatedAt: '2026-01-01T00:00:00.000Z',
       flows: [{
         id: 'f1', title: 'a refund settles', goal: 'settle a refund', fingerprint: 'sha256:f',
-        milestones: [{ order: 1, doc: REFUNDS, anchor: 'refunds', claimTitle: 'a refund settles', sentences: ['refunds'] }],
+        milestones: [{ order: 1, doc: REFUNDS, claimId: id, claimTitle: 'a refund settles', sentences: ['refunds'] }],
         bindings: [binding], composedOf: [], synthesisInputsHash: 'sha256:i',
       }],
       noFlowClaims: [],
@@ -143,12 +145,11 @@ function failingRun(repoPath: string): void {
       {
         id: 's1',
         title: 'a refund settles',
-        binds: { doc: REFUNDS, section: 'refunds', fingerprint: 'sha256:x', sentences: ['refunds'] },
+        binds: { doc: REFUNDS, sentences: ['refunds'] },
         outcome: 'fail',
         durationMs: 1,
       },
     ],
-    sections: [],
   });
 }
 

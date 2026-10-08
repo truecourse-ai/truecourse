@@ -19,6 +19,7 @@
 
 import { isMarkdownDoc, parseHeadings, type RawHeading } from './headings.js'
 import { splitDocSentences, type DocSentence } from './sentences.js'
+import { sentenceKey } from '../spec/conflict-resolution.js'
 
 export interface DocSection {
   /** Slugified heading chain (parent/child), unique within the doc. */
@@ -209,6 +210,32 @@ export function sectionOwnText(tree: DocTree, section: Pick<DocSection, 'startLi
 /** The sentences of a section's own text, in document order. */
 export function sectionSentences(tree: DocTree, section: Pick<DocSection, 'startLine' | 'ownEndLine'>): DocSentence[] {
   return tree.sentences.filter((s) => s.startLine >= section.startLine && s.startLine <= section.ownEndLine)
+}
+
+/** The doc's sentences by {@link sentenceKey} — what a binding's sentence keys resolve through. */
+export function sentencesByKey(tree: DocTree): Map<string, DocSentence> {
+  return new Map(tree.sentences.map((s) => [sentenceKey(s.text, s.repeat), s]))
+}
+
+/**
+ * The section the earliest live sentence of `keys` sits in — the text a reader
+ * is shown around a binding. Null when none of the sentences is in the doc.
+ */
+export function sectionOfSentences(tree: DocTree, keys: readonly string[]): DocSection | null {
+  const live = sentencesByKey(tree)
+  const lines = keys.flatMap((key) => live.get(key)?.startLine ?? [])
+  return lines.length === 0 ? null : sectionAtLine(tree, Math.min(...lines))
+}
+
+/**
+ * The section a line sits in: the one whose own text holds it, else the last
+ * section opened above it, else the doc's first. Null for a doc with no section.
+ */
+export function sectionAtLine(tree: DocTree, line: number): DocSection | null {
+  const own = tree.sections.find((s) => s.startLine <= line && line <= s.ownEndLine)
+  if (own) return own
+  const above = [...tree.sections].reverse().find((s) => s.startLine <= line)
+  return above ?? tree.sections[0] ?? null
 }
 
 /** The lead section, or null when the doc opens with a heading or the text above it is blank. */

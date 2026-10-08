@@ -13,8 +13,8 @@ function repo(): string {
   return r
 }
 
-const bindsFor = (...sections: string[]) =>
-  sections.map((section) => ({ doc: 'docs/spec.md', section, fingerprint: `sha256:${section}`, sentences: [`sentence:${section}`] }))
+/** One bind per name, each to one sentence of `doc`. */
+const bindsFor = (...names: string[]) => names.map((name) => ({ doc: 'docs/spec.md', sentences: [`sentence:${name}`] }))
 
 describe('GuardManifestSchema', () => {
   it('round-trips through JSON', () => {
@@ -23,7 +23,7 @@ describe('GuardManifestSchema', () => {
         {
           flowId: 'task-lifecycle',
           flowFingerprint: 'sha256:flow',
-          bindings: [{ doc: 'docs/spec.md', anchor: 'a/b', fingerprint: 'sha256:1', sentences: ['a/b'] }],
+          bindings: [{ doc: 'docs/spec.md', sentences: ['sentence:a'] }],
           scenarios: [{ id: 'task-lifecycle.cli.1', drivers: ['cli'], status: 'passing' }],
           interfaces: [{ surface: 'cli', interfaceIds: ['cli/tasks-add'] }],
           generationInputsHash: null,
@@ -66,14 +66,19 @@ describe('GuardManifestSchema', () => {
 })
 
 describe('rebuildManifestFromScenarios', () => {
-  it('groups scenarios by the flow they realize, unioning the sections they bind', () => {
+  it('groups scenarios by the flow they realize, unioning the sentences they bind per doc', () => {
     const r = repo()
     writeRecipe(r)
     const flow = { id: 'task-lifecycle', fingerprint: 'sha256:flow' }
     writeScenario(
       r,
       'a.yaml',
-      scenario({ id: 'task-lifecycle.cli.1', flow, binds: bindsFor('one', 'two'), steps: [{ run: [], expect: { exit: 0 } }] }),
+      scenario({
+        id: 'task-lifecycle.cli.1',
+        flow,
+        binds: [...bindsFor('two', 'one'), { doc: 'docs/other.md', sentences: ['sentence:three'] }],
+        steps: [{ run: [], expect: { exit: 0 } }],
+      }),
     )
     writeScenario(
       r,
@@ -93,8 +98,8 @@ describe('rebuildManifestFromScenarios', () => {
       flowId: 'task-lifecycle',
       flowFingerprint: 'sha256:flow',
       bindings: [
-        { doc: 'docs/spec.md', anchor: 'one', fingerprint: 'sha256:one', sentences: ['sentence:one'] },
-        { doc: 'docs/spec.md', anchor: 'two', fingerprint: 'sha256:two', sentences: ['sentence:two'] },
+        { doc: 'docs/other.md', sentences: ['sentence:three'] },
+        { doc: 'docs/spec.md', sentences: ['sentence:one', 'sentence:two'] },
       ],
       scenarios: [
         { id: 'task-lifecycle.cli.1', drivers: ['cli'], status: 'passing' },
@@ -142,7 +147,7 @@ describe('rebuildManifestFromScenarios', () => {
     const manifest = rebuildManifestFromScenarios(r)
     expect(manifest.flows.map((f) => f.flowId)).toEqual(['manual/hand.1', 'manual/hand.2'])
     expect(manifest.flows[0].flowFingerprint).toBe(
-      flowFingerprint([{ order: 1, doc: 'docs/spec.md', anchor: 'one', claimTitle: 'a hand-written guard', sentences: ['one'] }]),
+      flowFingerprint([{ order: 1, doc: 'docs/spec.md', claimId: 'hand.1', claimTitle: 'a hand-written guard', sentences: ['sentence:one'] }]),
     )
     expect(manifest.flows[0].scenarios).toEqual([{ id: 'hand.1', drivers: ['cli'], status: 'passing' }])
   })

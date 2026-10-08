@@ -31,7 +31,7 @@ a documentation site) and turns it into tests that run.
 It curates those documents into a corpus of **claims**, works out the **flows** a
 user takes through the product, writes a test for each one against the real
 interfaces, and runs them. A failing test means the product and the documentation
-disagree, and it names which section.
+disagree, and it names which claim.
 
 For more details, check our documentation at
 **[docs.truecourse.dev](https://docs.truecourse.dev)**.

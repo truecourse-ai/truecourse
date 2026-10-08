@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { runGuard, buildDocSectionIndex, guardRunPath, type GuardScenario } from '@truecourse/guard-runner'
-import { GuardLatestSchema, type GuardBinds } from '@truecourse/shared'
-import { makeTempRepo, rmrf, writeRecipe, writeScenario, scenario, specBinds, sectionBind, staleSpecBind } from './helpers.js'
+import { runGuard, guardRunPath } from '@truecourse/guard-runner'
+import { GuardLatestSchema, type GuardBinds, type GuardScenario } from '@truecourse/shared'
+import { makeTempRepo, parseDocTree, rmrf, writeRecipe, writeScenario, scenario, specBinds, sectionBind, staleSpecBind } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -15,15 +15,12 @@ function repo(): string {
   return r
 }
 
-/** The shared spec doc `writeRecipe` seeds — the live-binding source. */
-const SPEC_DOC = specBinds('a/b')[0].doc
-
-/** A bind one of whose sentences the doc no longer holds — an EDITED section. */
+/** A bind one of whose sentences the doc no longer holds — an EDITED sentence. */
 const staleBind = staleSpecBind
 
-/** A bind none of whose sentences the doc holds — a REMOVED section. */
-function orphanBind(section: string): GuardBinds {
-  return { doc: SPEC_DOC, section, fingerprint: 'sha256:section-that-no-longer-exists', sentences: ['sentence:that-no-longer-exists'] }
+/** A bind to a document that is not in the repo — a REMOVED document. */
+function orphanBind(doc: string): GuardBinds {
+  return { doc, sentences: ['sentence:of-a-removed-doc'] }
 }
 
 /** A one-step passing scenario over the given binds. */
@@ -31,7 +28,7 @@ function passing(id: string, binds: GuardBinds[]): GuardScenario {
   return scenario({ id, binds, steps: [{ run: ['--version'], expect: { exit: 0 } }] })
 }
 
-// --- A doc this file owns, so a section can be MOVED between binds ------------
+// --- A doc this file owns, so its sentences can MOVE under other headings -----
 
 const MOVE_DOC = 'docs/moving.md'
 const MOVE_V1 = ['# Guide', '', '## Top', 'preamble', '', '### Limits', 'Five attempts.', '', '## Aside', 'unrelated'].join(
@@ -44,12 +41,12 @@ function writeMoveDoc(root: string, content: string): void {
   fs.writeFileSync(target, content)
 }
 
-/** The live binding of `headingText` in `content`. */
+/** The live binding of the sentences under `headingText` in `content`. */
 function moveBind(content: string, headingText: string): GuardBinds {
-  const index = buildDocSectionIndex(MOVE_DOC, content)
-  const s = index.sections.find((x) => x.headingText === headingText)
+  const tree = parseDocTree(MOVE_DOC, content)
+  const s = tree.sections.find((x) => x.headingText === headingText)
   if (!s) throw new Error(`no section "${headingText}"`)
-  return sectionBind(index, s.anchor)
+  return sectionBind(tree, s.anchor)
 }
 
 describe('runGuard — plural-bind staleness', () => {
@@ -73,15 +70,13 @@ describe('runGuard — plural-bind staleness', () => {
     const s = res.latest.scenarios[0]
     expect(s.outcome).toBe('stale')
     expect(s.durationMs).toBe(0)
-    // The current text of the bind that drifted — even though it is not `binds`.
-    expect(s.currentFingerprint).toBe(specBinds('cli/version')[0].fingerprint)
     expect(s.evidencePath).toBeUndefined()
   })
 
   it('is orphaned only when EVERY bind is orphaned', async () => {
     const r = repo()
     writeRecipe(r)
-    writeScenario(r, 's.yaml', passing('all-gone', [orphanBind('no/such'), orphanBind('also/gone')]))
+    writeScenario(r, 's.yaml', passing('all-gone', [orphanBind('docs/no-such.md'), orphanBind('docs/also-gone.md')]))
 
     const res = await runGuard({ repoRoot: r, skipBuild: true })
     if (res.status !== 'ok') throw new Error('expected ok')
@@ -92,62 +87,33 @@ describe('runGuard — plural-bind staleness', () => {
   it('is stale (not orphaned) when only SOME binds are orphaned', async () => {
     const r = repo()
     writeRecipe(r)
-    writeScenario(r, 's.yaml', passing('partial', [specBinds('a/b')[0], orphanBind('no/such')]))
+    writeScenario(r, 's.yaml', passing('partial', [specBinds('a/b')[0], orphanBind('docs/no-such.md')]))
 
     const res = await runGuard({ repoRoot: r, skipBuild: true })
     if (res.status !== 'ok') throw new Error('expected ok')
-    const s = res.latest.scenarios[0]
-    expect(s.outcome).toBe('stale')
-    // Nothing was EDITED — a removal has no current text to fingerprint.
-    expect(s.currentFingerprint).toBeUndefined()
+    expect(res.latest.scenarios[0].outcome).toBe('stale')
   })
 
-  it('prefers stale over orphaned when the two mix, reporting the edited fingerprint', async () => {
+  it('is stale when an edited bind and a removed document mix', async () => {
     const r = repo()
     writeRecipe(r)
-    writeScenario(r, 's.yaml', passing('mixed', [orphanBind('no/such'), staleBind('cli/version')]))
+    writeScenario(r, 's.yaml', passing('mixed', [orphanBind('docs/no-such.md'), staleBind('cli/version')]))
 
     const res = await runGuard({ repoRoot: r, skipBuild: true })
     if (res.status !== 'ok') throw new Error('expected ok')
-    const s = res.latest.scenarios[0]
-    expect(s.outcome).toBe('stale')
-    expect(s.currentFingerprint).toBe(specBinds('cli/version')[0].fingerprint)
+    expect(res.latest.scenarios[0].outcome).toBe('stale')
   })
 
-  it('is transparent to a remapped bind — the scenario still runs', async () => {
+  it('still runs when a bind’s sentences moved under a renamed heading', async () => {
     const r = repo()
     writeRecipe(r)
-    // Primary bind = the section that moves; the second one stays put.
-    writeScenario(r, 'primary.yaml', {
-      ...passing('primary-moved', [moveBind(MOVE_V1, 'Limits'), moveBind(MOVE_V1, 'Aside')]),
-    })
-    // Same pair, reversed: the moving section is a NON-primary bind.
-    writeScenario(r, 'secondary.yaml', {
-      ...passing('secondary-moved', [moveBind(MOVE_V1, 'Aside'), moveBind(MOVE_V1, 'Limits')]),
-    })
-    // Rename the parent heading: "Limits" keeps its text but changes anchor.
+    writeScenario(r, 's.yaml', passing('moved', [moveBind(MOVE_V1, 'Aside'), moveBind(MOVE_V1, 'Limits')]))
+    // Rename the parent heading: the sentences under "Limits" stand, under a new anchor.
     writeMoveDoc(r, MOVE_V1.replace('## Top', '## Renamed'))
 
     const res = await runGuard({ repoRoot: r, skipBuild: true })
     if (res.status !== 'ok') throw new Error('expected ok')
-    const primary = res.latest.scenarios.find((s) => s.id === 'primary-moved')!
-    const secondary = res.latest.scenarios.find((s) => s.id === 'secondary-moved')!
-    expect(primary.outcome).toBe('pass')
-    expect(primary.remappedTo).toBe('guide/renamed/limits')
-    expect(secondary.outcome).toBe('pass')
-    // `remappedTo` re-anchors the PRIMARY bind only; the second bind matched here.
-    expect(secondary.remappedTo).toBeUndefined()
-  })
-
-  it('rolls the scenario outcome up onto EVERY section it binds', async () => {
-    const r = repo()
-    writeRecipe(r)
-    writeScenario(r, 's.yaml', passing('three', specBinds('a/b', 'cli/version', 'cli/whoami')))
-
-    const res = await runGuard({ repoRoot: r, skipBuild: true })
-    if (res.status !== 'ok') throw new Error('expected ok')
-    expect(res.latest.sections.map((s) => s.section).sort()).toEqual(['a/b', 'cli/version', 'cli/whoami'])
-    expect(res.latest.sections.every((s) => s.status === 'pass' && s.scenarioIds.includes('three'))).toBe(true)
+    expect(res.latest.scenarios[0].outcome).toBe('pass')
   })
 })
 
@@ -214,11 +180,10 @@ describe('runGuard — flow annotations on results', () => {
     )
     expect(snapshot.scenarios.find((s) => s.id === 'publish-a-release.cli.1')?.failedMilestone).toBe(2)
 
-    // The evidence transcript names the flow and every bound section.
+    // The evidence transcript names the flow and every bind.
     const transcript = fs.readFileSync(path.join(r, failed.evidencePath!, 'transcript.txt'), 'utf-8')
     expect(transcript).toContain('flow:     publish-a-release')
-    expect(transcript).toContain('cli/version')
-    expect(transcript).toContain('cli/boom')
+    expect(transcript.split('docs/spec.md (1 sentence)').length - 1).toBe(2)
   })
 
   it('annotates no milestone when the failing step is plumbing, and keeps flowId on a stale result', async () => {

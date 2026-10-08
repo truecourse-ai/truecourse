@@ -158,13 +158,9 @@ const report = (): GuardGenerateReport => ({
   noChanges: false,
   written: [],
   birthFindings: [],
-  sectionsTotal: 0,
-  sectionsChanged: 0,
-  skippedUnchanged: 0,
   coverageGaps: [],
   errors: [],
   extractionFailures: [],
-  orphaned: [],
 });
 
 /** A run of the one-flow set, with scenario a1 at `outcome`. */
@@ -176,13 +172,12 @@ function latestOf(runId: string, commit: string, outcome: 'pass' | 'fail' | 'err
       {
         id: 'a1',
         title: 'create an org',
-        binds: { doc: 'docs/orgs.md', section: 'orgs', fingerprint: 'sha256:x', sentences: ['orgs'] },
+        binds: { doc: 'docs/orgs.md', sentences: ['orgs'] },
         outcome,
         durationMs: 1,
         ...(failure ? { failure: { step: 1, ...failure } } : {}),
       },
     ],
-    sections: [],
   } as GuardLatest;
 }
 
@@ -193,7 +188,7 @@ async function storeBase(commit = BASE): Promise<void> {
   fs.mkdirSync(orgs, { recursive: true });
   fs.writeFileSync(
     path.join(orgs, 'a1.yaml'),
-    ['id: a1', 'title: create an org', 'binds:', '  - doc: docs/orgs.md', '    section: orgs', '    fingerprint: "sha256:x"', '    sentences: [orgs]', 'steps:', '  - run: ["--help"]', '    expect:', '      exit: 0', ''].join('\n'),
+    ['id: a1', 'title: create an org', 'binds:', '  - doc: docs/orgs.md', '    sentences: [orgs]', 'steps:', '  - run: ["--help"]', '    expect:', '      exit: 0', ''].join('\n'),
   );
   fs.writeFileSync(
     manifestPath(dir),
@@ -203,7 +198,7 @@ async function storeBase(commit = BASE): Promise<void> {
         {
           flowId: 'f1',
           flowFingerprint: 'sha256:f',
-          bindings: [{ doc: 'docs/orgs.md', anchor: 'orgs', fingerprint: 'sha256:x', sentences: ['orgs'] }],
+          bindings: [{ doc: 'docs/orgs.md', sentences: ['orgs'] }],
           scenarios: [{ id: 'a1', drivers: ['cli'] }],
           interfaces: [],
           generationInputsHash: null,
@@ -217,7 +212,7 @@ async function storeBase(commit = BASE): Promise<void> {
   await saveGuardSetupBundle(ref, { '.truecourse/scenarios/recipe.json': JSON.stringify({ build: 'true', api: { serve: ['node', 'server.mjs'], healthPath: '/health' } }) + '\n' });
   const run = latestOf(`run-${commit}`, commit, 'pass');
   await writeGuardLatest(REPO, run);
-  await writeGuardRunCoverage(REPO, { runId: run.run.runId, ranAt: run.run.ranAt, commit, sections: {}, flows: { f1: 'succeeded' } });
+  await writeGuardRunCoverage(REPO, { runId: run.run.runId, ranAt: run.run.ranAt, commit, claims: {}, flows: { f1: 'succeeded' } });
 }
 
 function pr(over: Partial<PullRequestRecord> = {}): PullRequestRecord {

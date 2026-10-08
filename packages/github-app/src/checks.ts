@@ -185,7 +185,7 @@ function settledWithoutReport(reason: PullRequestCheckReason, detailsUrl: string
 function countsLine(report: PullRequestCheckReport): string {
   const parts = [
     `${report.conflictsCreated.length} conflict${report.conflictsCreated.length === 1 ? '' : 's'} created`,
-    `${report.sectionsMoved.length} section${report.sectionsMoved.length === 1 ? '' : 's'} moved`,
+    `${report.docsMoved.length} document${report.docsMoved.length === 1 ? '' : 's'} moved`,
     `${report.repositoriesAffected.length} other repositor${report.repositoriesAffected.length === 1 ? 'y' : 'ies'} affected`,
   ];
   if (report.run) {
@@ -218,10 +218,10 @@ function sections(report: PullRequestCheckReport): string[] {
         .join('\n')}`,
     );
   }
-  if (report.sectionsMoved.length > 0) {
+  if (report.docsMoved.length > 0) {
     out.push(
-      `## Sections moved\n\n${report.sectionsMoved
-        .map((s) => `- ${s.doc} · ${s.anchor}${s.flows.length > 0 ? ` (${s.flows.map((f) => f.title).join(', ')})` : ''}`)
+      `## Documents moved\n\n${report.docsMoved
+        .map((d) => `- ${d.doc}${d.flows.length > 0 ? ` (${d.flows.map((f) => f.title).join(', ')})` : ''}`)
         .join('\n')}`,
     );
   }

@@ -59,7 +59,7 @@ it('keeps ordinary CLI commands outside the server-startup proof gate', async ()
       {
         order: 1,
         doc: 'cli.md',
-        anchor: 'version',
+        claimId: 'claim::cli.md::version',
         claimTitle: 'relkit --version prints version', sentences: ['version'],
         proofDrivers: ['cli' as const],
         verification: {

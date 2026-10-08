@@ -102,7 +102,7 @@ export function GuardDriftDetail({
           )}
           {scenario.outcome === 'orphaned' && !scenario.failure && (
             <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
-              The bound section no longer exists in the spec, the test was not run.
+              The document this test was written against is gone from the spec, the test was not run.
             </p>
           )}
         </>

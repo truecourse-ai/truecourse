@@ -462,31 +462,13 @@ export {
   type WebScreenAuthoringState,
 } from './interface-authoring.js'
 
-export {
-  buildDocSectionIndex,
-  extractSectionTexts,
-  resolveBinding,
-  resolveScenarioBinds,
-  slugifyHeading,
-  normalizeSectionText,
-  fingerprintText,
-  isMarkdownDoc,
-  isOpenApiDoc,
-  deriveOpenApiSections,
-} from './section-index.js'
-export type {
-  DocSection,
-  DocSectionIndex,
-  BindingResolution,
-  ScenarioBindingVerdict,
-  SectionText,
-} from './section-index.js'
+export { resolveBinding, resolveScenarioBinds } from './binding.js'
+export type { BindingResolution, ScenarioBindingVerdict } from './binding.js'
 
 export { isInterfaceDrifted } from './interface-drift.js'
 
-export { corpusKeptDocs, indexRepoDocs, nodeRefContext } from './doc-index.js'
-export type { RepoDocIndexes } from './doc-index.js'
-export type { RefResolutionContext } from './section-index.js'
+export { corpusKeptDocs, readRepoDocTrees } from './doc-index.js'
+export type { RepoDocTrees } from './doc-index.js'
 
 export { readManifest, writeManifest, rebuildManifestFromScenarios } from './manifest.js'
 
