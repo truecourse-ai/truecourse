@@ -43,14 +43,12 @@ describe('ManualAreaSchema (per-doc area override)', () => {
 });
 
 describe('ConflictResolutionSchema (conflict verdicts)', () => {
-  it('round-trips a pick-a-side verdict with anchors + quotes', () => {
+  it('round-trips a pick-a-side verdict with its sentences and quotes', () => {
     const r = {
       docA: 'README.md',
-      anchorA: 'taskline',
       quoteA: 'rm permanently deletes the task.',
       sentenceA: 's-readme',
       docB: 'docs/SPEC.md',
-      anchorB: 'rm <id>',
       quoteB: 'rm archives the task.',
       sentenceB: 's-spec',
       verdict: 'a' as const,
@@ -60,27 +58,12 @@ describe('ConflictResolutionSchema (conflict verdicts)', () => {
     expect(ConflictResolutionSchema.parse(r)).toEqual(r);
   });
 
-  it('allows null anchors (preamble/lead) and omitted quotes', () => {
-    const parsed = ConflictResolutionSchema.parse({
-      docA: 'README.md',
-      anchorA: null,
-      sentenceA: 's-readme',
-      docB: 'docs/SPEC.md',
-      anchorB: null,
-      sentenceB: 's-spec',
-      verdict: 'dismissed',
-      resolvedAt: '',
-    });
-    expect(parsed.anchorA).toBeNull();
-    expect(parsed.quoteA).toBeUndefined();
-  });
-
   it('rejects an unknown verdict, and a verdict that names no sentences', () => {
     expect(() =>
-      ConflictResolutionSchema.parse({ docA: 'a', anchorA: null, sentenceA: 's', docB: 'b', anchorB: null, sentenceB: 't', verdict: 'maybe', resolvedAt: '' }),
+      ConflictResolutionSchema.parse({ docA: 'a', sentenceA: 's', docB: 'b', sentenceB: 't', verdict: 'maybe', resolvedAt: '' }),
     ).toThrow();
     expect(() =>
-      ConflictResolutionSchema.parse({ docA: 'a', anchorA: null, docB: 'b', anchorB: null, verdict: 'a', resolvedAt: '' }),
+      ConflictResolutionSchema.parse({ docA: 'a', docB: 'b', verdict: 'a', resolvedAt: '' }),
     ).toThrow();
   });
 });
@@ -105,7 +88,7 @@ describe('DecisionsFileSchema (corpus curation intent)', () => {
       manualIncludes: ['docs/keep.md'],
       manualAreas: [{ doc: 'a.md', areas: ['core/auth'] }],
       conflictResolutions: [
-        { docA: 'a.md', anchorA: 'x', sentenceA: 's-a', docB: 'b.md', anchorB: 'y', sentenceB: 's-b', verdict: 'b' as const, resolvedAt: '2026-07-10T00:00:00Z' },
+        { docA: 'a.md', sentenceA: 's-a', docB: 'b.md', sentenceB: 's-b', verdict: 'b' as const, resolvedAt: '2026-07-10T00:00:00Z' },
       ],
     };
     const parsed = DecisionsFileSchema.parse(file);

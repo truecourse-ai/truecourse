@@ -438,8 +438,8 @@ describe('write tools', () => {
               docs: [A, B],
               note: '24h vs 48h',
               sections: [
-                { doc: A, heading: 'Cancellation', quote: 'within 24 hours', sentence: 's-a' },
-                { doc: B, heading: 'Cancellation policy', quote: 'within 48 hours', sentence: 's-b' },
+                { doc: A, quote: 'within 24 hours', sentence: 's-a' },
+                { doc: B, quote: 'within 48 hours', sentence: 's-b' },
               ],
             },
           ],
@@ -582,22 +582,22 @@ describe('write tools', () => {
       const { conflicts } = await ok(client, 'list_conflicts');
       expect(conflicts).toHaveLength(1);
       expect(conflicts[0]).toMatchObject({
-        a: { doc: A, heading: 'Cancellation', quote: 'within 24 hours' },
-        b: { doc: B, heading: 'Cancellation policy', quote: 'within 48 hours' },
+        a: { doc: A, quote: 'within 24 hours' },
+        b: { doc: B, quote: 'within 48 hours' },
         resolved: false,
       });
 
       const resolved = await ok(client, 'resolve_conflict', { conflictId: conflicts[0].id, verdict: 'b' });
       expect(resolved.conflict).toMatchObject({ resolved: true, resolution: { verdict: 'b' } });
-      // The same record the dashboard's verdict writes: both sections and quotes.
+      // The same record the dashboard's verdict writes: both sentences and quotes.
       expect((await corpusRead()).conflictResolutions).toEqual([
         expect.objectContaining({
           docA: A,
-          anchorA: 'Cancellation',
           quoteA: 'within 24 hours',
+          sentenceA: 's-a',
           docB: B,
-          anchorB: 'Cancellation policy',
           quoteB: 'within 48 hours',
+          sentenceB: 's-b',
           verdict: 'b',
         }),
       ]);
@@ -613,11 +613,11 @@ describe('write tools', () => {
     }
   });
 
-  it('resolves and undoes one of several conflicts between the same two sections, by its sentences', async () => {
-    const at = (doc: string, heading: string, quote: string) => ({ doc, heading, quote, sentence: sentenceKey(quote) });
+  it('resolves and undoes one of several conflicts between the same two docs, by its sentences', async () => {
+    const at = (doc: string, quote: string) => ({ doc, quote, sentence: sentenceKey(quote) });
     const points = [
-      [at(A, 'Cancellation', 'within 24 hours'), at(B, 'Cancellation policy', 'within 48 hours')],
-      [at(A, 'Cancellation', 'a fee of 10 dollars'), at(B, 'Cancellation policy', 'free of charge')],
+      [at(A, 'within 24 hours'), at(B, 'within 48 hours')],
+      [at(A, 'a fee of 10 dollars'), at(B, 'free of charge')],
     ];
     const base = corpus();
     await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', {

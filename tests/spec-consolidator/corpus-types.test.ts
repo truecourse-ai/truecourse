@@ -147,45 +147,16 @@ describe('CuratedCorpusSchema', () => {
     expect((parsed as Record<string, unknown>).relations).toBeUndefined();
   });
 
-  it('parses an conflict whose section pointer is a preamble marker (null heading)', () => {
-    const parsed = CuratedCorpusSchema.parse({
-      version: 5,
-      generatedAt: '2026-06-26T00:00:00Z',
-      docs: [],
-      areas: [
-        {
-          id: 'core/languages',
-          product: 'core',
-          concern: 'languages',
-          docRefs: ['README.md', 'docs/PLAN.md'],
-          conflicts: [
-            {
-              docs: ['README.md', 'docs/PLAN.md'],
-              note: 'README preamble lists C#; PLAN omits it',
-              sections: [
-                { doc: 'README.md', heading: null, sentence: 's-readme' },
-                { doc: 'docs/PLAN.md', heading: 'Tech Stack', sentence: 's-plan' },
-              ],
-            },
-          ],
-        },
-      ],
-    });
-    expect(parsed.areas[0].conflicts[0].sections).toEqual([
-      { doc: 'README.md', heading: null, sentence: 's-readme' },
-      { doc: 'docs/PLAN.md', heading: 'Tech Stack', sentence: 's-plan' },
-    ]);
-  });
 });
 
 describe('ConflictSideSchema', () => {
-  it('accepts a heading, or null for the preamble, beside the sentence key', () => {
-    expect(ConflictSideSchema.parse({ doc: 'a.md', heading: 'Tech Stack', sentence: 's' })).toEqual({ doc: 'a.md', heading: 'Tech Stack', sentence: 's' });
-    expect(ConflictSideSchema.parse({ doc: 'a.md', heading: null, sentence: 's' })).toEqual({ doc: 'a.md', heading: null, sentence: 's' });
+  it('is a doc and a sentence key, with the quoted words when there are any', () => {
+    expect(ConflictSideSchema.parse({ doc: 'a.md', quote: 'Uses C#.', sentence: 's' })).toEqual({ doc: 'a.md', quote: 'Uses C#.', sentence: 's' });
+    expect(ConflictSideSchema.parse({ doc: 'a.md', sentence: 's' })).toEqual({ doc: 'a.md', sentence: 's' });
   });
 
   it('refuses a side without its sentence', () => {
-    expect(() => ConflictSideSchema.parse({ doc: 'a.md', heading: null })).toThrow();
+    expect(() => ConflictSideSchema.parse({ doc: 'a.md', quote: 'Uses C#.' })).toThrow();
   });
 });
 

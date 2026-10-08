@@ -46,8 +46,8 @@ function seedCorpusWithConflict(): void {
             docs: ['docs/v1.md', 'docs/v2.md'],
             note: NOTE,
             sections: [
-              { doc: 'docs/v1.md', heading: null, sentence: 's-v1' },
-              { doc: 'docs/v2.md', heading: null, sentence: 's-v2' },
+              { doc: 'docs/v1.md', sentence: 's-v1' },
+              { doc: 'docs/v2.md', sentence: 's-v2' },
             ],
           },
         ],
@@ -130,15 +130,13 @@ describe('guard generate — open-conflict gate', () => {
 
   it('proceeds past the gate when a SIDE VERDICT resolves the conflict', async () => {
     seedCorpusWithConflict();
-    // The seeded conflict is sectionless → a null-anchor verdict matches its identity.
+    // A verdict on the seeded conflict's two sentences matches its identity.
     writeDecisions({
       conflictResolutions: [
         {
           docA: 'docs/v1.md',
-          anchorA: null,
           sentenceA: 's-v1',
           docB: 'docs/v2.md',
-          anchorB: null,
           sentenceB: 's-v2',
           verdict: 'b',
           resolvedAt: '2026-07-10T00:00:00Z',
@@ -154,7 +152,7 @@ describe('guard generate — open-conflict gate', () => {
     seedCorpusWithConflict();
     writeDecisions({
       conflictResolutions: [
-        { docA: 'docs/v1.md', anchorA: null, sentenceA: 's-v1', docB: 'docs/v2.md', anchorB: null, sentenceB: 's-v2', verdict: 'dismissed', resolvedAt: '' },
+        { docA: 'docs/v1.md', sentenceA: 's-v1', docB: 'docs/v2.md', sentenceB: 's-v2', verdict: 'dismissed', resolvedAt: '' },
       ],
     });
     const err = await guardGenerateInProcess(repo, { onLlmEstimate: async () => false }).catch((e: unknown) => e);

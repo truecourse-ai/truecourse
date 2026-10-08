@@ -20,10 +20,8 @@ const DOC_B = 'context/site-docs-acme/payouts.md';
 
 const VERDICT = {
   docA: DOC_A,
-  anchorA: 'Refunds',
   sentenceA: 's-refunds',
   docB: DOC_B,
-  anchorB: 'Refund window',
   sentenceB: 's-window',
   verdict: 'b' as const,
 };

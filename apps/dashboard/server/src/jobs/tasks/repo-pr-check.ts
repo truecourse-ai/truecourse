@@ -42,12 +42,11 @@ import {
   conflictSides,
   isForkPullRequest,
   openConflicts,
-  headingKey,
-  parseHeadings,
+  parseDocTree,
   pullRequestWorkspaceScope,
+  sentencesByKey,
   type CorpusConflict,
   type NotificationLevel,
-  type ConflictSideLike,
   type PullRequestCheckConclusion,
   type PullRequestCheckReason,
   type PullRequestCheckReport,
@@ -447,11 +446,11 @@ async function scanHead(input: {
 }
 
 /**
- * One created conflict as the report carries it: the doc pair with each
- * side's headings — this repository's own document first when one
- * side is one (the one the pull request changed, when both are), with its
- * path and its heading's line at the head, which is where the check's
- * annotation goes — and the repositories whose slices read either side.
+ * One created conflict as the report carries it: the doc pair — this
+ * repository's own document first when one side is one (the one the pull
+ * request changed, when both are), with its path and the line of its disputed
+ * sentence at the head, which is where the check's annotation goes — and the
+ * repositories whose slices read either side.
  */
 function reportConflict(
   conflict: CorpusConflict,
@@ -459,8 +458,6 @@ function reportConflict(
   repos: readonly { repoFullName: string; sourceIds: string[] }[],
 ): PullRequestCheckReport['conflictsCreated'][number] {
   const { source, documents } = scan;
-  const headings = (side: readonly ConflictSideLike[]): string[] =>
-    side.flatMap((s) => (s.heading !== null ? [s.heading] : []));
   const [sideA, sideB] = conflictSides(conflict.a, conflict.b, conflict.sections);
   const ownSides = [conflict.a, conflict.b]
     .map((doc) => ({ doc, parsed: parseContextDocRef(doc) }))
@@ -469,19 +466,15 @@ function reportConflict(
   // A conflict inside one doc keeps its sentences in order: there is no other doc to put first.
   const flip = own?.doc === conflict.b && conflict.a !== conflict.b;
   const docs: [string, string] = flip ? [conflict.b, conflict.a] : [conflict.a, conflict.b];
-  const sections: [string[], string[]] = flip
-    ? [headings(sideB), headings(sideA)]
-    : [headings(sideA), headings(sideB)];
+  const ownSide = (flip ? sideB : sideA)[0];
   const path = own?.parsed?.docPath ?? null;
   const body = path !== null ? documents.get(path) : undefined;
-  const heading = own ? sections[0][0] : undefined;
-  const line = body !== undefined && heading !== undefined ? headingLine(body, heading) : null;
+  const line = body !== undefined && ownSide !== undefined ? sentenceLine(path!, body, ownSide.sentence) : null;
   const sourcesOf = new Set(
     [conflict.a, conflict.b].map((doc) => parseContextDocRef(doc)?.sourceId).filter((id): id is string => !!id),
   );
   return {
     docs,
-    sections,
     note: conflict.note,
     area: conflict.area,
     path,
@@ -490,14 +483,8 @@ function reportConflict(
   };
 }
 
-/**
- * The 1-based line of a markdown heading in a body, or null when it is not
- * there. Headings are the ones the doc's outline lists, so a `#` comment inside
- * a fenced block is never one.
- */
-function headingLine(body: string, heading: string): number | null {
-  const key = headingKey(heading);
-  const found = parseHeadings(body.split('\n')).find((h) => headingKey(h.text) === key);
-  return found ? found.line + 1 : null;
+/** The 1-based line a sentence (by key) starts on in a body, or null when the body no longer holds it. */
+function sentenceLine(doc: string, body: string, sentence: string): number | null {
+  return sentencesByKey(parseDocTree(doc, body)).get(sentence)?.startLine ?? null;
 }
 

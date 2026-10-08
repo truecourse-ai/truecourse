@@ -78,7 +78,6 @@ const PULL: WorkspacePullRequestRow = {
     conflictsCreated: [
       {
         docs: [REFUNDS_REF, PAYOUTS_REF],
-        sections: [['window'], ['timing']],
         note: 'the refund window is two days in one and five in the other',
         area: 'acme/refunds',
         path: 'docs/refunds.md',

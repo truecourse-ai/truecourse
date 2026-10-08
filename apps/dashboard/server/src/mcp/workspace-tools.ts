@@ -82,7 +82,6 @@ function conflictRow(conflict: CorpusConflict<ConflictLike & { review?: unknown 
   const [[sectionA], [sectionB]] = conflictSides(conflict.a, conflict.b, conflict.sections);
   const side = (doc: string, section: ConflictSideLike | undefined) => ({
     doc,
-    heading: section?.heading ?? null,
     ...(section?.quote ? { quote: section.quote } : {}),
   });
   return {

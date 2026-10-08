@@ -122,14 +122,12 @@ export async function unexcludeDocument(org: string, ref: unknown): Promise<Incl
 /** The verdicts a conflict resolution may carry. */
 export const CONFLICT_VERDICTS = ['a', 'b', 'dismissed'] as const;
 
-/** A verdict on one conflict, keyed by its two sentences; the anchors and quotes ride along for display. */
+/** A verdict on one conflict, keyed by its two sentences; the quotes ride along for display. */
 export interface ConflictVerdictRequest {
   docA?: string;
-  anchorA?: string | null;
   quoteA?: string;
   sentenceA?: string;
   docB?: string;
-  anchorB?: string | null;
   quoteB?: string;
   sentenceB?: string;
   verdict?: unknown;
@@ -152,11 +150,9 @@ export async function resolveConflict(
   // named twice is no conflict.
   const sides = {
     docA,
-    anchorA: request.anchorA ?? null,
     quoteA: request.quoteA,
     sentenceA,
     docB,
-    anchorB: request.anchorB ?? null,
     quoteB: request.quoteB,
     sentenceB,
   };

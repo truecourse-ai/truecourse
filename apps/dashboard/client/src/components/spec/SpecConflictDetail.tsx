@@ -34,7 +34,6 @@ import type { SpecConflictResolution, SpecCorpusResponse, SpecConflict, SpecConf
 import { SpecDocViewer } from '@/components/spec/SpecDocViewer';
 import { WorkspaceBadge } from '@/components/spec/WorkspaceBadge';
 import { createRepoSpecSource, useSpecSource } from '@/components/spec/spec-source';
-import { sentenceNames } from '@/lib/sentence-names';
 
 /** Caption above a detail card, the label grammar the guard detail panes read in. */
 const LABEL = 'mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground';
@@ -122,18 +121,12 @@ export function SpecConflictDetail({
   // Each column's sides: the doc's own, or inside one doc its sentence.
   const [pointersA, pointersB] = conflictSides(docA, docB, conflict?.sections ?? []);
 
-  // How each side is named: its doc, and inside one doc its sentence too.
-  const sideNames = (r: Pick<ConflictResolutionLike, 'docA' | 'anchorA' | 'docB' | 'anchorB'>): [string, string] => {
-    if (r.docA !== r.docB) return [titleOf(r.docA), titleOf(r.docB)];
-    const [a, b] = sentenceNames(r.anchorA, r.anchorB);
-    return [`${titleOf(r.docA)} · ${a}`, `${titleOf(r.docB)} · ${b}`];
-  };
-  const [nameA, nameB] = sideNames({
-    docA,
-    anchorA: pointersA[0]?.heading ?? null,
-    docB,
-    anchorB: pointersB[0]?.heading ?? null,
-  });
+  // How each side is named: its doc, and inside one doc which of its two
+  // sentences it is (side a is the first sentence, side b the second).
+  const [nameA, nameB]: [string, string] =
+    docA !== docB
+      ? [titleOf(docA), titleOf(docB)]
+      : [`${titleOf(docA)} · first sentence`, `${titleOf(docB)} · second sentence`];
 
   // On open (or when the conflict changes), drop any stale optimistic verdict
   // from a prior one. Keyed on the conflict ID, not the doc pair: two conflicts
@@ -151,9 +144,9 @@ export function SpecConflictDetail({
   const repoSource = useMemo(() => createRepoSpecSource(repoId), [repoId]);
   const source = ctxSource ?? repoSource;
 
-  // Build the persisted verdict from the flagged sections: the heading per doc,
-  // and its sentence when the conflict names one, is the identity a stored
-  // verdict is matched by; the quote rides as evidence.
+  // Build the persisted verdict from the flagged sides: each side's doc and
+  // sentence is the identity a stored verdict is matched by; the quote rides
+  // as evidence.
   const buildResolution = (verdict: 'a' | 'b' | 'dismissed'): SpecConflictResolution =>
     conflictVerdictFor(conflict ?? { sections: [] }, docA, docB, verdict);
 
@@ -196,7 +189,7 @@ export function SpecConflictDetail({
     }
   };
 
-  const winnerOf = (r: ConflictResolutionLike): string => sideNames(r)[r.verdict === 'a' ? 0 : 1];
+  const winnerOf = (r: ConflictResolutionLike): string => (r.verdict === 'a' ? nameA : nameB);
   // Newer or older says nothing about two sentences of one doc.
   const badgeOf = (doc: string): string | undefined => (sameDoc ? undefined : doc === newerDoc ? 'Newer' : 'Older');
 

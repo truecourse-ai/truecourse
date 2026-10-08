@@ -224,10 +224,8 @@ describe('an inclusion decision says a scan is needed', () => {
       .post('/api/context/conflict-resolution')
       .send({
         docA: ref(SRC_A, 'one.md'),
-        anchorA: 'Cancellation',
         sentenceA: 's-one',
         docB: ref(SRC_B, 'site.md'),
-        anchorB: 'Cancellation',
         sentenceB: 's-site',
         verdict: 'b',
       })
@@ -241,48 +239,48 @@ describe('an inclusion decision says a scan is needed', () => {
     });
   });
 
-  it('replaces a verdict re-recorded on the same two sentences, whatever its anchors say', async () => {
+  it('replaces a verdict re-recorded on the same two sentences, whatever its quotes say', async () => {
     await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', corpus());
     const conflict = { docA: ref(SRC_A, 'one.md'), sentenceA: 's-one', docB: ref(SRC_B, 'site.md'), sentenceB: 's-site' };
     await request(app)
       .post('/api/context/conflict-resolution')
-      .send({ ...conflict, anchorA: '`Cancellation`', anchorB: 'Cancellation', verdict: 'a' })
+      .send({ ...conflict, quoteA: 'Cancel within 24 hours.', quoteB: 'Cancel within 48 hours.', verdict: 'a' })
       .expect(200);
-    // The same conflict, the anchors as a later scan lists them: one row, the new verdict.
+    // The same conflict, quoted as a later scan windows it: one row, the new verdict.
     const again = await request(app)
       .post('/api/context/conflict-resolution')
-      .send({ ...conflict, anchorA: 'cancellation', anchorB: 'Cancellation', verdict: 'b' })
+      .send({ ...conflict, quoteA: 'within 24 hours', quoteB: 'Cancel within 48 hours.', verdict: 'b' })
       .expect(200);
     expect(again.body.conflictResolutions).toHaveLength(1);
-    expect(again.body.conflictResolutions[0]).toMatchObject({ verdict: 'b', anchorA: 'cancellation' });
-    // And the same key removes it, however the anchors are spelled.
+    expect(again.body.conflictResolutions[0]).toMatchObject({ verdict: 'b', quoteA: 'within 24 hours' });
+    // And the same key removes it, whatever words come with it.
     const removed = await request(app)
       .delete('/api/context/conflict-resolution')
-      .send({ ...conflict, anchorA: '`Cancellation`', anchorB: 'cancellation' })
+      .send({ ...conflict, quoteA: 'other words' })
       .expect(200);
     expect(removed.body.conflictResolutions).toEqual([]);
   });
 
-  it('keeps one verdict per pair of sentences between the same two sections, and removes only the one named', async () => {
+  it('keeps one verdict per pair of sentences between the same two docs, and removes only the one named', async () => {
     await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', corpus());
-    const sections = { docA: ref(SRC_A, 'one.md'), anchorA: 'Cancellation', docB: ref(SRC_B, 'site.md'), anchorB: 'Cancellation' };
+    const docs = { docA: ref(SRC_A, 'one.md'), docB: ref(SRC_B, 'site.md') };
     await request(app)
       .post('/api/context/conflict-resolution')
-      .send({ ...sections, sentenceA: 'p-hours', sentenceB: 'q-hours', verdict: 'a' })
+      .send({ ...docs, sentenceA: 'p-hours', sentenceB: 'q-hours', verdict: 'a' })
       .expect(200);
     const both = await request(app)
       .post('/api/context/conflict-resolution')
-      .send({ ...sections, sentenceA: 'p-fee', sentenceB: 'q-fee', verdict: 'b' })
+      .send({ ...docs, sentenceA: 'p-fee', sentenceB: 'q-fee', verdict: 'b' })
       .expect(200);
     expect(both.body.conflictResolutions.map((r: { sentenceA?: string; verdict: string }) => [r.sentenceA, r.verdict])).toEqual([
       ['p-hours', 'a'],
       ['p-fee', 'b'],
     ]);
     // A withdrawal must name its two sentences.
-    await request(app).delete('/api/context/conflict-resolution').send(sections).expect(400);
+    await request(app).delete('/api/context/conflict-resolution').send(docs).expect(400);
     const left = await request(app)
       .delete('/api/context/conflict-resolution')
-      .send({ ...sections, sentenceA: 'p-hours', sentenceB: 'q-hours' })
+      .send({ ...docs, sentenceA: 'p-hours', sentenceB: 'q-hours' })
       .expect(200);
     expect(left.body.conflictResolutions).toEqual([expect.objectContaining({ sentenceA: 'p-fee', sentenceB: 'q-fee' })]);
   });
@@ -301,10 +299,8 @@ describe('an inclusion decision says a scan is needed', () => {
       .post('/api/context/conflict-resolution')
       .send({
         docA: ref(SRC_A, 'one.md'),
-        anchorA: 'Cancellation',
         sentenceA: 's-one',
         docB: ref(SRC_B, 'site.md'),
-        anchorB: 'Cancellation',
         sentenceB: 's-site',
         verdict: 'a',
       })
@@ -386,10 +382,8 @@ describe('the workspace corpus and its decisions', () => {
     await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', corpus());
     const verdict = {
       docA: ref(SRC_A, 'one.md'),
-      anchorA: 'Cancellation',
       sentenceA: 's-one',
       docB: ref(SRC_B, 'site.md'),
-      anchorB: 'Cancellation policy',
       sentenceB: 's-site',
       verdict: 'b',
     };
@@ -409,11 +403,11 @@ describe('the workspace corpus and its decisions', () => {
   it('settles a conflict inside one document by its sentence, and the other sentence still conflicts nothing', async () => {
     await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', corpus());
     const doc = ref(SRC_A, 'one.md');
-    const verdict = { docA: doc, anchorA: 'Cancellation', sentenceA: 's-cancel', docB: doc, anchorB: 'Refunds', sentenceB: 's-refund', verdict: 'a' };
+    const verdict = { docA: doc, sentenceA: 's-cancel', docB: doc, sentenceB: 's-refund', verdict: 'a' };
     const add = await request(app).post('/api/context/conflict-resolution').send(verdict).expect(200);
     expect(add.body.conflictResolutions).toEqual([expect.objectContaining(verdict)]);
     // The same conflict named the other way round is the same verdict, replaced.
-    const flipped = { docA: doc, anchorA: 'Refunds', sentenceA: 's-refund', docB: doc, anchorB: 'Cancellation', sentenceB: 's-cancel', verdict: 'b' };
+    const flipped = { docA: doc, sentenceA: 's-refund', docB: doc, sentenceB: 's-cancel', verdict: 'b' };
     const again = await request(app).post('/api/context/conflict-resolution').send(flipped).expect(200);
     expect(again.body.conflictResolutions).toEqual([expect.objectContaining(flipped)]);
   });
@@ -426,7 +420,7 @@ describe('the workspace corpus and its decisions', () => {
     // One sentence named twice is no conflict.
     await request(app)
       .post('/api/context/conflict-resolution')
-      .send({ docA: 'a', anchorA: 'X', sentenceA: 's', docB: 'a', anchorB: 'X', sentenceB: 's', verdict: 'b' })
+      .send({ docA: 'a', sentenceA: 's', docB: 'a', sentenceB: 's', verdict: 'b' })
       .expect(400);
     await request(app)
       .post('/api/context/conflict-resolution')
@@ -469,16 +463,16 @@ describe('a workspace decision unblocks the generation it freed', () => {
             docs: [ref(SRC_A, 'one.md'), ref(SRC_B, 'site.md')],
             note: '24h vs 48h',
             sections: [
-              { doc: ref(SRC_A, 'one.md'), heading: 'Cancellation', sentence: 's-one' },
-              { doc: ref(SRC_B, 'site.md'), heading: 'Cancellation policy', sentence: 's-site' },
+              { doc: ref(SRC_A, 'one.md'), sentence: 's-one' },
+              { doc: ref(SRC_B, 'site.md'), sentence: 's-site' },
             ],
           },
           {
             docs: [ref(SRC_C, 'w1.md'), ref(SRC_C, 'w2.md')],
             note: 'two refund windows',
             sections: [
-              { doc: ref(SRC_C, 'w1.md'), heading: 'Refunds', sentence: 's-w1' },
-              { doc: ref(SRC_C, 'w2.md'), heading: 'Refund window', sentence: 's-w2' },
+              { doc: ref(SRC_C, 'w1.md'), sentence: 's-w1' },
+              { doc: ref(SRC_C, 'w2.md'), sentence: 's-w2' },
             ],
           },
         ],
@@ -490,10 +484,8 @@ describe('a workspace decision unblocks the generation it freed', () => {
   /** The verdict that settles the FIRST conflict, and nothing else. */
   const VERDICT = {
     docA: ref(SRC_A, 'one.md'),
-    anchorA: 'Cancellation',
     sentenceA: 's-one',
     docB: ref(SRC_B, 'site.md'),
-    anchorB: 'Cancellation policy',
     sentenceB: 's-site',
     verdict: 'b',
   };

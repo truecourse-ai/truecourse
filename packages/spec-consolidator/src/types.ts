@@ -66,24 +66,18 @@ export type DocKind = z.infer<typeof DocKindSchema>;
  *   - "dismissed" a detector false-positive — not a real conflict. Resolves the
  *                 gate (visible, reversible) but suppresses NOTHING.
  *
- * `anchorA`/`anchorB` are the heading each sentence sat under when the verdict
- * was recorded (or `null` for a doc's preamble/lead) and `quoteA`/`quoteB` its
- * words, both for display; `sentenceA`/`sentenceB` are the sentence keys, the
- * identity.
+ * `quoteA`/`quoteB` are each side's words when the verdict was recorded, for
+ * display; `sentenceA`/`sentenceB` are the sentence keys, the identity.
  */
 export const ConflictResolutionSchema = z.object({
   /** Repo-relative path / DocRef of the first doc in the conflict. */
   docA: z.string(),
-  /** The heading docA's sentence sat under, or `null` for its preamble/lead. Display only. */
-  anchorA: z.string().nullable(),
   /** docA's disputed words, as quoted when the verdict was recorded. Display only. */
   quoteA: z.string().optional(),
   /** docA's sentence key: with the doc, side a's identity. */
   sentenceA: z.string(),
   /** Repo-relative path / DocRef of the second doc in the conflict. */
   docB: z.string(),
-  /** The heading docB's sentence sat under, or `null` for its preamble/lead. Display only. */
-  anchorB: z.string().nullable(),
   /** docB's disputed words, as quoted when the verdict was recorded. Display only. */
   quoteB: z.string().optional(),
   /** docB's sentence key: with the doc, side b's identity. */
