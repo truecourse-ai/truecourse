@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { getCalApi } from '@calcom/embed-react';
+import { trackAdsBooking } from '@/lib/ga';
 import { trackEvent } from '@/lib/posthog';
 
 export const BOOKING_URL = 'https://cal.com/mushegh-gevorgyan-asax6e/your-app-checkup';
@@ -36,7 +37,8 @@ let openedFrom: BookPlacement | undefined;
 
 /**
  * The calendar, loaded once for the page: preloaded so the popup opens at
- * once, and recording each booking made in it as `checkup_booked`.
+ * once, and recording each booking made in it as `checkup_booked` and as a
+ * Google Ads conversion.
  */
 let calendar: ReturnType<typeof getCalApi> | undefined;
 function loadCalendar() {
@@ -45,7 +47,10 @@ function loadCalendar() {
     cal('preload', { calLink: CAL_LINK });
     cal('on', {
       action: 'bookingSuccessfulV2',
-      callback: () => trackEvent('checkup_booked', { placement: openedFrom, page: 'builders' }),
+      callback: () => {
+        trackEvent('checkup_booked', { placement: openedFrom, page: 'builders' });
+        trackAdsBooking();
+      },
     });
     return cal;
   });
@@ -92,7 +97,8 @@ export function BookLink({
 /**
  * The app checkup calendar set into the page, carrying this visit's ad tags.
  * It has a namespace of its own, apart from the popup's, and records each
- * booking made in it as `checkup_booked` from the `calendar` placement.
+ * booking made in it as `checkup_booked` from the `calendar` placement and
+ * as a Google Ads conversion.
  */
 export function BookingCalendar({ className }: { className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -103,7 +109,10 @@ export function BookingCalendar({ className }: { className?: string }) {
       cal('ui', { theme: 'light', layout: 'month_view' });
       cal('on', {
         action: 'bookingSuccessfulV2',
-        callback: () => trackEvent('checkup_booked', { placement: 'calendar', page: 'builders' }),
+        callback: () => {
+          trackEvent('checkup_booked', { placement: 'calendar', page: 'builders' });
+          trackAdsBooking();
+        },
       });
       cal('inline', {
         elementOrSelector: el,
