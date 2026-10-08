@@ -42,8 +42,8 @@ function corpusWith(conflictQuoteA: string): CuratedCorpus {
             docs: ['docs/a.md', 'docs/b.md'],
             note: 'disagree',
             sections: [
-              { doc: 'docs/a.md', heading: 'A', quote: conflictQuoteA, sentence: 's-a' },
-              { doc: 'docs/b.md', heading: 'B', quote: 'b says otherwise', sentence: 's-b' },
+              { doc: 'docs/a.md', quote: conflictQuoteA, sentence: 's-a' },
+              { doc: 'docs/b.md', quote: 'b says otherwise', sentence: 's-b' },
             ],
           },
         ],
@@ -55,11 +55,9 @@ function corpusWith(conflictQuoteA: string): CuratedCorpus {
 
 const resolution = (over: Partial<ConflictResolution> = {}): ConflictResolution => ({
   docA: 'docs/a.md',
-  anchorA: 'A',
   quoteA: 'a says this',
   sentenceA: 's-a',
   docB: 'docs/b.md',
-  anchorB: 'B',
   quoteB: 'b says otherwise',
   sentenceB: 's-b',
   verdict: 'a',

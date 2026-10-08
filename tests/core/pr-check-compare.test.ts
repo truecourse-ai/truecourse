@@ -59,13 +59,13 @@ describe('compareFlows', () => {
 });
 
 describe('conflictsCreated', () => {
-  /** A conflict between one sentence of each doc, named after the heading it sits under. */
-  const conflict = (a: string, b: string, headingA: string, headingB: string) => ({
+  /** A conflict between one sentence of each doc, each sentence opening with the topic given. */
+  const conflict = (a: string, b: string, topicA: string, topicB: string) => ({
     docs: [a, b] as [string, string],
     note: `${a} vs ${b}`,
     sections: [
-      { doc: a, heading: headingA, quote: `${headingA} says x`, sentence: sentenceKey(`${headingA} says x`) },
-      { doc: b, heading: headingB, quote: `${headingB} says y`, sentence: sentenceKey(`${headingB} says y`) },
+      { doc: a, quote: `${topicA} says x`, sentence: sentenceKey(`${topicA} says x`) },
+      { doc: b, quote: `${topicB} says y`, sentence: sentenceKey(`${topicB} says y`) },
     ],
   });
   const corpus = (...conflicts: ReturnType<typeof conflict>[]) => ({ areas: [{ id: 'core/auth', conflicts }] });
@@ -74,14 +74,13 @@ describe('conflictsCreated', () => {
     const shared = conflict('a.md', 'b.md', 'Login', 'Sessions');
     const fresh = conflict('a.md', 'c.md', 'Login', 'Tokens');
     const prConflicts = buildCorpusConflicts(corpus(shared, fresh), {}).filter((c) => !c.resolved);
-    // The workspace's copy of the shared conflict windows the quotes differently,
-    // files the sentences under other headings and lists the docs the other way
-    // round: same identity all the same.
+    // The workspace's copy of the shared conflict windows the quotes differently
+    // and lists the docs the other way round: same identity all the same.
     const workspace = corpus({
       ...conflict('b.md', 'a.md', 'Sessions', 'Login'),
       sections: [
-        { doc: 'b.md', heading: 'Session cookies', quote: 'other words', sentence: sentenceKey('Sessions says y') },
-        { doc: 'a.md', heading: 'Signing in', quote: 'more words', sentence: sentenceKey('Login says x') },
+        { doc: 'b.md', quote: 'other words', sentence: sentenceKey('Sessions says y') },
+        { doc: 'a.md', quote: 'more words', sentence: sentenceKey('Login says x') },
       ],
     });
     expect(conflictsCreated(workspace, prConflicts, {}).map((c) => c.b)).toEqual(['c.md']);
@@ -90,7 +89,7 @@ describe('conflictsCreated', () => {
   it('a conflict the workspace resolved is created anew when the head states it in other sentences', () => {
     const decisions = {
       conflictResolutions: [
-        { docA: 'a.md', anchorA: 'Login', sentenceA: sentenceKey('Login says x'), docB: 'b.md', anchorB: 'Sessions', sentenceB: sentenceKey('Sessions says y'), verdict: 'a' as const },
+        { docA: 'a.md', sentenceA: sentenceKey('Login says x'), docB: 'b.md', sentenceB: sentenceKey('Sessions says y'), verdict: 'a' as const },
       ],
     };
     const workspace = corpus(conflict('a.md', 'b.md', 'Login', 'Sessions'));
@@ -105,13 +104,13 @@ describe('conflictsCreated', () => {
     expect(conflictsCreated(workspace, same, decisions)).toEqual([]);
   });
 
-  it('a new disagreement between two sections the workspace already conflicts on another point is created', () => {
+  it('a new disagreement between two docs the workspace already conflicts on another point is created', () => {
     const between = (quoteA: string, quoteB: string) => ({
       docs: ['a.md', 'b.md'] as [string, string],
       note: `${quoteA} vs ${quoteB}`,
       sections: [
-        { doc: 'a.md', heading: 'Login', quote: quoteA, sentence: sentenceKey(quoteA) },
-        { doc: 'b.md', heading: 'Sessions', quote: quoteB, sentence: sentenceKey(quoteB) },
+        { doc: 'a.md', quote: quoteA, sentence: sentenceKey(quoteA) },
+        { doc: 'b.md', quote: quoteB, sentence: sentenceKey(quoteB) },
       ],
     });
     const ttl = between('Tokens last an hour.', 'Tokens last a day.');

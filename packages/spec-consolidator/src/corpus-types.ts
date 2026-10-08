@@ -277,33 +277,21 @@ export const CorpusDocSchema = z.object({
 });
 export type CorpusDoc = z.infer<typeof CorpusDocSchema>;
 
-/** One side of a conflict: a section (markdown heading) of one of its docs. */
+/** One side of a conflict: a sentence of one of its docs. */
 export const ConflictSideSchema = z.object({
-  /** The doc this section lives in, by ref (one of the conflict's two docs). */
+  /** The doc the sentence lives in, by ref (one of the conflict's two docs). */
   doc: DocRefSchema,
   /**
-   * The heading text of the conflicting section (verbatim from the doc), or
-   * `null` when the conflicting sentence sits in the doc's PREAMBLE — the block
-   * before its first heading (README badges/tagline, intro line). A plain string
-   * from older corpora still parses; `null` is the preamble marker the viewer
-   * bands as the pre-first-heading block.
-   */
-  heading: z.string().nullable(),
-  /**
    * A short verbatim excerpt (≤ ~25 words) of the disputed sentence, copied from
-   * the doc — the model's evidence for the heading it picked. Persisted (optional,
-   * so older corpora without it still parse) for verification transparency and so
-   * the viewer can later highlight the exact disputed sentence, not just band the
-   * section. Consumed at assembly by `verifyConflictSides` to anchor the pointer
-   * by exact location; NOT part of the conflict's identity (that is doc + heading,
-   * and the sentence below when the pointer carries one).
+   * the doc, so the viewer can show the exact disputed words. NOT part of the
+   * conflict's identity (that is the doc and the sentence key below).
    */
   quote: z.string().optional(),
   /**
    * The key (`sentenceKey` in `@truecourse/shared`) of the document sentence the
-   * quote is cut from. With the doc, the side's identity: two sides under one
-   * heading with different sentences name two conflicts, and a heading renamed
-   * leaves the conflict in place.
+   * quote is cut from. With the doc, the side's identity: two different sentences
+   * of one doc name two conflicts, and anything else changing in the doc leaves
+   * the conflict in place.
    */
   sentence: z.string(),
 });

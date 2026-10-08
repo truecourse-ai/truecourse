@@ -24,6 +24,7 @@ import { registerJob, type JobTask, type StartWorker } from '@truecourse/jobs';
 import { manifestPath, scenariosDir, dependenciesLocalPath, API_SERVER_BOOT_EXPECTED } from '@truecourse/guard-runner';
 import {
   GUARD_FORMAT_VERSION,
+  sentenceKey,
   type GuardGenerateReport,
   type GuardLatest,
   type PullRequestCheckRecord,
@@ -533,8 +534,8 @@ describe('the pull request check', () => {
               docs: [`context/${SOURCE}/docs/orgs.md`, `context/${SOURCE}/docs/other.md`],
               note: 'one org vs many',
               sections: [
-                { doc: `context/${SOURCE}/docs/orgs.md`, heading: 'Orgs', quote: 'An org can be created.' },
-                { doc: `context/${SOURCE}/docs/other.md`, heading: 'Limits', quote: 'Only one org.' },
+                { doc: `context/${SOURCE}/docs/orgs.md`, quote: 'An org can be created.', sentence: sentenceKey('An org can be created.') },
+                { doc: `context/${SOURCE}/docs/other.md`, quote: 'Only one org.', sentence: sentenceKey('Only one org.') },
               ],
               areas: [],
             },
@@ -557,18 +558,17 @@ describe('the pull request check', () => {
     expect(settled.report?.conflictsCreated).toEqual([
       {
         docs: [`context/${SOURCE}/docs/orgs.md`, `context/${SOURCE}/docs/other.md`],
-        sections: [['Orgs'], ['Limits']],
         note: 'one org vs many',
         area: 'p/c',
         path: 'docs/orgs.md',
-        line: 1,
+        line: 3,
         blocksRepositories: [REPO],
       },
     ]);
-    // The conflict is annotated on the changed document's heading line, and the
-    // check links to Context's conflicts filtered to the pull request.
+    // The conflict is annotated on the line of the changed document's disputed
+    // sentence, and the check links to Context's conflicts filtered to the pull request.
     expect((lastGithubUpdate()!.output as { annotations: unknown[] }).annotations).toEqual([
-      { path: 'docs/orgs.md', start_line: 1, end_line: 1, annotation_level: 'failure', message: expect.stringContaining('one org vs many') },
+      { path: 'docs/orgs.md', start_line: 3, end_line: 3, annotation_level: 'failure', message: expect.stringContaining('one org vs many') },
     ]);
     expect(lastGithubUpdate()!.details_url).toBe('https://app/context/conflicts?pr=acme%2Fwidgets%237');
     // Nothing of the code half ran.
@@ -604,8 +604,8 @@ describe('the pull request check', () => {
                   docs: [other, orgs],
                   note: 'one org vs many',
                   sections: [
-                    { doc: other, heading: 'Limits', quote: 'Only one org.' },
-                    { doc: orgs, heading: 'Orgs', quote: 'An org can be created.' },
+                    { doc: other, quote: 'Only one org.', sentence: sentenceKey('Only one org.') },
+                    { doc: orgs, quote: 'An org can be created.', sentence: sentenceKey('An org can be created.') },
                   ],
                   areas: [],
                 },
@@ -617,7 +617,7 @@ describe('the pull request check', () => {
       }) as never;
 
     const settled = await check();
-    expect(settled.report?.conflictsCreated).toMatchObject([{ docs: [orgs, other], path: 'docs/orgs.md', line: 1 }]);
+    expect(settled.report?.conflictsCreated).toMatchObject([{ docs: [orgs, other], path: 'docs/orgs.md', line: 3 }]);
     expect((lastGithubUpdate()!.output as { annotations: { path: string }[] }).annotations.map((a) => a.path)).toEqual([
       'docs/orgs.md',
     ]);
@@ -913,7 +913,7 @@ describe('the pull request check', () => {
   it('a chain with nothing to run settles on the conflicts the head created', async () => {
     await storeBase();
     await setContextBindings(ORG, REPO, []);
-    const conflict = { docs: ['a', 'b'] as [string, string], sections: [[], []] as [string[], string[]], note: 'n', path: null, line: null, blocksRepositories: [] };
+    const conflict = { docs: ['a', 'b'] as [string, string], note: 'n', path: null, line: null, blocksRepositories: [] };
     engines.setup = async () => {
       const open = await pulls.activeCheck(REPO, 7);
       await pulls.updateCheck(open!.id, { report: { ...open!.report!, conflictsCreated: [conflict] } });

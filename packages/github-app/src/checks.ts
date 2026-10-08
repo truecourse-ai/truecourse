@@ -214,7 +214,7 @@ function sections(report: PullRequestCheckReport): string[] {
   if (report.conflictsCreated.length > 0) {
     out.push(
       `## Conflicts created\n\n${report.conflictsCreated
-        .map((c) => `- ${c.docs[0]} · ${c.sections[0].join(', ') || 'lead'} vs ${c.docs[1]} · ${c.sections[1].join(', ') || 'lead'}: ${c.note}`)
+        .map((c) => `- ${c.docs[0]} vs ${c.docs[1]}: ${c.note}`)
         .join('\n')}`,
     );
   }

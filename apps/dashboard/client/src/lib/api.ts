@@ -186,8 +186,6 @@ export function getSpecStaleness(repoId: string): Promise<SpecStalenessResponse>
 
 export interface SpecConflictSide {
   doc: string;
-  /** Heading of the section this side points at, or null when it lives in the doc's preamble. */
-  heading: string | null;
   /** The disputed words — carried into a pick-a-side verdict so the loser's claim is suppressed at guard generate. */
   quote?: string;
   /** The sentence key: with the doc, the side's identity. */
@@ -195,14 +193,12 @@ export interface SpecConflictSide {
 }
 
 /** A conflict verdict — pick-a-side ('a'/'b') or dismissal. Identity is each
- *  side's doc and sentence key; the anchors and quotes ride along for display. */
+ *  side's doc and sentence key; the quotes ride along for display. */
 export interface SpecConflictResolution {
   docA: string;
-  anchorA: string | null;
   quoteA?: string;
   sentenceA: string;
   docB: string;
-  anchorB: string | null;
   quoteB?: string;
   sentenceB: string;
   verdict: 'a' | 'b' | 'dismissed';
@@ -1081,11 +1077,9 @@ export function removeContextExclude(ref: string): Promise<SpecDecisionAck> {
 
 export function postContextConflictResolution(payload: {
   docA: string;
-  anchorA: string | null;
   quoteA?: string;
   sentenceA: string;
   docB: string;
-  anchorB: string | null;
   quoteB?: string;
   sentenceB: string;
   verdict: 'a' | 'b' | 'dismissed';

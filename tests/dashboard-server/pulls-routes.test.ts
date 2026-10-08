@@ -161,7 +161,7 @@ describe('GET /api/context/pull-requests', () => {
     await pulls.savePullRequest(pr(3, { state: 'closed' }));
     const settled = await pulls.createCheck({ repoFullName: fixture.project.name, number: 1, headSha: 'head-1' });
     const created = [
-      { docs: ['a', 'b'] as [string, string], sections: [['x'], ['y']] as [string[], string[]], note: 'n', path: 'a.md', line: 3, blocksRepositories: [] },
+      { docs: ['a', 'b'] as [string, string], note: 'n', path: 'a.md', line: 3, blocksRepositories: [] },
     ];
     await pulls.updateCheck(settled.id, {
       status: 'settled',
@@ -199,7 +199,7 @@ describe('POST /api/context/conflict-resolution', () => {
     });
     await request(app)
       .post('/api/context/conflict-resolution')
-      .send({ docA: 'context/s/a.md', anchorA: 'A', sentenceA: 's-a', docB: 'context/s/b.md', anchorB: 'B', sentenceB: 's-b', verdict: 'a' })
+      .send({ docA: 'context/s/a.md', sentenceA: 's-a', docB: 'context/s/b.md', sentenceB: 's-b', verdict: 'a' })
       .expect(200);
     expect(rechecked).toEqual([TEST_ORG]);
   });

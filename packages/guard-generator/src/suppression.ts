@@ -25,7 +25,6 @@ import { specsDir } from '@truecourse/shared/work-tree'
 const ConflictSideShape = z
   .object({
     doc: z.string(),
-    heading: z.string().nullable().optional(),
     quote: z.string().optional(),
     sentence: z.string(),
   })
@@ -47,11 +46,9 @@ const CorpusShape = z
 const ConflictResolutionShape = z
   .object({
     docA: z.string(),
-    anchorA: z.string().nullable().optional(),
     quoteA: z.string().optional(),
     sentenceA: z.string(),
     docB: z.string(),
-    anchorB: z.string().nullable().optional(),
     quoteB: z.string().optional(),
     sentenceB: z.string(),
     verdict: z.enum(['a', 'b', 'dismissed']),
@@ -88,14 +85,9 @@ export function readSuppressedClaims(repoRoot: string): SuppressedClaim[] {
       conflicts: (a.conflicts ?? []).map((o) => ({
         docs: o.docs,
         note: o.note,
-        // The sentence is part of a side's identity: dropping it would merge
-        // conflicts that share two sections, and match the wrong verdict.
-        sections: (o.sections ?? []).map((s) => ({
-          doc: s.doc,
-          heading: s.heading ?? null,
-          quote: s.quote,
-          sentence: s.sentence,
-        })),
+        // The sentence is a side's identity: dropping it would merge conflicts
+        // that share two docs, and match the wrong verdict.
+        sections: (o.sections ?? []).map((s) => ({ doc: s.doc, quote: s.quote, sentence: s.sentence })),
         areas: o.areas,
       })),
     })),
@@ -104,11 +96,9 @@ export function readSuppressedClaims(repoRoot: string): SuppressedClaim[] {
     manualExcludes: decisions?.manualExcludes ?? [],
     conflictResolutions: (decisions?.conflictResolutions ?? []).map((r) => ({
       docA: r.docA,
-      anchorA: r.anchorA ?? null,
       quoteA: r.quoteA,
       sentenceA: r.sentenceA,
       docB: r.docB,
-      anchorB: r.anchorB ?? null,
       quoteB: r.quoteB,
       sentenceB: r.sentenceB,
       verdict: r.verdict,

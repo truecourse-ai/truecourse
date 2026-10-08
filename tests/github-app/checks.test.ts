@@ -123,7 +123,6 @@ describe('renderCheckOutput', () => {
         conflictsCreated: [
           {
             docs: ['context/src/docs/a.md', 'context/src/docs/b.md'],
-            sections: [['Login'], ['Sessions']],
             note: 'one hour vs two',
             path: 'docs/a.md',
             line: 12,
@@ -141,7 +140,7 @@ describe('renderCheckOutput', () => {
     const order = ['## Conflicts created', '## Documents moved', '## Repositories affected', '## The run', '[The full report]'].map((h) => summary.indexOf(h));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
-    expect(summary).toContain('context/src/docs/a.md · Login vs context/src/docs/b.md · Sessions: one hour vs two');
+    expect(summary).toContain('- context/src/docs/a.md vs context/src/docs/b.md: one hour vs two');
     expect(summary).toContain('- context/src/docs/a.md (Login flow)');
     expect(summary).toContain('- acme/web');
     expect(summary).toContain('### New failures\n\n- Checkout completes (bug)');

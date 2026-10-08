@@ -439,13 +439,11 @@ describe('the scan run — orphaned conflict-verdict prune', () => {
   const specsDir = () => path.join(repo, '.truecourse', 'specs');
   const decisionsFile = () => path.join(specsDir(), 'decisions.json');
 
-  /** A verdict on the two docs' body sentences, both in their preambles. */
+  /** A verdict on the two docs' body sentences. */
   const verdict = (docA: string, docB: string) => ({
     docA,
-    anchorA: null,
     sentenceA: sentenceKey(`body of ${docA}`),
     docB,
-    anchorB: null,
     sentenceB: sentenceKey(`body of ${docB}`),
     verdict: 'a' as const,
     resolvedAt: '2026-07-20T00:00:00Z',
@@ -610,10 +608,8 @@ describe('the scan run — high-confidence recommendation auto-apply', () => {
         conflictResolutions: [
           {
             docA: 'docs/users-v1.md',
-            anchorA: null,
             sentenceA: sentenceKey('body of docs/users-v1.md'),
             docB: 'docs/users-v2.md',
-            anchorB: null,
             sentenceB: sentenceKey('body of docs/users-v2.md'),
             verdict: 'a',
             resolvedAt: '2026-07-20T00:00:00Z',

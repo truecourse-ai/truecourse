@@ -1,8 +1,9 @@
 /**
  * A contradiction INSIDE one document, as the two surfaces that resolve a
  * conflict render it. Both sides are the same doc, so each is named by its
- * sentence, the recommendation names the sentence it picks, and a verdict is
- * recorded against the sentence the reader chose.
+ * place, the first sentence or the second; the recommendation names the
+ * sentence it picks, and a verdict is recorded against the sentence the reader
+ * chose.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -14,8 +15,8 @@ import { SpecSourceProvider, type SpecSource } from '@/components/spec/spec-sour
 import type { SpecCorpusResponse } from '@/lib/api';
 
 const DOC = 'context/site-x/design.md';
-const PRESS = { doc: DOC, heading: 'Buttons', quote: 'A press translates the button down 1px.', sentence: sentenceKey('A press translates the button down 1px.') };
-const SCALE = { doc: DOC, heading: 'Motion', quote: 'A press scales the button to 0.97.', sentence: sentenceKey('A press scales the button to 0.97.') };
+const PRESS = { doc: DOC, quote: 'A press translates the button down 1px.', sentence: sentenceKey('A press translates the button down 1px.') };
+const SCALE = { doc: DOC, quote: 'A press scales the button to 0.97.', sentence: sentenceKey('A press scales the button to 0.97.') };
 
 const conflict = {
   docs: [DOC, DOC] as [string, string],
@@ -55,7 +56,7 @@ function source(post: SpecSource['postConflictResolution']): SpecSource {
 }
 
 describe('the conflict pane, for a conflict inside one doc', () => {
-  it('names each side by its sentence, recommends the second, and records a verdict against the sentence chosen', async () => {
+  it('names each side by its place, recommends the second, and records a verdict against the sentence chosen', async () => {
     const post = vi.fn(async () => ({ conflictResolutions: [] }));
     const [conflict] = buildCorpusConflicts(CORPUS, {});
     render(
@@ -64,20 +65,26 @@ describe('the conflict pane, for a conflict inside one doc', () => {
       </SpecSourceProvider>,
     );
     const detail = screen.getByTestId('conflict-detail');
-    expect(detail).toHaveTextContent('Design · Buttons↔Design · Motion');
-    expect(screen.getByTestId('conflict-assessment')).toHaveTextContent('Design · Motion is right');
+    expect(detail).toHaveTextContent('Design · first sentence↔Design · second sentence');
+    expect(screen.getByTestId('conflict-assessment')).toHaveTextContent('Design · second sentence is right');
     // Newer or older means nothing between two sentences of one doc.
     expect(detail).not.toHaveTextContent(/Newer|Older/);
 
-    await userEvent.setup().click(screen.getByRole('button', { name: /Design · Buttons\s*is right/ }));
-    expect(post).toHaveBeenCalledWith(
-      expect.objectContaining({ docA: DOC, anchorA: 'Buttons', docB: DOC, anchorB: 'Motion', verdict: 'a' }),
-    );
+    await userEvent.setup().click(screen.getByRole('button', { name: /Design · first sentence\s*is right/ }));
+    expect(post).toHaveBeenCalledWith({
+      docA: DOC,
+      quoteA: PRESS.quote,
+      sentenceA: PRESS.sentence,
+      docB: DOC,
+      quoteB: SCALE.quote,
+      sentenceB: SCALE.sentence,
+      verdict: 'a',
+    });
   });
 });
 
-describe('the conflict pane, for one of several contradictions under one heading', () => {
-  const at = (quote: string) => ({ doc: DOC, heading: 'Buttons', quote, sentence: sentenceKey(quote) });
+describe('the conflict pane, for one of several contradictions inside one doc', () => {
+  const at = (quote: string) => ({ doc: DOC, quote, sentence: sentenceKey(quote) });
   const press = [at('A press translates the button down 1px.'), at('A press scales the button to 0.97.')];
   const focus = [at('Focus draws a 2px ring.'), at('Focus draws no ring.')];
   const corpus = {
@@ -107,15 +114,15 @@ describe('the conflict pane, for one of several contradictions under one heading
     };
     const user = userEvent.setup();
     const first = withSource([]);
-    expect(screen.getByTestId('conflict-detail')).toHaveTextContent('Design · Buttons, first sentence↔Design · Buttons, second sentence');
+    expect(screen.getByTestId('conflict-detail')).toHaveTextContent('Design · first sentence↔Design · second sentence');
     await user.click(screen.getByRole('button', { name: /first sentence\s*is right/ }));
     expect(post).toHaveBeenCalledWith(
-      expect.objectContaining({ anchorA: 'Buttons', sentenceA: focus[0]!.sentence, anchorB: 'Buttons', sentenceB: focus[1]!.sentence, verdict: 'a' }),
+      expect.objectContaining({ sentenceA: focus[0]!.sentence, sentenceB: focus[1]!.sentence, verdict: 'a' }),
     );
     first.unmount();
 
-    // Another contradiction's verdict on the same heading leaves this one open; its own resolves it.
-    const pressVerdict = { docA: DOC, anchorA: 'Buttons', sentenceA: press[0]!.sentence, docB: DOC, anchorB: 'Buttons', sentenceB: press[1]!.sentence, verdict: 'a', resolvedAt: '' };
+    // Another contradiction's verdict on the same doc leaves this one open; its own resolves it.
+    const pressVerdict = { docA: DOC, sentenceA: press[0]!.sentence, docB: DOC, sentenceB: press[1]!.sentence, verdict: 'a', resolvedAt: '' };
     const focusVerdict = { ...pressVerdict, sentenceA: focus[0]!.sentence, sentenceB: focus[1]!.sentence, verdict: 'b' };
     withSource([pressVerdict, focusVerdict]);
     await user.click(screen.getByRole('button', { name: 'Undo' }));

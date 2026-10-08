@@ -145,8 +145,8 @@ describe('a conflict card', () => {
           docs: ['docs/api/users.md', 'docs/api/identity.md'],
           note: 'users.md uses auth0_id; identity.md uses auth0_sub',
           sections: [
-            { doc: 'docs/api/users.md', heading: 'User fields', quote: 'the `auth0_id` field holds the subject', sentence: 's-users' },
-            { doc: 'docs/api/identity.md', heading: null, quote: 'we store `auth0_sub` on every account', sentence: 's-identity' },
+            { doc: 'docs/api/users.md', quote: 'the `auth0_id` field holds the subject', sentence: 's-users' },
+            { doc: 'docs/api/identity.md', quote: 'we store `auth0_sub` on every account', sentence: 's-identity' },
           ],
           review: {
             explanation: 'users.md says auth0_id, identity.md says auth0_sub — one field, two names.',
@@ -163,7 +163,7 @@ describe('a conflict card', () => {
       kind: 'conflict',
       claim: 'users.md uses auth0_id; identity.md uses auth0_sub',
       quotes: [
-        { doc: 'docs/api/users.md', heading: 'User fields', quote: 'the `auth0_id` field holds the subject' },
+        { doc: 'docs/api/users.md', quote: 'the `auth0_id` field holds the subject' },
         { doc: 'docs/api/identity.md', quote: 'we store `auth0_sub` on every account' },
       ],
       recommendation: {
@@ -174,11 +174,9 @@ describe('a conflict card', () => {
       },
       conflict: {
         docA: 'docs/api/users.md',
-        anchorA: 'User fields',
         quoteA: 'the `auth0_id` field holds the subject',
         sentenceA: 's-users',
         docB: 'docs/api/identity.md',
-        anchorB: null,
         quoteB: 'we store `auth0_sub` on every account',
         sentenceB: 's-identity',
       },

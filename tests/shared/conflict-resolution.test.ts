@@ -29,17 +29,16 @@ import {
   type ConflictSideLike,
 } from '../../packages/shared/src/spec/conflict-resolution.js';
 
-/** A side: a doc, the heading its sentence sits under, the words, and the key of those words. */
-const at = (doc: string, heading: string | null, text: string, repeat = 0): ConflictSideLike => ({
+/** A side: a doc, the words, and the key of those words. */
+const at = (doc: string, text: string, repeat = 0): ConflictSideLike => ({
   doc,
-  heading,
   quote: text,
   sentence: sentenceKey(text, repeat),
 });
 
 const README = 'README.md';
 const SPEC = 'docs/SPEC.md';
-const rmSides = [at(README, 'taskline', 'rm permanently deletes the task.'), at(SPEC, 'rm <id>', 'rm archives the task, keeping history.')];
+const rmSides = [at(README, 'rm permanently deletes the task.'), at(SPEC, 'rm archives the task, keeping history.')];
 const RM = { docs: [README, SPEC] as [string, string], note: 'rm permanent vs archived', sections: rmSides };
 
 /** One area, the conflicts given — the base fixture. */
@@ -114,7 +113,7 @@ describe('cross-area dedup', () => {
           {
             docs: [SPEC, README] as [string, string],
             note: 'rm deletes permanently vs archives',
-            sections: [{ ...rmSides[1]!, quote: 'rm archives the task' }, { ...rmSides[0]!, heading: null }],
+            sections: [{ ...rmSides[1]!, quote: 'rm archives the task' }, rmSides[0]!],
           },
         ],
       },
@@ -125,7 +124,7 @@ describe('cross-area dedup', () => {
     const conflicts = buildCorpusConflicts(twoAreas(), {});
     expect(conflicts).toHaveLength(1);
     expect(conflicts[0]).toMatchObject({ a: README, b: SPEC, resolved: false });
-    // Representative = the record with the fewest preamble sides.
+    // Representative = the first record by area, then note.
     expect(conflicts[0].area).toBe('core/persistence');
     expect(conflicts[0].areas).toEqual(['core/persistence', 'core/tasks-entity']);
   });
@@ -151,7 +150,7 @@ describe('cross-area dedup', () => {
   });
 
   it('keeps TWO records for two conflicts on the same pair', () => {
-    const login = [at(README, 'taskline', 'Login needs a token.'), at(SPEC, 'Login', 'Login needs a password.')];
+    const login = [at(README, 'Login needs a token.'), at(SPEC, 'Login needs a password.')];
     const two = {
       areas: [
         { id: 'core/persistence', conflicts: [RM] },
@@ -185,22 +184,22 @@ describe('conflict resolutions — matching, verdicts, claim suppression', () =>
 
   it('suppressedClaims names the LOSER’s quote for a side verdict', () => {
     expect(suppressedClaims(corpus([RM]), { conflictResolutions: [pickReadme] })).toEqual([
-      { doc: SPEC, anchor: 'rm <id>', quote: 'rm archives the task, keeping history.', sentence: rmSides[1]!.sentence },
+      { doc: SPEC, quote: 'rm archives the task, keeping history.', sentence: rmSides[1]!.sentence },
     ]);
     expect(suppressedClaims(corpus([RM]), { conflictResolutions: [{ ...pickReadme, verdict: 'b' }] })).toEqual([
-      { doc: README, anchor: 'taskline', quote: 'rm permanently deletes the task.', sentence: rmSides[0]!.sentence },
+      { doc: README, quote: 'rm permanently deletes the task.', sentence: rmSides[0]!.sentence },
     ]);
   });
 
-  it('suppresses the words and heading the CURRENT scan carries, not the ones the verdict recorded', () => {
-    const rescanned = corpus([{ ...RM, sections: [rmSides[0]!, { ...rmSides[1]!, heading: 'Removing', quote: 'rm archives the task, keeping' }] }]);
+  it('suppresses the words the CURRENT scan carries, not the ones the verdict recorded', () => {
+    const rescanned = corpus([{ ...RM, sections: [rmSides[0]!, { ...rmSides[1]!, quote: 'rm archives the task, keeping' }] }]);
     expect(suppressedClaims(rescanned, { conflictResolutions: [pickReadme] })).toEqual([
-      { doc: SPEC, anchor: 'Removing', quote: 'rm archives the task, keeping', sentence: rmSides[1]!.sentence },
+      { doc: SPEC, quote: 'rm archives the task, keeping', sentence: rmSides[1]!.sentence },
     ]);
   });
 
-  it('matches by SENTENCE whatever the quotes and headings say', () => {
-    const drifted: ConflictResolutionLike = { ...pickReadme, anchorA: 'Taskline (v2)', quoteA: 'other words', anchorB: null, quoteB: undefined };
+  it('matches by SENTENCE whatever the quotes say', () => {
+    const drifted: ConflictResolutionLike = { ...pickReadme, quoteA: 'other words', quoteB: undefined };
     const decisions = { conflictResolutions: [drifted] };
     expect(openConflicts(corpus([RM]), decisions)).toEqual([]);
     expect(buildCorpusConflicts(corpus([RM]), decisions)[0].resolution?.verdict).toBe('a');
@@ -217,9 +216,9 @@ describe('conflict resolutions — matching, verdicts, claim suppression', () =>
   it('conflictKey is the two sides as doc and sentence, in either order', () => {
     expect(conflictKey(README, SPEC, rmSides)).toBe(conflictKey(SPEC, README, [...rmSides].reverse()));
     expect(conflictKey(README, SPEC, rmSides)).toBe(
-      conflictKey(README, SPEC, [{ ...rmSides[0]!, heading: null, quote: undefined }, { ...rmSides[1]!, heading: 'Other' }]),
+      conflictKey(README, SPEC, [{ ...rmSides[0]!, quote: undefined }, { ...rmSides[1]!, quote: 'other words' }]),
     );
-    expect(conflictKey(README, SPEC, rmSides)).not.toBe(conflictKey(README, SPEC, [rmSides[0]!, at(SPEC, 'rm <id>', 'rm archives nothing.')]));
+    expect(conflictKey(README, SPEC, rmSides)).not.toBe(conflictKey(README, SPEC, [rmSides[0]!, at(SPEC, 'rm archives nothing.')]));
     expect(resolutionConflictKey(pickReadme)).toBe(conflictKey(README, SPEC, rmSides));
   });
 
@@ -264,7 +263,7 @@ describe('conflict resolutions — matching, verdicts, claim suppression', () =>
 describe('conflict identity — the addressable id the surfaces key rows on', () => {
   const API = 'knowledge/708837377.md';
   const APP = 'knowledge/894959617.md';
-  /** Two conflicts on the SAME pair in the SAME area, under the same headings. */
+  /** Two conflicts on the SAME pair in the SAME area. */
   const samePairTwoPoints = () => ({
     areas: [
       {
@@ -273,12 +272,12 @@ describe('conflict identity — the addressable id the surfaces key rows on', ()
           {
             docs: [API, APP] as [string, string],
             note: 'two endpoints both documented as "retrieve the list of source channels"',
-            sections: [at(API, '3. API Description', 'GET /channels lists the source channels.'), at(APP, '3. API Description', 'GET /sources lists the source channels.')],
+            sections: [at(API, 'GET /channels lists the source channels.'), at(APP, 'GET /sources lists the source channels.')],
           },
           {
             docs: [API, APP] as [string, string],
             note: 'channel key named affiliateChannelKey vs ChannelKey',
-            sections: [at(API, '3. API Description', 'The key is affiliateChannelKey.'), at(APP, '3. API Description', 'The key is ChannelKey.')],
+            sections: [at(API, 'The key is affiliateChannelKey.'), at(APP, 'The key is ChannelKey.')],
           },
         ],
       },
@@ -317,8 +316,8 @@ describe('conflict identity — the addressable id the surfaces key rows on', ()
 
 describe('a contradiction inside one document', () => {
   const DOC = 'DESIGN.md';
-  const press = at(DOC, 'Buttons', 'A press translates the button down 1px.');
-  const motion = at(DOC, 'Motion', 'A press scales the button to 0.97.');
+  const press = at(DOC, 'A press translates the button down 1px.');
+  const motion = at(DOC, 'A press scales the button to 0.97.');
   const inside = (sections: readonly ConflictSideLike[] = [press, motion]) => ({
     areas: [{ id: 'core/design', conflicts: [{ docs: [DOC, DOC] as [string, string], note: 'press is a translate and a scale', sections }] }],
   });
@@ -326,14 +325,14 @@ describe('a contradiction inside one document', () => {
   it('reads its sides by position: the first side is side a, the second side b', () => {
     expect(conflictSides(DOC, DOC, [press, motion])).toEqual([[press], [motion]]);
     // Two docs keep reading each doc's own sides, whatever order they came in.
-    const other = at('GUIDE.md', 'Press', 'q');
+    const other = at('GUIDE.md', 'q');
     expect(conflictSides(DOC, 'GUIDE.md', [other, press])).toEqual([[press], [other]]);
   });
 
   it('keys the conflict on both sentences, in either order, apart from every other conflict on the doc', () => {
     const key = conflictKey(DOC, DOC, [press, motion]);
     expect(conflictKey(DOC, DOC, [motion, press])).toBe(key);
-    expect(conflictKey(DOC, DOC, [press, at(DOC, 'Motion', 'A press scales the button to 0.98.')])).not.toBe(key);
+    expect(conflictKey(DOC, DOC, [press, at(DOC, 'A press scales the button to 0.98.')])).not.toBe(key);
     expect(conflictKey(DOC, 'GUIDE.md', [press, { ...motion, doc: 'GUIDE.md' }])).not.toBe(key);
   });
 
@@ -342,7 +341,7 @@ describe('a contradiction inside one document', () => {
     corpus.areas[0].conflicts.push({
       docs: [DOC, 'GUIDE.md'],
       note: 'radius 4 vs 6',
-      sections: [at(DOC, 'Corners', 'Radius is 4px.'), at('GUIDE.md', 'Corners', 'Radius is 6px.')],
+      sections: [at(DOC, 'Radius is 4px.'), at('GUIDE.md', 'Radius is 6px.')],
     });
     const conflicts = buildCorpusConflicts(corpus, {});
     expect(conflicts.map((c) => [c.a, c.b])).toEqual([
@@ -351,34 +350,34 @@ describe('a contradiction inside one document', () => {
     ]);
     const self = conflicts[0];
     const verdict = conflictVerdictFor(self, self.a, self.b, 'b');
-    expect(verdict).toMatchObject({ docA: DOC, anchorA: 'Buttons', sentenceA: press.sentence, docB: DOC, anchorB: 'Motion', sentenceB: motion.sentence, verdict: 'b' });
+    expect(verdict).toEqual({ docA: DOC, quoteA: press.quote, sentenceA: press.sentence, docB: DOC, quoteB: motion.quote, sentenceB: motion.sentence, verdict: 'b' });
     const decisions = { conflictResolutions: [{ ...verdict, resolvedAt: '' }] };
     expect(openConflicts(corpus, decisions).map((c) => c.a === c.b)).toEqual([false]);
   });
 
   it('suppresses the losing sentence, never the winning one on the same doc, whatever order the next scan lists them in', () => {
     const a = verdictOn([press, motion], DOC, DOC, 'a');
-    expect(suppressedClaims(inside(), { conflictResolutions: [a] })).toEqual([{ doc: DOC, anchor: 'Motion', quote: motion.quote, sentence: motion.sentence }]);
-    expect(suppressedClaims(inside(), { conflictResolutions: [{ ...a, verdict: 'b' }] })).toEqual([{ doc: DOC, anchor: 'Buttons', quote: press.quote, sentence: press.sentence }]);
-    expect(suppressedClaims(inside([motion, press]), { conflictResolutions: [a] })).toEqual([{ doc: DOC, anchor: 'Motion', quote: motion.quote, sentence: motion.sentence }]);
+    expect(suppressedClaims(inside(), { conflictResolutions: [a] })).toEqual([{ doc: DOC, quote: motion.quote, sentence: motion.sentence }]);
+    expect(suppressedClaims(inside(), { conflictResolutions: [{ ...a, verdict: 'b' }] })).toEqual([{ doc: DOC, quote: press.quote, sentence: press.sentence }]);
+    expect(suppressedClaims(inside([motion, press]), { conflictResolutions: [a] })).toEqual([{ doc: DOC, quote: motion.quote, sentence: motion.sentence }]);
   });
 
-  it('under one heading, two sentences are two sides, and two repeats of one text are too', () => {
-    const first = at(DOC, 'Providers', 'The provider is tested when you save it.');
-    const second = at(DOC, 'Providers', 'Run the Test step to check the provider.');
+  it('two sentences of one doc are two sides, and two repeats of one text are too', () => {
+    const first = at(DOC, 'The provider is tested when you save it.');
+    const second = at(DOC, 'Run the Test step to check the provider.');
     const pickFirst = verdictOn([first, second], DOC, DOC, 'a');
     expect(suppressedClaims(inside([second, first]), { conflictResolutions: [pickFirst] })).toEqual([
-      { doc: DOC, anchor: 'Providers', quote: second.quote, sentence: second.sentence },
+      { doc: DOC, quote: second.quote, sentence: second.sentence },
     ]);
-    const once = at(DOC, 'Status', 'Returns 200.');
-    const twice = at(DOC, 'Errors', 'Returns 200.', 1);
+    const once = at(DOC, 'Returns 200.');
+    const twice = at(DOC, 'Returns 200.', 1);
     expect(sameSentence(once, twice)).toBe(false);
     expect(buildCorpusConflicts(inside([once, twice]), {})).toHaveLength(1);
   });
 
   it('sameSentence and verdictNamesOneSentence read the key alone', () => {
     expect(sameSentence(press, motion)).toBe(false);
-    expect(sameSentence(press, { ...press, heading: 'Other', quote: 'a different window of the same sentence' })).toBe(true);
+    expect(sameSentence(press, { ...press, quote: 'a different window of the same sentence' })).toBe(true);
     expect(sameSentence(press, { ...press, doc: 'GUIDE.md' })).toBe(false);
     expect(verdictNamesOneSentence({ docA: DOC, sentenceA: press.sentence, docB: DOC, sentenceB: press.sentence })).toBe(true);
     expect(verdictNamesOneSentence({ docA: DOC, sentenceA: press.sentence, docB: DOC, sentenceB: motion.sentence })).toBe(false);
@@ -386,12 +385,12 @@ describe('a contradiction inside one document', () => {
   });
 });
 
-describe('several conflicts between the same two sections', () => {
+describe('several conflicts between the same two documents', () => {
   const API = 'docs/api.md';
   const APP = 'docs/app.md';
-  const pageSize = [at(API, 'Expense list', 'Returns 20 expenses per page.'), at(APP, 'Expense list', 'The list shows 50 expenses per page.')];
-  const sortOrder = [at(API, 'Expense list', 'Expenses are sorted newest first.'), at(APP, 'Expense list', 'Expenses are sorted oldest first.')];
-  const emptyText = [at(API, 'Expense list', 'An empty list returns an empty array.'), at(APP, 'Expense list', 'An empty list says "No expenses yet".')];
+  const pageSize = [at(API, 'Returns 20 expenses per page.'), at(APP, 'The list shows 50 expenses per page.')];
+  const sortOrder = [at(API, 'Expenses are sorted newest first.'), at(APP, 'Expenses are sorted oldest first.')];
+  const emptyText = [at(API, 'An empty list returns an empty array.'), at(APP, 'An empty list says "No expenses yet".')];
   const POINTS = [pageSize, sortOrder, emptyText];
   const corpusOf = (lists: ReadonlyArray<readonly ConflictSideLike[]>, area = 'core/expenses') => ({
     areas: [{ id: area, conflicts: lists.map((sections, i) => ({ docs: [API, APP] as [string, string], note: `point ${i}`, sections })) }],
@@ -435,18 +434,18 @@ describe('several conflicts between the same two sections', () => {
 
   it('offers as a hint only a verdict that matches no current conflict', () => {
     const inForce = verdictOn(pageSize, API, APP, 'a');
-    const old = verdictOn([at(API, 'Expense list', 'Pages hold ten.'), at(APP, 'Expense list', 'Pages hold twelve.')], API, APP, 'b');
+    const old = verdictOn([at(API, 'Pages hold ten.'), at(APP, 'Pages hold twelve.')], API, APP, 'b');
     const decisions = { conflictResolutions: [inForce] };
     expect(dormantResolutionForPair(decisions, buildCorpusConflicts(corpusOf(POINTS), decisions), API, APP)).toBeUndefined();
     const withOld = { conflictResolutions: [inForce, old] };
     expect(dormantResolutionForPair(withOld, buildCorpusConflicts(corpusOf(POINTS), withOld), APP, API)).toBe(old);
   });
 
-  it('suppresses the losing quote of the conflict each verdict is on, never another point on the same sections', () => {
+  it('suppresses the losing quote of the conflict each verdict is on, never another point on the same docs', () => {
     const decisions = { conflictResolutions: [verdictOn(pageSize, API, APP, 'a'), verdictOn(emptyText, API, APP, 'b')] };
     expect(suppressedClaims(corpusOf(POINTS), decisions)).toEqual([
-      { doc: APP, anchor: 'Expense list', quote: pageSize[1]!.quote, sentence: pageSize[1]!.sentence },
-      { doc: API, anchor: 'Expense list', quote: emptyText[0]!.quote, sentence: emptyText[0]!.sentence },
+      { doc: APP, quote: pageSize[1]!.quote, sentence: pageSize[1]!.sentence },
+      { doc: API, quote: emptyText[0]!.quote, sentence: emptyText[0]!.sentence },
     ]);
   });
 });

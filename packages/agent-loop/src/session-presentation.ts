@@ -43,18 +43,15 @@ export type SessionDisplay = z.infer<typeof SessionDisplaySchema>;
 
 /**
  * A conflict's identity: two sentences that disagree, each a doc and a
- * sentence key, named precisely enough for a reader to record a verdict.
- * `anchorA`/`anchorB` are the headings the sentences sit under, `null` for a
- * doc's preamble, carried for display. `docA` and `docB` are the same doc for
- * a contradiction inside it, its sides the first and second sentence.
+ * sentence key, named precisely enough for a reader to record a verdict; the
+ * quotes are carried for display. `docA` and `docB` are the same doc for a
+ * contradiction inside it, its sides the first and second sentence.
  */
 export const DisplayConflictSchema = z.object({
   docA: z.string(),
-  anchorA: z.string().nullable(),
   quoteA: z.string().optional(),
   sentenceA: z.string(),
   docB: z.string(),
-  anchorB: z.string().nullable(),
   quoteB: z.string().optional(),
   sentenceB: z.string(),
 });
@@ -105,7 +102,7 @@ export const KnownDisplayBlockSchema = z.discriminatedUnion('kind', [
     kind: z.literal('conflict'),
     claim: z.string(),
     quotes: z.array(
-      z.object({ doc: z.string(), heading: z.string().optional(), quote: z.string() }),
+      z.object({ doc: z.string(), quote: z.string() }),
     ),
     recommendation: z
       .object({

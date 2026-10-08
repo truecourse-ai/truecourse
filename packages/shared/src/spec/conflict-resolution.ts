@@ -16,11 +16,11 @@
  * dismissed, or fixed.
  *
  * A conflict's identity is its two SIDES, each a doc and the key of the
- * sentence it points at ({@link sentenceKey}). The heading a side also carries
- * is where a reader finds the sentence, never part of the identity: a heading
- * renamed, or a sentence moved under another heading, leaves the conflict and
- * the verdict recorded against it in place. Several disagreements between the
- * same two sections are several conflicts, each with its own id and verdict.
+ * sentence it points at ({@link sentenceKey}). The quote a side also carries
+ * is for a reader, never part of the identity: anything else changing in the
+ * doc around the sentence leaves the conflict and the verdict recorded against
+ * it in place. Several disagreements between the same two docs are several
+ * conflicts, each with its own id and verdict.
  */
 
 /**
@@ -70,8 +70,6 @@ export function sentenceKey(text: string, repeat = 0): string {
 /** One side of a conflict — a doc and the sentence of it the side points at. */
 export interface ConflictSideLike {
   doc: string;
-  /** The heading the sentence sits under, as the outline lists it (`null` = the doc's preamble). Display only. */
-  heading: string | null;
   /** The verbatim disputed words. Carried for display; never part of the identity. */
   quote?: string;
   /** The {@link sentenceKey} of the sentence: with the doc, the side's identity. */
@@ -104,18 +102,15 @@ export interface CorpusLike<O extends ConflictLike = ConflictLike> {
 
 /**
  * A conflict verdict as the derivation reads it — the two sides as a doc and
- * a sentence key each, the heading and quote each carried for display, and
- * the verdict. `verdict` 'a'/'b' picks a side (the loser's quoted claim is
+ * a sentence key each, the quote carried for display, and the verdict. `verdict` 'a'/'b' picks a side (the loser's quoted claim is
  * suppressed at extraction); 'dismissed' says this is no conflict, which
  * resolves the gate but suppresses nothing.
  */
 export interface ConflictResolutionLike {
   docA: string;
-  anchorA: string | null;
   quoteA?: string;
   sentenceA: string;
   docB: string;
-  anchorB: string | null;
   quoteB?: string;
   sentenceB: string;
   verdict: 'a' | 'b' | 'dismissed';
@@ -203,7 +198,6 @@ export interface MergedConflict<O extends ConflictLike> {
 
 const NUL = '\x00';
 const unorderedPairKey = (a: string, b: string): string => (a < b ? `${a}${NUL}${b}` : `${b}${NUL}${a}`);
-const preambleCount = (c: ConflictLike): number => c.sections.filter((s) => s.heading === null).length;
 
 /** One side of a conflict as its key reads it. */
 interface KeySide {
@@ -253,8 +247,7 @@ export function resolveConflictId<C extends Pick<CorpusConflict, 'id'>>(conflict
  * exactly when they have one identity: the same two sentences. The same two
  * sections holding another disagreement is another conflict.
  *
- * The representative (which record survives) is deterministic: fewest preamble
- * (null-heading) sides first — the most bandable in the viewer — then area then
+ * The representative (which record survives) is deterministic: by area then
  * note. The span (`areas`) unions each member's tagged area with any `areas` the
  * record already carries.
  */
@@ -272,9 +265,6 @@ export function dedupeCrossAreaConflicts<O extends ConflictLike>(
   const merged: MergedConflict<O>[] = [];
   for (const group of byIdentity.values()) {
     group.sort((x, y) => {
-      const px = preambleCount(x.conflict);
-      const py = preambleCount(y.conflict);
-      if (px !== py) return px - py;
       if (x.area !== y.area) return x.area < y.area ? -1 : 1;
       return (x.conflict.note ?? '') < (y.conflict.note ?? '') ? -1 : 1;
     });
@@ -463,8 +453,8 @@ export function buildCorpusConflicts<O extends ConflictLike>(
 
 /**
  * The verdict record for one conflict: each side's doc and sentence key (the
- * conflict's identity, {@link conflictKey}), its heading and quote for
- * display, and the verdict. Built ONCE — the dashboard's verdict buttons and
+ * conflict's identity, {@link conflictKey}), its quote for display, and the
+ * verdict. Built ONCE — the dashboard's verdict buttons and
  * the MCP tool both record through it, and so does the scan's auto-apply.
  * Sides are read by {@link conflictSides}, so inside one doc `a` is the first
  * sentence.
@@ -478,11 +468,9 @@ export function conflictVerdictFor(
   const [[sideA], [sideB]] = conflictSides(docA, docB, conflict.sections);
   return {
     docA,
-    anchorA: sideA?.heading ?? null,
     quoteA: sideA?.quote,
     sentenceA: sideA?.sentence ?? '',
     docB,
-    anchorB: sideB?.heading ?? null,
     quoteB: sideB?.quote,
     sentenceB: sideB?.sentence ?? '',
     verdict,
@@ -541,8 +529,6 @@ function orphansAmong(
 export interface SuppressedClaim {
   /** The losing doc (the side the verdict rejected). */
   doc: string;
-  /** The losing sentence's heading (`null` = preamble/lead). */
-  anchor: string | null;
   /** The verbatim disputed sentence — no claim asserting it may be extracted. */
   quote: string;
   /** The losing sentence's key: a claim read from it is suppressed. */
@@ -556,13 +542,13 @@ export interface SuppressedClaim {
  * an orphaned resolution (no matching conflict) suppresses nothing (it is
  * surfaced via {@link orphanedConflictResolutions} instead); a side verdict
  * whose loser carries no quote yields nothing to suppress (the gate still
- * counts it resolved). The guard generator injects each entry into the losing
- * section's extraction context so no claim asserting the stale sentence is
- * authored.
+ * counts it resolved). The guard generator drops every claim read from the
+ * losing sentence before it composes flows, so no test asserts the stale
+ * sentence.
  *
  * Each conflict carries its own sides and matches only the verdict on itself,
- * so where many conflicts share two docs and two headings, each verdict
- * suppresses the losing quote of its own conflict, never another point's.
+ * so where many conflicts share two docs, each verdict suppresses the losing
+ * quote of its own conflict, never another point's.
  */
 export function suppressedClaims(corpus: CorpusLike, decisions: DecisionsLike): SuppressedClaim[] {
   const out: SuppressedClaim[] = [];
@@ -571,14 +557,14 @@ export function suppressedClaims(corpus: CorpusLike, decisions: DecisionsLike): 
     if (!r || r.verdict === 'dismissed') continue;
     const loser =
       r.verdict === 'a'
-        ? { doc: r.docB, anchor: r.anchorB, quote: r.quoteB, sentence: r.sentenceB }
-        : { doc: r.docA, anchor: r.anchorA, quote: r.quoteA, sentence: r.sentenceA };
-    // The words and heading to drop are the ones the CURRENT scan carries: the
-    // verdict matched by sentence key, and the quote window or the heading may
-    // have moved on since the verdict was recorded.
+        ? { doc: r.docB, quote: r.quoteB, sentence: r.sentenceB }
+        : { doc: r.docA, quote: r.quoteA, sentence: r.sentenceA };
+    // The words to drop are the ones the CURRENT scan carries: the verdict
+    // matched by sentence key, and the quote window may have moved on since
+    // the verdict was recorded.
     const current = c.sections.find((s) => s.doc === loser.doc && s.sentence === loser.sentence);
     const quote = current?.quote?.trim() || loser.quote?.trim();
-    if (quote) out.push({ doc: loser.doc, anchor: current?.heading ?? loser.anchor, quote, sentence: loser.sentence });
+    if (quote) out.push({ doc: loser.doc, quote, sentence: loser.sentence });
   }
   return out;
 }

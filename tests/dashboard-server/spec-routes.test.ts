@@ -116,8 +116,8 @@ async function seedWorkspaceCorpus(
                 docs: [ref('v1.md'), ref('v2.md')],
                 note: '24h vs 48h',
                 sections: [
-                  { doc: ref('v1.md'), heading: 'Cancellation', sentence: 's-v1' },
-                  { doc: ref('v2.md'), heading: 'Cancellation policy', sentence: 's-v2' },
+                  { doc: ref('v1.md'), sentence: 's-v1' },
+                  { doc: ref('v2.md'), sentence: 's-v2' },
                 ],
               },
             ]
@@ -131,10 +131,8 @@ async function seedWorkspaceCorpus(
 /** The verdict that resolves the seeded workspace v1/v2 conflict. */
 const WS_VERDICT = {
   docA: 'context/repo-src/docs/v1.md',
-  anchorA: 'Cancellation',
   sentenceA: 's-v1',
   docB: 'context/repo-src/docs/v2.md',
-  anchorB: 'Cancellation policy',
   sentenceB: 's-v2',
   verdict: 'b',
 };

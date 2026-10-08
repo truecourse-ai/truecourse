@@ -45,11 +45,9 @@ export interface SkippedPage {
 /** The verdict POST payload (pick-a-side / dismissal). */
 export interface ConflictResolutionPayload {
   docA: string;
-  anchorA: string | null;
   quoteA?: string;
   sentenceA: string;
   docB: string;
-  anchorB: string | null;
   quoteB?: string;
   sentenceB: string;
   verdict: 'a' | 'b' | 'dismissed';

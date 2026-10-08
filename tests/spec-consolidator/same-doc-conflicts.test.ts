@@ -30,8 +30,8 @@ A press translates the button down 1px.
 A press scales the button to 0.97.
 `;
 
-const PRESS = { doc: DOC, heading: 'Buttons', quote: 'A press translates the button down 1px.', sentence: sentenceKey('A press translates the button down 1px.') };
-const SCALE = { doc: DOC, heading: 'Motion', quote: 'A press scales the button to 0.97.', sentence: sentenceKey('A press scales the button to 0.97.') };
+const PRESS = { doc: DOC, quote: 'A press translates the button down 1px.', sentence: sentenceKey('A press translates the button down 1px.') };
+const SCALE = { doc: DOC, quote: 'A press scales the button to 0.97.', sentence: sentenceKey('A press scales the button to 0.97.') };
 
 let repo: string;
 beforeEach(() => {
@@ -84,11 +84,11 @@ describe('autoApplyHighConfidenceRecommendations on one doc', () => {
     expect(decisions.conflictResolutions).toEqual([
       expect.objectContaining({
         docA: DOC,
-        anchorA: 'Buttons',
         quoteA: PRESS.quote,
+        sentenceA: PRESS.sentence,
         docB: DOC,
-        anchorB: 'Motion',
         quoteB: SCALE.quote,
+        sentenceB: SCALE.sentence,
         verdict: 'b',
         resolvedBy: 'auto',
       }),
@@ -104,7 +104,7 @@ describe('pruneOrphanedConflictResolutions on one doc', () => {
     const decisions: DecisionsFile = {
       ...EMPTY,
       conflictResolutions: [
-        { docA: DOC, anchorA: 'Buttons', sentenceA: PRESS.sentence, docB: DOC, anchorB: 'Motion', sentenceB: SCALE.sentence, verdict: 'a', resolvedAt: '2026-10-01T00:00:00Z' },
+        { docA: DOC, sentenceA: PRESS.sentence, docB: DOC, sentenceB: SCALE.sentence, verdict: 'a', resolvedAt: '2026-10-01T00:00:00Z' },
       ],
     };
     expect(pruneOrphanedConflictResolutions(repo, corpus, decisions)).toBe(decisions);

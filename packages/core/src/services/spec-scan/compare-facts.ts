@@ -48,7 +48,7 @@
  * sentence key), the note and the review.
  *
  * A conflict is ONE PAIR OF SENTENCES: its identity is the two sentences its
- * pointers name, so the same two sections can hold many conflicts, each with
+ * pointers name, so the same two docs can hold many conflicts, each with
  * its own verdict. Fact pairs that land on the same two sentences (one pair of
  * sentences that disagrees on two points, or one pair found by an area batch
  * and again by a subject batch) are folded into one conflict by
@@ -408,7 +408,6 @@ export function compareFactsCacheKey(item: CompareItem, extraParts: readonly str
 /** One side of a reported conflict: where the disputed claim lives. */
 export interface ReportedConflictSide {
   doc: string
-  heading: string | null
   quote: string
   /** The key of the sentence the quote is cut from (`sentenceKey`): with the doc, the side's identity. */
   sentence: string
@@ -429,8 +428,7 @@ export interface ReportedConflict {
 /**
  * Why a conflict that names one doc on both sides is not a contradiction inside
  * it, or `undefined` when it is: exactly two sides, both on the doc, naming two
- * sentences (another heading, or other words under the same heading). The first
- * side is side a, the second side b.
+ * different sentences. The first side is side a, the second side b.
  */
 export function sameDocConflictProblem(conflict: Pick<ReportedConflict, 'docs' | 'sections'>): string | undefined {
   const [doc] = conflict.docs
@@ -448,8 +446,8 @@ export function sameDocConflictProblem(conflict: Pick<ReportedConflict, 'docs' |
  * One reported conflict as a card: the note as the claim, up to two quoted
  * sentences, the adjudication, and the CONFLICT IDENTITY — each side's doc and
  * sentence key, which is the key a `conflictResolutions` entry is matched by,
- * so a verdict recorded off the card matches the corpus conflict. The headings
- * and quotes ride along for display.
+ * so a verdict recorded off the card matches the corpus conflict. The quotes
+ * ride along for display.
  */
 export function presentConflict(conflict: ReportedConflict): KnownDisplayBlock {
   const [docA, docB] = conflict.docs
@@ -458,11 +456,9 @@ export function presentConflict(conflict: ReportedConflict): KnownDisplayBlock {
   // the gate refused anything else before it reached here.
   const identity: DisplayConflict = {
     docA,
-    anchorA: sideA?.heading ?? null,
     ...(sideA ? { quoteA: sideA.quote } : {}),
     sentenceA: sideA?.sentence ?? '',
     docB,
-    anchorB: sideB?.heading ?? null,
     ...(sideB ? { quoteB: sideB.quote } : {}),
     sentenceB: sideB?.sentence ?? '',
   }
@@ -476,11 +472,7 @@ export function presentConflict(conflict: ReportedConflict): KnownDisplayBlock {
   return {
     kind: 'conflict',
     claim: conflict.note,
-    quotes: conflict.sections.slice(0, 2).map((s) => ({
-      doc: s.doc,
-      ...(s.heading !== null ? { heading: s.heading } : {}),
-      quote: s.quote,
-    })),
+    quotes: conflict.sections.slice(0, 2).map((s) => ({ doc: s.doc, quote: s.quote })),
     recommendation: {
       ...(recommendedDoc ? { doc: recommendedDoc } : {}),
       ...(recommendedSide ? { side: recommendedSide } : {}),
@@ -611,7 +603,6 @@ export function factPointer(fact: RecordedFact): ReportedConflictSide {
   }
   return {
     doc: fact.doc,
-    heading: sentence?.heading ?? null,
     quote: sentence ? evidenceWindow(sentence.text, wanted) : fact.statement,
     sentence: sentence ? sentenceKey(sentence.text, sentence.repeat) : sentenceKey(fact.statement),
   }
@@ -723,7 +714,7 @@ export function checkGroups(outcome: FactComparisonWire, batch: CompareBatch): G
       }
       const oneSentenceProblem = a.fact.doc === b.fact.doc ? sameDocConflictProblem(found) : undefined
       if (oneSentenceProblem) {
-        problems.push(`${at}: ${conflict.a} and ${conflict.b} quote the same words under one heading of ${a.fact.doc}; a conflict is between two sentences`)
+        problems.push(`${at}: ${conflict.a} and ${conflict.b} quote the same sentence of ${a.fact.doc}; a conflict is between two sentences`)
         return
       }
       conflicts.push(found)
@@ -1071,9 +1062,8 @@ export function compareFactsBriefing(
       '',
       'PREVIOUSLY FLAGGED: conflicts an earlier scan reported between these documents. Re-examine each among the facts above; one that still stands is a conflict group here, one the documents no longer state is not.',
     )
-    // A side that names its sentence shows its quote: two sections can hold several conflicts.
-    const side = (s: ConflictSideLike): string =>
-      `${s.doc} · ${s.heading ?? '(lead)'}${s.sentence !== undefined && s.quote ? ` · "${s.quote}"` : ''}`
+    // A side shows its quote: two docs can hold several conflicts.
+    const side = (s: ConflictSideLike): string => `${s.doc}${s.quote ? ` · "${s.quote}"` : ''}`
     prior.forEach((o, i) => {
       const sides = (o.sections ?? []).map(side).join('  <->  ')
       lines.push(`  ${i + 1}. ${sides || `${o.docs[0]}  <->  ${o.docs[1]}`}${o.note ? `  : ${o.note}` : ''}`)

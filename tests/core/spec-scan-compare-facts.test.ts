@@ -22,7 +22,7 @@
  *   folds into an conflict entry whose verbatim quotes the pointer verifier
  *   anchors where they are; a conflict inside one doc; the same conflict
  *   found by an area batch and a subject batch folds to one; several
- *   conflicts between the same two sections stay several; two fact pairs on
+ *   conflicts between the same two docs stay several; two fact pairs on
  *   the same two sentences fold into one that keeps both notes; a failed
  *   session lands its docs in `notReached`; the checklist carries the new
  *   steps.
@@ -299,13 +299,11 @@ describe('the comparison gate', () => {
       sections: [
         {
           doc: 'docs/export.md',
-          heading: 'Where',
           quote: 'Export my data is under Settings, Account.',
           sentence: sentenceKey('Export my data is under Settings, Account.'),
         },
         {
           doc: 'docs/privacy.md',
-          heading: 'Where',
           quote: 'Export my data is under Settings, Danger Zone.',
           sentence: sentenceKey('Export my data is under Settings, Danger Zone.'),
         },
@@ -410,7 +408,6 @@ describe('a pointer\'s evidence', () => {
     ])
     expect(factPointer(fact!)).toEqual({
       doc: 'docs/export.md',
-      heading: null,
       quote: 'Export your resume as a PDF.',
       sentence: sentenceKey('Export your resume as a PDF.'),
     })
@@ -449,7 +446,6 @@ describe('a pointer\'s evidence', () => {
     const sentence = fact!.sentences[0]!
     expect(sentence.kind).toBe('code')
     const pointer = factPointer(fact!)
-    expect(pointer.heading).toBe('Compose')
     expect(sentence.text).toContain(pointer.quote)
     expect(pointer.quote).toContain('./data:/app/data')
     expect(pointer.quote.trim().split(/\s+/).length).toBeLessThanOrEqual(POINTER_QUOTE_WORDS)
@@ -470,7 +466,7 @@ describe('a pointer\'s evidence', () => {
 })
 
 describe('conflicts on the same two sentences', () => {
-  const at = (doc: string, quote: string) => ({ doc, heading: 'Expense list', quote, sentence: sentenceKey(quote) })
+  const at = (doc: string, quote: string) => ({ doc, quote, sentence: sentenceKey(quote) })
   const api = at('docs/api.md', 'Expenses are listed 20 per page, newest first.')
   const app = at('docs/app.md', 'Expenses are listed 50 per page, oldest first.')
   const conflict = (
@@ -573,22 +569,26 @@ describe('the comparison session', () => {
     expect(def.outcomePrecondition?.tool).toBe('check_groups')
   })
 
-  it('briefs each earlier conflict between its docs, quoting the sentences of one that names them', () => {
-    const where = (quote: string, doc: string) => ({ doc, heading: 'Where', quote, sentence: sentenceKey(quote) })
-    const keyed = {
+  it('briefs each earlier conflict between its docs, each side by its doc and the words it quotes', () => {
+    const side = (doc: string, text: string, quoted = true) => ({ doc, ...(quoted ? { quote: text } : {}), sentence: sentenceKey(text) })
+    const quoted = {
       docs: ['docs/export.md', 'docs/privacy.md'] as [string, string],
       note: 'where',
       sections: [
-        where('Export my data is under Settings, Account.', 'docs/export.md'),
-        where('Export my data is under Settings, Danger Zone.', 'docs/privacy.md'),
+        side('docs/export.md', 'Export my data is under Settings, Account.'),
+        side('docs/privacy.md', 'Export my data is under Settings, Danger Zone.'),
       ],
     }
-    const plain = { ...keyed, note: 'schedule', sections: keyed.sections.map(({ doc, heading, quote }) => ({ doc, heading, quote })) }
-    const briefing = compareFactsBriefing({ batch, docs: new Map() }, [], [keyed, plain])
+    const unquoted = {
+      ...quoted,
+      note: 'schedule',
+      sections: [side('docs/export.md', 'It runs nightly.', false), side('docs/privacy.md', 'It runs weekly.', false)],
+    }
+    const briefing = compareFactsBriefing({ batch, docs: new Map() }, [], [quoted, unquoted])
     expect(briefing).toContain(
-      '  1. docs/export.md · Where · "Export my data is under Settings, Account."  <->  docs/privacy.md · Where · "Export my data is under Settings, Danger Zone."  : where',
+      '  1. docs/export.md · "Export my data is under Settings, Account."  <->  docs/privacy.md · "Export my data is under Settings, Danger Zone."  : where',
     )
-    expect(briefing).toContain('  2. docs/export.md · Where  <->  docs/privacy.md · Where  : schedule')
+    expect(briefing).toContain('  2. docs/export.md  <->  docs/privacy.md  : schedule')
   })
 
   it('reads the section around each fact, one block per sentence', async () => {
@@ -701,13 +701,11 @@ describe('a scan that compares facts, from docs to corpus', () => {
     expect(conflict.sections).toEqual([
       {
         doc: 'docs/export.md',
-        heading: 'Where',
         quote: 'Export my data is under Settings, Account.',
         sentence: sentenceKey('Export my data is under Settings, Account.'),
       },
       {
         doc: 'docs/privacy.md',
-        heading: 'Where',
         quote: 'Export my data is under Settings, Danger Zone.',
         sentence: sentenceKey('Export my data is under Settings, Danger Zone.'),
       },
@@ -739,7 +737,7 @@ describe('a scan that compares facts, from docs to corpus', () => {
     const { result } = await scan({ tags: { 'docs/settings.md': [EXPORTS] } })
     const conflict = result.corpus.areas[0]!.conflicts[0]!
     expect(conflict.docs).toEqual(['docs/settings.md', 'docs/settings.md'])
-    expect(conflict.sections.map((s) => s.heading)).toEqual(['Account', 'Danger Zone'])
+    expect(conflict.sections.map((s) => s.quote)).toEqual(['Export my data is under Settings, Account.', 'Export my data is under Settings, Danger Zone.'])
   })
 
   it('folds one conflict found by an area batch and by a subject batch into one', async () => {
@@ -789,7 +787,7 @@ describe('a scan that compares facts, from docs to corpus', () => {
     expect(result.corpus.comparison).toMatchObject({ subjectBatchFamilies: 1, subjectBatchFacts: 3, unplacedFacts: 0 })
   })
 
-  // Two docs whose "Expense list" sections disagree, sentence by sentence, on three points.
+  // Two docs that disagree, sentence by sentence, on three points.
   const API_MD = `# API\n\n## Expense list\n\nThe list returns 20 expenses per page. Expenses are sorted newest first. An empty list returns an empty array.\n`
   const APP_MD = `# App\n\n## Expense list\n\nThe list shows 50 expenses per page. Expenses are sorted oldest first. An empty list shows a message.\n`
   const EXPENSES = { product: 'core', concern: 'expenses' }
@@ -797,7 +795,7 @@ describe('a scan that compares facts, from docs to corpus', () => {
     /per page/.test(line) ? 'Expense page size' : /sorted/.test(line) ? 'Expense sort order' : /empty list/i.test(line) ? 'Empty expense list' : null
   const apiAgainstApp = (call: StubCall) => compare(call, (a, b) => a.doc === 'docs/api.md' && b.doc === 'docs/app.md')
 
-  it('files every conflict between the same two sections as a conflict of its own', async () => {
+  it('files every conflict between the same two docs as a conflict of its own', async () => {
     writeDocs({ 'docs/api.md': API_MD, 'docs/app.md': APP_MD })
     const { result } = await scan({
       tags: { 'docs/api.md': [EXPENSES], 'docs/app.md': [EXPENSES] },
@@ -809,7 +807,7 @@ describe('a scan that compares facts, from docs to corpus', () => {
     })
     const conflicts = result.corpus.areas.flatMap((a) => a.conflicts)
     expect(conflicts).toHaveLength(3)
-    expect(conflicts.every((o) => o.sections.every((s) => s.heading === 'Expense list'))).toBe(true)
+    expect(conflicts.every((o) => o.sections.map((s) => s.doc).join() === 'docs/api.md,docs/app.md')).toBe(true)
     expect(new Set(conflicts.map((o) => o.sections.map((s) => s.sentence).join())).size).toBe(3)
     expect(conflicts.flatMap((o) => o.sections.filter((s) => s.doc === 'docs/app.md').map((s) => s.quote)).sort()).toEqual([
       'An empty list shows a message.',
