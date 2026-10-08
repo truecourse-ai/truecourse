@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 're
 import { getCalApi } from '@calcom/embed-react';
 import { trackAdsBooking } from '@/lib/ga';
 import { trackEvent } from '@/lib/posthog';
+import { trackRedditBooking } from '@/lib/reddit';
 
 export const BOOKING_URL = 'https://cal.com/mushegh-gevorgyan-asax6e/your-app-checkup';
 const CAL_LINK = 'mushegh-gevorgyan-asax6e/your-app-checkup';
@@ -38,7 +39,7 @@ let openedFrom: BookPlacement | undefined;
 /**
  * The calendar, loaded once for the page: preloaded so the popup opens at
  * once, and recording each booking made in it as `checkup_booked` and as a
- * Google Ads conversion.
+ * Google Ads and Reddit Ads conversion.
  */
 let calendar: ReturnType<typeof getCalApi> | undefined;
 function loadCalendar() {
@@ -50,6 +51,7 @@ function loadCalendar() {
       callback: () => {
         trackEvent('checkup_booked', { placement: openedFrom, page: 'builders' });
         trackAdsBooking();
+        trackRedditBooking();
       },
     });
     return cal;
@@ -98,7 +100,7 @@ export function BookLink({
  * The app checkup calendar set into the page, carrying this visit's ad tags.
  * It has a namespace of its own, apart from the popup's, and records each
  * booking made in it as `checkup_booked` from the `calendar` placement and
- * as a Google Ads conversion.
+ * as a Google Ads and Reddit Ads conversion.
  */
 export function BookingCalendar({ className }: { className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -112,6 +114,7 @@ export function BookingCalendar({ className }: { className?: string }) {
         callback: () => {
           trackEvent('checkup_booked', { placement: 'calendar', page: 'builders' });
           trackAdsBooking();
+          trackRedditBooking();
         },
       });
       cal('inline', {
