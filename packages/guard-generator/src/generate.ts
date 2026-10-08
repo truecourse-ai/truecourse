@@ -177,9 +177,7 @@ import {
 import {
   planGuardWork,
   hasGuardUniverse,
-  legacyFlowGenerationInputsHash,
   flowGenerationInputComponents,
-  flowInterfaceFingerprintBag,
   flowSettleDigest,
   flowSettleVerdict,
   type FlowGenerationInputParts,
@@ -187,7 +185,6 @@ import {
   type GuardDoc,
   type SectionInput,
 } from './section-plan.js'
-import { LEGACY_WORLD_CLASSIFY_PROMPT_FINGERPRINT } from './legacy-prompt-fingerprints.js'
 import { buildOperationIndex, matchedRequestSchemas, parseOperationSection, type OperationEntry } from './openapi-enrich.js'
 import { writeClaimsCorpus } from './claims-persist.js'
 import { claimAreaInputs, dismissedReason, oneLine, placeClaims, readSpecClaims } from './claims-input.js'
@@ -740,14 +737,14 @@ function defaultConcurrency(): number {
 }
 
 /**
- * The per-(flow, surface) cache-key recipe of the flow-worker session — the
- * retired one-shot `authorCacheKey`'s exact structure, with the
- * prompt fingerprint passed in. The key moves when the flow's milestone
+ * The per-(flow, surface) cache-key recipe of the flow-worker session, with
+ * the stage label passed in. The key moves when the flow's milestone
  * composition changes (a reworded sentence is a new claim id), when the
  * realization plan's interfaces move, when the recipe or the format version
- * changes, or when the session prompt changes. Nothing else re-authors.
- * Exported for `@truecourse/core`, which owns the session prompts and therefore
- * computes the keys (cache name `guard/generate`, kept from the one-shot stage).
+ * changes, or when the stage version is bumped. Nothing else re-authors.
+ * Exported for `@truecourse/core`, which owns the session and its stage version
+ * and therefore computes the keys (cache name `guard/generate`, kept from the
+ * one-shot stage).
  */
 export function workerCacheKey(
   stage: string,
@@ -787,34 +784,20 @@ export function workerRecipeMaterial(material: {
 }
 
 /**
- * The interface bag one (flow, surface) worker key folds — under the current
- * formula, and under the retired one beside it. The run and the pre-flight
- * estimate both build it HERE: a bag either of them assembled on its own would
- * price a key the other never probes, which is how the estimate came to quote a
- * full re-author for work the run served from cache.
+ * The interface bag one (flow, surface) worker key folds. The run and the
+ * pre-flight estimate both build it HERE: a bag either of them assembled on its
+ * own would price a key the other never probes, which is how the estimate came
+ * to quote a full re-author for work the run served from cache.
  */
-/** The resolved prerequisite state the retired worker key folded: no flow
- *  carried a prerequisite by then, so every key folded this. */
-const LEGACY_PREREQUISITE_STATE = '[]'
-
 export function flowWorkerKeyFingerprints(input: {
   /** The realization plan's assignment fingerprint. */
   assignment: string
   /** The planned interfaces' fingerprints. */
   interfaces: readonly string[]
-  /** Web only: what the session is handed, and the whole author catalog the
-   *  retired formula folded instead. */
-  web?: { handed: string; catalog: string }
-}): { fingerprints: string[]; legacyFingerprints: string[] } {
-  const common = [input.assignment, ...input.interfaces]
-  return {
-    fingerprints: [...common, ...(input.web ? [input.web.handed] : [])],
-    legacyFingerprints: [
-      LEGACY_PREREQUISITE_STATE,
-      ...common,
-      ...(input.web ? [input.web.catalog] : []),
-    ],
-  }
+  /** Web only: what the session is handed from the author catalog. */
+  webHanded?: string
+}): string[] {
+  return [input.assignment, ...input.interfaces, ...(input.webHanded !== undefined ? [input.webHanded] : [])]
 }
 
 // ---------------------------------------------------------------------------
@@ -829,8 +812,8 @@ export function flowWorkerKeyFingerprints(input: {
 //    red-prediction done-gate, the accepted-yaml STASH, and the ledger/finding
 //    bookkeeping. Each {@link FlowWorkerTask} closes over that.
 //  - CORE owns everything session-shaped — the system prompts, the pool, the
-//    `guard/generate` cache (key = {@link workerCacheKey} with the session
-//    prompt fingerprint), and the depth-1 fidelity CHILD (`ctx.dispatchChild`),
+//    `guard/generate` cache (key = {@link workerCacheKey} with the session's
+//    stage version), and the depth-1 fidelity CHILD (`ctx.dispatchChild`),
 //    which it hands the engine as the {@link WorkerFidelityJudge} argument of
 //    `submitScenario`.
 // ---------------------------------------------------------------------------
@@ -876,14 +859,6 @@ export interface FlowWorkerCacheMaterial {
   roster: string
   /** Every declared preparation profile, with its script bytes. */
   preparations: string
-  /** The whole recipe fingerprint, for the OLD key a miss falls back to.
-   *  Delete with the legacy hash. */
-  recipeFingerprint: string
-  /** {@link interfaceFingerprints} as the retired formula folded it — the
-   *  prerequisites' resolved STATE where the bag now carries their shape, and
-   *  on web the WHOLE author catalog where it now carries what the session is
-   *  handed. Absent when the two agree. Delete with the legacy hash. */
-  legacyInterfaceFingerprints?: readonly string[]
   /** `edit` when the briefing carries the flow's committed scenarios to edit;
    *  `scratch` otherwise (the key then matches every pre-edit-mode entry). */
   mode: 'scratch' | 'edit'
@@ -1727,7 +1702,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       interfaceFingerprints: [...plans.values()].flatMap((p) => p.interfaces.map((j) => j.fingerprint)),
       ...(plans.has('web')
         ? {
-            webCatalogFingerprint: catalogs.get('web')!.fingerprint,
             // What the flow's LAST session read, priced against the catalog as
             // it stands now. A flow that re-authors re-stamps this below with
             // what its new session read.
@@ -1742,15 +1716,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       roster: flowRosterFingerprint(recipe, priorScenarios),
       preparation: flowPreparationFingerprint(repoRoot, recipe, priorScenarios),
     }
-    const interfaceFingerprints = flowInterfaceFingerprintBag(inputParts)
     const inputComponents = flowGenerationInputComponents(inputParts)
     const inputsHash = flowSettleDigest(inputComponents)
-    const legacyHash = legacyFlowGenerationInputsHash({
-      flowFingerprint: flow.fingerprint,
-      interfaceFingerprints,
-      recipeFingerprint,
-    })
-    const settle = flowSettleVerdict({ prior, components: inputComponents, legacyHash })
+    const settle = flowSettleVerdict({ prior, components: inputComponents })
     // A settled entry that leaves a planned surface unaccounted for (no test, no
     // gap) is a hole nothing can heal: its hash skips the flow forever. Its hash is
     // DISREGARDED, so the flow re-runs here and settles honestly — no migration.
@@ -1784,7 +1752,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         changed,
         // Only a settled row the compare re-opened has moved inputs to name; a
         // flow that was new, unsettled or re-opened by an invariant has none,
-        // and a row checked the legacy way names them as unrecorded.
+        // and a settled row with no components names them as unrecorded.
         ...(changed && prior && prior.generationInputsHash !== null && !settle.settled
           ? { movedInputs: settle.moved }
           : {}),
@@ -1934,26 +1902,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       unresolved.set(flow.id, flow)
     }
 
-    // THE RETIRED POSITIONAL CHUNKS, read once per forty flows: the old key —
-    // the prompt fingerprint over this run's slicing of this run's changed set
-    // — is exactly what shipped before per-flow verdicts, so an unchanged set
-    // finds its whole stored answer and every flow in it is written out
-    // individually. A set that moved simply misses, as it did before.
-    if (unresolved.size > 0) {
-      for (const chunk of chunksOf(classifyInputs)) {
-        if (!chunk.some((flow) => unresolved.has(flow.id))) continue
-        const stored = await getCacheEntry(repoRoot, WORLD_CLASSIFY_CACHE_NAME,
-          createHash('sha256').update(`${LEGACY_WORLD_CLASSIFY_PROMPT_FINGERPRINT}\0${JSON.stringify(chunk)}`).digest('hex'))
-        const cached = WorldClassifySchema.safeParse(stored)
-        if (!cached.success) continue
-        const mutators = new Set(cached.data.mutators)
-        for (const flow of chunk) {
-          if (!unresolved.delete(flow.id)) continue
-          await record(flow, mutators.has(flow.id))
-        }
-      }
-    }
-
     for (const chunk of chunksOf([...unresolved.values()])) {
       const known = new Set(chunk.map((f) => f.id))
       let settled = false
@@ -2087,7 +2035,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       resolvedEntry: resolvedEntryMemo,
       displayEntry: recipe.entry,
       inputsFingerprint: groundInputsFingerprint(repoRoot, recipe),
-      legacyRecipeFingerprint: recipeFingerprint,
       recipeEnv: recipe.env,
       onProbesPlanned: (n) => {
         groundPlanned += n
@@ -2933,19 +2880,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         // The shared catalog, recorded per task: what this session is served is
         // what its flow's settle compare folds.
         const reads = task.surface === 'web' ? readLogFor(ref) : undefined
-        const keyFingerprints = flowWorkerKeyFingerprints({
+        const interfaceKeyFingerprints = flowWorkerKeyFingerprints({
           assignment: realizationAssignmentFingerprint(task.plan),
           interfaces: task.plan.interfaces.map((j) => j.fingerprint),
           // The web arm folds what the session is HANDED, not the whole catalog
           // it may search: one unrelated screen's readables moving used to
           // re-key every web flow.
           ...(task.surface === 'web'
-            ? {
-                web: {
-                  handed: webAuthorKeyMaterial(authorCatalog, task.plan.interfaces, task.work.flow, mapped.resources),
-                  catalog: authorCatalog.fingerprint,
-                },
-              }
+            ? { webHanded: webAuthorKeyMaterial(authorCatalog, task.plan.interfaces, task.work.flow, mapped.resources) }
             : {}),
         })
         return {
@@ -2965,12 +2907,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             : {}),
           cacheMaterial: {
             flowFingerprint: task.work.flow.fingerprint,
-            interfaceFingerprints: keyFingerprints.fingerprints,
-            legacyInterfaceFingerprints: keyFingerprints.legacyFingerprints,
+            interfaceFingerprints: interfaceKeyFingerprints,
             recipeSlice: recipeSliceOf(task.surface),
             roster: seedRoster,
             preparations: preparationsOffer,
-            recipeFingerprint,
             mode: editMode ? 'edit' : 'scratch',
             priorShas: priorScenarios.map((p) => sha256Hex(p.yaml)),
           },

@@ -14,7 +14,6 @@
  */
 
 import fs from 'node:fs';
-import { LEGACY_ADJUDICATE_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { defineSessionKind, type SessionBudget, type SessionDef } from '@truecourse/agent-loop';
@@ -118,20 +117,10 @@ export function scenarioBehaviorHash(scenario: GuardScenario | undefined): strin
 /** The verdict cache key — see the module note. Exported for the estimate,
  *  which probes the SAME entries the run would (never a parallel guess). */
 export function adjudicationCacheKey(item: AdjudicationItem): string {
-  return adjudicationKeyOver(`adjudicate-v${ADJUDICATE_STAGE_VERSION}`, item);
-}
-
-/** {@link adjudicationCacheKey} as it was computed while the prompt was in it —
- *  the key a miss falls back to. Delete with the legacy hash. */
-export function adjudicationLegacyCacheKey(item: AdjudicationItem): string {
-  return adjudicationKeyOver(LEGACY_ADJUDICATE_PROMPT_FINGERPRINT, item);
-}
-
-function adjudicationKeyOver(stage: string, item: AdjudicationItem): string {
   return createHash('sha256')
     .update(
       [
-        stage,
+        `adjudicate-v${ADJUDICATE_STAGE_VERSION}`,
         item.flowId ?? '',
         item.surface,
         String(item.step),

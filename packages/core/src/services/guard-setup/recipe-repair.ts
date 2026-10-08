@@ -27,10 +27,10 @@
  * before. A fold-verify failure fails the run with the structured reason — the
  * session is not re-entered this run; resume is the next run's path.
  *
- * CACHE: a DERIVED proposal keeps the legacy `guard/recipe` name AND key
- * (`recipeCacheKey(inputsFingerprint, composeProject)`), via
- * `cachedSessionOutcome` — a proposal the one-shot era settled stays a hit, and
- * verification always re-runs on hits, today's semantics exactly. A repair of a
+ * CACHE: a DERIVED proposal keeps the one-shot path's `guard/recipe` name AND
+ * key (`recipeCacheKey(inputsFingerprint, composeProject)`), via
+ * `cachedSessionOutcome` — a proposal the one-shot path settled is a hit, and
+ * verification always re-runs on hits. A repair of a
  * standing recipe keys on that recipe plus the situation instead
  * (`recipeRepairCacheKey`), so an outcome can never be replayed against a
  * recipe or a failure it does not describe. The run's compose project is part

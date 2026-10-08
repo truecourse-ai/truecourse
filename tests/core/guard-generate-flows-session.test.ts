@@ -48,7 +48,6 @@ import {
   FLOWS_SESSION_KIND,
   FLOWS_SESSION_PROMPT_FINGERPRINT,
   FLOWS_STAGE_VERSION,
-  flowsSessionLegacyCacheKey,
   FLOWS_SESSION_SYSTEM_PROMPT,
   flowSetRefusalReason,
   flowsEpicSessionBriefing,
@@ -602,9 +601,6 @@ describe('the session cache keys', () => {
       `flows-v${FLOWS_STAGE_VERSION}::${AREA.areaId}::${sha(flowAreaClaimsMaterial(AREA))}::${sha(flowAreaOutlinesMaterial(AREA))}`,
     )
     expect(flowsSessionCacheKey(AREA)).toBe(expected)
-    // The old key stays computable, so a synthesized area is not re-synthesized
-    // on the way over.
-    expect(flowsSessionLegacyCacheKey(AREA)).not.toBe(expected)
   })
 
   it('is the same key whatever the existing flows are — they supply identity, not an answer', () => {

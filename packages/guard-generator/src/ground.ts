@@ -21,7 +21,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
-import { getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import { createSandbox, executeStep, flowRecipeSliceFingerprint, recipeFingerprintComponents, type Recipe, type StepCapture } from '@truecourse/guard-runner'
 
 export const GROUND_CACHE_NAME = 'guard/ground'
@@ -358,9 +358,6 @@ export interface CaptureProbesOptions {
   displayEntry: readonly string[]
   /** {@link groundInputsFingerprint} — the cache key's stable component. */
   inputsFingerprint: string
-  /** The whole recipe fingerprint, for the OLD key a miss falls back to.
-   *  Delete with the legacy hash. */
-  legacyRecipeFingerprint: string
   recipeEnv?: Record<string, string>
   /** Test seam; production uses {@link defaultProbeExecutor}. */
   exec?: ProbeExecutor
@@ -379,12 +376,7 @@ export async function captureProbes(opts: CaptureProbesOptions): Promise<ProbeTr
   return Promise.all(
     opts.probes.map(async (argv) => {
       const key = groundCacheKey(opts.inputsFingerprint, argv)
-      const cached = await getCacheEntryOrLegacy(
-        opts.repoRoot,
-        GROUND_CACHE_NAME,
-        key,
-        groundCacheKey(opts.legacyRecipeFingerprint, argv),
-      )
+      const cached = await getCacheEntry(opts.repoRoot, GROUND_CACHE_NAME, key)
       if (cached) {
         const parsed = ProbeTranscriptSchema.safeParse(cached)
         if (parsed.success) {
@@ -411,9 +403,6 @@ export interface GroundProbesOptions {
   displayEntry: readonly string[]
   /** {@link groundInputsFingerprint} — the cache key's stable component. */
   inputsFingerprint: string
-  /** The whole recipe fingerprint, for the OLD key a miss falls back to.
-   *  Delete with the legacy hash. */
-  legacyRecipeFingerprint: string
   recipeEnv?: Record<string, string>
   /** Test seam; production uses {@link defaultProbeExecutor}. */
   exec?: ProbeExecutor
@@ -449,7 +438,6 @@ export async function groundProbes(opts: GroundProbesOptions): Promise<ProbeTran
       resolvedEntry: opts.resolvedEntry,
       displayEntry: opts.displayEntry,
       inputsFingerprint: opts.inputsFingerprint,
-      legacyRecipeFingerprint: opts.legacyRecipeFingerprint,
       recipeEnv: opts.recipeEnv,
       exec: opts.exec,
       onProbeCaptured: opts.onProbeCaptured,

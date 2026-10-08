@@ -21,7 +21,7 @@ import { buildAuthorUserPrompt } from '../../packages/guard-generator/src/prompt
 import type { FlowWorkerTask } from '../../packages/guard-generator/src/generate.js'
 import { createGuardGenerateSessionSeams } from '../../packages/core/src/services/guard-generate/run.js'
 import { FLOWS_SESSION_CACHE_NAME, flowsSessionCacheKey } from '../../packages/core/src/services/guard-generate/flows.js'
-import { CachedWorkerEntrySchema, flowWorkerCacheKey, flowWorkerPromptFingerprint } from '../../packages/core/src/services/guard-generate/flow-worker.js'
+import { CachedWorkerEntrySchema, flowWorkerCacheKey } from '../../packages/core/src/services/guard-generate/flow-worker.js'
 import { authoringFixture } from '../fixtures/guard-authoring-benchmark/fixture.js'
 import {
   claimsBy,
@@ -133,7 +133,7 @@ describe('author-only changes retain upstream cache compatibility', () => {
     expect(material(own)).not.toBe(material(f.resources))
 
     const task = (surface: 'cli' | 'api' | 'web', web: string): FlowWorkerTask => ({ surface,
-      cacheMaterial: { flowFingerprint: 'same-flow', recipeFingerprint: 'same-recipe',
+      cacheMaterial: { flowFingerprint: 'same-flow',
         interfaceFingerprints: ['matched-interface', ...(surface === 'web' ? [web] : [])], mode: 'scratch', priorShas: [] } } as unknown as FlowWorkerTask)
     expect(flowWorkerCacheKey(task('web', material(unrelated)))).toBe(flowWorkerCacheKey(task('web', material(f.resources))))
     expect(flowWorkerCacheKey(task('web', material(own)))).not.toBe(flowWorkerCacheKey(task('web', material(f.resources))))
@@ -141,7 +141,6 @@ describe('author-only changes retain upstream cache compatibility', () => {
       // Only web consumes the catalog dependency. The actual worker helper
       // cannot accidentally include a catalog supplied on another surface.
       expect(flowWorkerCacheKey(task(surface, material(own)))).toBe(flowWorkerCacheKey(task(surface, material(f.resources))))
-      expect(flowWorkerPromptFingerprint(surface)).not.toBe(flowWorkerPromptFingerprint('web'))
     }
     const cached = { outcome: { kind: 'settled', scenarioYamlSha: 'sha', expectedReds: [] }, scenarioYaml: 'yaml', reviews: [] }
     expect(CachedWorkerEntrySchema.safeParse(cached).success).toBe(true)

@@ -38,7 +38,7 @@ import {
   type CatalogDraft,
   type GuardSetupSessionContext,
 } from '../../packages/core/src/services/guard-setup/index.js';
-import { LEGACY_DEPENDENCY_CATALOG_PROMPT_FINGERPRINT } from '../../packages/core/src/services/legacy-prompt-fingerprints.js';
+import { CATALOG_STAGE_VERSION } from '../../packages/core/src/services/guard-setup/dependency-catalog.js';
 import { memoryPersistence, outcome, stubDriver, toolResult } from './spec-scan-session-stub.js';
 import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-cache'
 
@@ -574,11 +574,9 @@ describe('buildCatalogSession', () => {
     expect(fs.readFileSync(guardSetupFindingsPath(r), 'utf-8')).toBe(ledger);
   });
 
-  // A pre-seeded entry under the key the prompt fingerprint once formed is a
-  // hit: that legacy key is the one a miss falls back to.
   it('reads a pre-seeded cache entry under `guard/dependency-catalog`', async () => {
     const r = repo();
-    const key = keyFor(LEGACY_DEPENDENCY_CATALOG_PROMPT_FINGERPRINT, 'fp-1');
+    const key = keyFor(`catalog-v${CATALOG_STAGE_VERSION}`, 'fp-1');
     await setCacheEntry(r, DEPENDENCY_CATALOG_CACHE_NAME, key, {
       entries: [{ name: 'seeded', class: 'seedable', evidence: 'pre-seeded' }],
       findings: [],
@@ -608,10 +606,10 @@ describe('buildCatalogSession', () => {
   });
 });
 
-/** The seam's own key: sha256(promptFingerprint :: step fingerprint). */
-function keyFor(promptFingerprint: string, stepFingerprint: string): string {
+/** The seam's own key: sha256(stage :: step fingerprint). */
+function keyFor(stage: string, stepFingerprint: string): string {
   return createHash('sha256')
-    .update(`${promptFingerprint}::${stepFingerprint}`)
+    .update(`${stage}::${stepFingerprint}`)
     .digest('hex');
 }
 

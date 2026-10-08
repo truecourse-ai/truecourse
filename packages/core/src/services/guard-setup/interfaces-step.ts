@@ -51,7 +51,6 @@ import type {
 import {
   authoringViewsMoved,
   canObserveLiveScreens,
-  computeRecipeFingerprint,
   authoringRecipeContract,
   guardInterfacesPath,
   recipeContractFingerprint,
@@ -346,7 +345,6 @@ async function runReconcile(
     // The cli disputes are settled by running the program, which the seed
     // never touches: the contract as it stood before the seed.
     recipeContract: recipeContractFingerprint(input.repoRoot, 'seed'),
-    legacyRecipeFingerprint: computeRecipeFingerprint(input.repoRoot),
     driver: async () => {
       acquired = await context.acquire();
       return acquired.driver;

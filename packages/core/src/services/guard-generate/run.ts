@@ -37,7 +37,7 @@ import type {
   SessionOutcome,
   SessionPersistence,
 } from '@truecourse/agent-loop'
-import { getCacheEntry, getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import {
   isCreditsExhausted,
   settledScenariosOf,
@@ -78,11 +78,9 @@ import {
   flowSetRefusalReason,
   flowsEpicSessionBriefing,
   flowsEpicSessionCacheKey,
-  flowsEpicSessionLegacyCacheKey,
   flowsEpicSessionDef,
   flowsSessionBriefing,
   flowsSessionCacheKey,
-  flowsSessionLegacyCacheKey,
   flowsSessionDef,
   flowsSessionWorkItem,
 } from './flows.js'
@@ -93,7 +91,6 @@ import {
   FLOW_WORKER_SESSION_KIND,
   cacheableWorkerOutcome,
   flowWorkerCacheKey,
-  flowWorkerLegacyCacheKeys,
   flowWorkerSessionDef,
   flowWorkerSystemPrompt,
   type CachedWorkerEntry,
@@ -201,9 +198,6 @@ interface CachedPoolOptions<TItem, TOutcome> {
   items: readonly TItem[]
   workItem(item: TItem): string
   cacheKey(item: TItem): string
-  /** The keys this kind computed before its formula changed, newest first; a
-   *  miss under `cacheKey` reads them in turn. Delete with the legacy hash. */
-  legacyCacheKeys?(item: TItem): readonly string[]
   schema: z.ZodType<TOutcome>
   session(item: TItem): SessionDef<TOutcome>
   briefing(item: TItem): string
@@ -287,7 +281,6 @@ async function runCachedGuardPool<TItem, TOutcome>(
       repoRoot: opts.repoRoot,
       cacheName: opts.cacheName,
       key: opts.cacheKey(item),
-      ...(opts.legacyCacheKeys ? { legacyKeys: opts.legacyCacheKeys(item) } : {}),
       schema: opts.schema,
       run: () => {
         toRun.push(item)
@@ -448,7 +441,6 @@ export function createGuardGenerateSessionSeams(
       items: input.areas,
       workItem: (area) => flowsSessionWorkItem(area.areaId, area.chunk),
       cacheKey: (area) => flowsSessionCacheKey(area),
-      legacyCacheKeys: (area) => [flowsSessionLegacyCacheKey(area)],
       schema: FlowSetSchema,
       session: (area) => flowsSessionDef({ area, universe, prior: input.prior?.get(flowAreaKey(area)) ?? [] }),
       briefing: (area) => flowsSessionBriefing(area, input.grounding, input.prior?.get(flowAreaKey(area)) ?? []),
@@ -493,7 +485,6 @@ export function createGuardGenerateSessionSeams(
       items: [FLOWS_EPIC_WORK_ITEM],
       workItem: () => FLOWS_EPIC_WORK_ITEM,
       cacheKey: () => flowsEpicSessionCacheKey(input.digests),
-      legacyCacheKeys: () => [flowsEpicSessionLegacyCacheKey(input.digests)],
       schema: EpicSynthesisSchema,
       session: () => flowsEpicSessionDef({ digests: input.digests, claims: input.claims, prior: input.prior ?? [] }),
       briefing: () => flowsEpicSessionBriefing(input.digests, input.prior ?? []),
@@ -558,12 +549,7 @@ export function createGuardGenerateSessionSeams(
         // rejected scenario, and re-serving it would re-flag and treadmill.
         const hit = task.taint
           ? null
-          : await getCacheEntryOrLegacy(
-              opts.repoRoot,
-              FLOW_WORKER_CACHE_NAME,
-              flowWorkerCacheKey(task),
-              ...flowWorkerLegacyCacheKeys(task),
-            ).catch(() => null)
+          : await getCacheEntry(opts.repoRoot, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task)).catch(() => null)
         if (hit !== null) {
           const parsed = CachedWorkerEntrySchema.safeParse(hit)
           if (parsed.success) {

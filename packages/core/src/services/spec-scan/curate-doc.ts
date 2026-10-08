@@ -30,7 +30,6 @@ import {
 } from '@truecourse/spec-consolidator'
 import { windowText } from '@truecourse/shared'
 import { promptFingerprint } from '../agent/session-cache.js'
-import { LEGACY_CURATE_DOC_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import {
   docWindows,
   corpusVocabTool,
@@ -162,8 +161,8 @@ One object: { "keep": true|false, "reason": "short explanation", "subject": "thi
 
 "subject" is always reported. When it is "different-product", "keep" MUST be false and "category" MUST be "third-party". "category" is REQUIRED when keep is false and OMITTED when keep is true. The reason is shown to the user in the dashboard — be specific ("describes a different product (ServiceTitan)", "superseded by capacity-ml-plan-v3") so they can verify the call.`
 
-/** The prompt half of every curate-doc cache key — exported for the step-7
- *  estimate rework, which must probe the REAL keys. */
+/** The prompt's fingerprint, a diagnostic: the cache key folds
+ *  {@link CURATE_DOC_STAGE_VERSION} instead. */
 export const CURATE_DOC_PROMPT_FINGERPRINT = promptFingerprint(CURATE_DOC_SYSTEM_PROMPT)
 
 /**
@@ -211,44 +210,13 @@ export function curateDocCacheKey(
   input: { identity: RepoIdentity | null; doc: Pick<DocCandidate, 'path' | 'contentHash'> },
   extraParts: readonly string[] = [],
 ): string {
-  return curateDocKeyOver(
+  return scanCacheKey([
     `curate-doc-v${CURATE_DOC_STAGE_VERSION}`,
     identityFingerprint(input.identity),
-    input.doc,
-    extraParts,
-  )
-}
-
-/**
- * {@link curateDocCacheKey} under the formula that came before it: the same
- * identity while the prompt's fingerprint, not the stage version, was in the
- * key. A miss reads it. Curate-doc's cache IS the scan's skip, so without this
- * a changed key re-curates every document once. A workspace identity has no
- * older form to fall back to: its subject moved from the connected repositories
- * to the sentence the workspace states, and its documents re-judge once.
- * Delete with the legacy hash.
- */
-export function curateDocLegacyCacheKeys(
-  input: { identity: RepoIdentity | null; doc: Pick<DocCandidate, 'path' | 'contentHash'> },
-  extraParts: readonly string[] = [],
-): string[] {
-  return [
-    curateDocKeyOver(
-      LEGACY_CURATE_DOC_PROMPT_FINGERPRINT,
-      identityFingerprint(input.identity),
-      input.doc,
-      extraParts,
-    ),
-  ]
-}
-
-function curateDocKeyOver(
-  stage: string,
-  identity: string,
-  doc: Pick<DocCandidate, 'path' | 'contentHash'>,
-  extraParts: readonly string[],
-): string {
-  return scanCacheKey([stage, identity, doc.path, doc.contentHash, ...extraParts])
+    input.doc.path,
+    input.doc.contentHash,
+    ...extraParts,
+  ])
 }
 
 export interface CurateDocSessionInput {

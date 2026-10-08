@@ -100,8 +100,7 @@ import { recordAuthoringLedger, registerSharedPlaces, retireAuthoredPlaces, writ
 /**
  * Where a screen's accepted fragment is stored, keyed on the digest of what its
  * session ran over — the same value its ledger row records — and on whether the
- * session had the live screen ({@link fragmentCacheKey}). There is no legacy
- * key: authoring had no cache before this one.
+ * session had the live screen ({@link fragmentCacheKey}).
  */
 export const INTERFACE_AUTHOR_CACHE_NAME = 'guard/interfaces-author'
 

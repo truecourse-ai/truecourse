@@ -29,7 +29,6 @@ import { z } from 'zod'
 import type { GuardDriverId, GuardScenario } from '@truecourse/shared'
 import { placeholderNames } from './api/vars.js'
 import {
-  computeRecipeFingerprint,
   hashableRecipeText,
   resolveApiServers,
   resolvePreparationScripts,
@@ -378,18 +377,6 @@ const PREPARATION_SEMANTICS_VERSION = 'guard-preparations:5-qualified-observatio
 export function computePreparationFingerprint(repoRoot: string): string {
   const hash = crypto.createHash('sha256').update(`${PREPARATION_SEMANTICS_VERSION}\n`)
     .update(recipeContractFingerprint(repoRoot))
-  for (const chunk of preparationSourceMaterial(repoRoot)) hash.update(chunk)
-  return hash.digest('hex')
-}
-
-/**
- * {@link computePreparationFingerprint} as it was computed before the slices,
- * over the whole recipe fingerprint — the one check a settled row with no
- * components gets. Delete with the legacy hash.
- */
-export function legacyPreparationFingerprint(repoRoot: string): string {
-  const hash = crypto.createHash('sha256').update(`${PREPARATION_SEMANTICS_VERSION}\n`)
-    .update(computeRecipeFingerprint(repoRoot))
   for (const chunk of preparationSourceMaterial(repoRoot)) hash.update(chunk)
   return hash.digest('hex')
 }

@@ -36,16 +36,6 @@ import {
   type RefResolutionContext,
 } from '@truecourse/shared/openapi'
 import { nodeRefContext } from '@truecourse/shared/openapi-node'
-import {
-  LEGACY_MATCH_PROMPT_FINGERPRINT,
-  LEGACY_GENERATE_PROMPT_FINGERPRINT,
-  LEGACY_GENERATE_API_PROMPT_FINGERPRINT,
-  LEGACY_GENERATE_WEB_PROMPT_FINGERPRINT,
-  LEGACY_FIDELITY_PROMPT_FINGERPRINT,
-  LEGACY_RETIRED_EXTRACT_PROMPT_FINGERPRINT,
-  LEGACY_RETIRED_FLOWS_PROMPT_FINGERPRINT,
-  LEGACY_RETIRED_FLOWS_EPIC_PROMPT_FINGERPRINT,
-} from './legacy-prompt-fingerprints.js'
 import { securityFingerprintForSection } from './openapi-security.js'
 import { corpusFilePath } from '@truecourse/shared/work-tree'
 
@@ -188,66 +178,13 @@ export function corpusOpenApiDocs(repoRoot: string): { doc: string; content: str
   return out
 }
 
-/**
- * THE LEGACY FLOW SETTLE HASH — what every manifest row written before named
- * components was stamped with: the flow fingerprint, the interfaces it grounds
- * on, the whole recipe fingerprint and the live prompt fingerprints, which are
- * frozen as literals here so a prompt edited since cannot make an old row miss.
- * The bound sections' text keys it also folded are gone, so every such row
- * misses once and re-authors.
- *
- * It has exactly one job left. A stored row with a hash and NO components is
- * checked against it ONCE: a match settles the flow and writes its components,
- * a miss re-authors, which is what the same run would have done without any of
- * this. Nothing new is ever stamped with it.
- *
- * Delete it, and the frozen literals, once no stored manifest lacks components.
- */
-/** The review-policy version the retired formula folded, frozen with the prompt fingerprints. */
-const LEGACY_REVIEW_POLICY_VERSION = '5'
-
-/** The resolved prerequisite state the retired formula folded in its interface
- *  bag: no flow carried a prerequisite by then, so every row folded this. */
-const LEGACY_PREREQUISITE_STATE = '[]'
-
-export function legacyFlowGenerationInputsHash(input: {
-  flowFingerprint: string
-  /** Fingerprints of the planned interfaces and any browser setup catalog offered. */
-  interfaceFingerprints: readonly string[]
-  recipeFingerprint: string
-}): string {
-  const parts = [
-    input.flowFingerprint,
-    [...input.interfaceFingerprints].sort().join(''),
-    input.recipeFingerprint,
-    LEGACY_RETIRED_EXTRACT_PROMPT_FINGERPRINT,
-    LEGACY_RETIRED_FLOWS_PROMPT_FINGERPRINT,
-    LEGACY_RETIRED_FLOWS_EPIC_PROMPT_FINGERPRINT,
-    LEGACY_MATCH_PROMPT_FINGERPRINT,
-    LEGACY_GENERATE_PROMPT_FINGERPRINT,
-    LEGACY_GENERATE_API_PROMPT_FINGERPRINT,
-    LEGACY_GENERATE_WEB_PROMPT_FINGERPRINT,
-    LEGACY_FIDELITY_PROMPT_FINGERPRINT,
-    LEGACY_REVIEW_POLICY_VERSION,
-  ]
-  return 'sha256:' + createHash('sha256').update(parts.join('\0')).digest('hex')
-}
-
-/**
- * A flow's settle inputs, before they are named. Every field becomes one
- * component of {@link flowGenerationInputComponents}; the legacy hash folds
- * several of them as one bag, which is why the bag and the record are built
- * from the same parts.
- */
+/** A flow's settle inputs, before {@link flowGenerationInputComponents} names them. */
 export interface FlowGenerationInputParts {
   flowFingerprint: string
   /** Each plan's realization-assignment fingerprint. */
   assignmentFingerprints: readonly string[]
   /** The planned interfaces' fingerprints. */
   interfaceFingerprints: readonly string[]
-  /** The whole web catalog's fingerprint, when the flow has a web plan — for
-   *  {@link legacyFlowGenerationInputsHash}'s bag alone. */
-  webCatalogFingerprint?: string
   /** Each catalog entry the flow's web session was served, with its CURRENT
    *  fingerprint. Present (possibly empty) for a flow with a web plan. */
   webCatalogReads?: readonly string[]
@@ -263,16 +200,6 @@ export interface FlowGenerationInputParts {
   roster: string
   /** The preparation profiles those scenarios name, with their script bytes. */
   preparation: string
-}
-
-/** The `interfaceFingerprints` bag {@link legacyFlowGenerationInputsHash} folds. */
-export function flowInterfaceFingerprintBag(parts: FlowGenerationInputParts): string[] {
-  return [
-    ...parts.assignmentFingerprints,
-    ...parts.interfaceFingerprints,
-    ...(parts.webCatalogFingerprint ? [parts.webCatalogFingerprint] : []),
-    LEGACY_PREREQUISITE_STATE,
-  ]
 }
 
 /**
@@ -343,26 +270,21 @@ export interface FlowSettleCheck {
     | undefined
   /** The components the CURRENT scheme computes for this flow. */
   components: Readonly<Record<string, string>>
-  /** {@link legacyFlowGenerationInputsHash} over the current inputs — the one
-   *  check a row that predates components gets. */
-  legacyHash: string
 }
 
 /**
  * Does this flow still hold? A row WITH components is compared name by name:
  * `moved` names the ones that differ, and an empty list settles the flow. A row
- * with a hash and no components is compared against the legacy hash once — it
- * names no input, so `moved` is `null` and the report counts it unrecorded. A
- * flow with no stored hash was never settled and is work whatever else is true.
+ * without a hash, or with a hash and no components, is not settled: it names no
+ * input, so `moved` is `null` and the report counts it unrecorded.
  */
 export function flowSettleVerdict(check: FlowSettleCheck): { settled: boolean; moved: string[] | null } {
   const prior = check.prior
-  if (!prior || prior.generationInputsHash === null) return { settled: false, moved: null }
-  if (prior.generationInputs) {
-    const moved = movedSchemeInputs(prior.generationInputs, check.components)
-    return { settled: moved.length === 0, moved }
+  if (!prior || prior.generationInputsHash === null || !prior.generationInputs) {
+    return { settled: false, moved: null }
   }
-  return { settled: prior.generationInputsHash === check.legacyHash, moved: null }
+  const moved = movedSchemeInputs(prior.generationInputs, check.components)
+  return { settled: moved.length === 0, moved }
 }
 
 /** Whether a corpus exists — the corpus is generation's only doc authority. */

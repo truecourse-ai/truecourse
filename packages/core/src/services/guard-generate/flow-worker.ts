@@ -42,12 +42,6 @@ import {
   type FlowWorkerTask,
   type WorkerFidelityJudge,
 } from '@truecourse/guard-generator'
-import {
-  LEGACY_FLOW_WORKER_API_PROMPT_FINGERPRINT,
-  LEGACY_FLOW_WORKER_CLI_PROMPT_FINGERPRINT,
-  LEGACY_FLOW_WORKER_WEB_PROMPT_FINGERPRINT,
-} from '../legacy-prompt-fingerprints.js'
-
 export const FLOW_WORKER_SESSION_KIND = 'guard-generate.flow-worker'
 
 /** Cache name shared with the one-shot author stage (`guard/generate`); the
@@ -169,11 +163,6 @@ const SYSTEM_PROMPT_BY_SURFACE: Partial<Record<GuardDriverId, string>> = {
   api: FLOW_WORKER_API_SYSTEM_PROMPT,
   web: FLOW_WORKER_WEB_SYSTEM_PROMPT,
 }
-const LEGACY_PROMPT_FINGERPRINT_BY_SURFACE: Partial<Record<GuardDriverId, string>> = {
-  cli: LEGACY_FLOW_WORKER_CLI_PROMPT_FINGERPRINT,
-  api: LEGACY_FLOW_WORKER_API_PROMPT_FINGERPRINT,
-  web: LEGACY_FLOW_WORKER_WEB_PROMPT_FINGERPRINT,
-}
 
 /**
  * THE FLOW-WORKER STAGE'S VERSION, bumped by hand. A cached scenario was
@@ -188,15 +177,8 @@ export function flowWorkerSystemPrompt(surface: GuardDriverId): string {
   return SYSTEM_PROMPT_BY_SURFACE[surface] ?? FLOW_WORKER_CLI_SYSTEM_PROMPT
 }
 
-/** The frozen prompt fingerprint a surface's legacy worker cache keys fold,
- *  so entries under those keys stay readable whatever the live prompt says. */
-export function flowWorkerPromptFingerprint(surface: GuardDriverId): string {
-  return LEGACY_PROMPT_FINGERPRINT_BY_SURFACE[surface] ?? LEGACY_FLOW_WORKER_CLI_PROMPT_FINGERPRINT
-}
-
 /**
- * The task's cache key: `authorCacheKey`'s exact recipe (`workerCacheKey` is
- * that recipe parameterized) with the stage version in the prompt's slot, so a
+ * The task's cache key: {@link workerCacheKey} under this stage's version, so a
  * prompt edit re-authors nothing.
  */
 export function flowWorkerCacheKey(task: FlowWorkerTask): string {
@@ -212,21 +194,6 @@ export function flowWorkerCacheKey(task: FlowWorkerTask): string {
     // scratch hit and vice versa.
     m.mode === 'edit' ? { priorShas: m.priorShas } : undefined,
   )
-}
-
-/**
- * {@link flowWorkerCacheKey} under the one formula that shipped before it: the
- * surface's prompt fingerprint over the interface bag as it was then and the
- * whole recipe fingerprint. A miss reads it. Delete with the legacy hash.
- */
-export function flowWorkerLegacyCacheKeys(task: FlowWorkerTask): string[] {
-  const m = task.cacheMaterial
-  const legacyBag = m.legacyInterfaceFingerprints ?? m.interfaceFingerprints
-  const edit = m.mode === 'edit' ? { priorShas: m.priorShas } : undefined
-  return [
-    workerCacheKey(flowWorkerPromptFingerprint(task.surface), { fingerprint: m.flowFingerprint }, task.surface,
-      legacyBag, m.recipeFingerprint, edit),
-  ]
 }
 
 /**

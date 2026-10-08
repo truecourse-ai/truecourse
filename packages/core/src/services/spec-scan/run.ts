@@ -126,7 +126,6 @@ import {
   DocVerdictSchema,
   curateDocBriefing,
   curateDocCacheKey,
-  curateDocLegacyCacheKeys,
   curateDocSessionDef,
   curateDocWorkItem,
   docOriginCachePart,
@@ -143,7 +142,6 @@ import {
   collectAreaVocab,
   settleAreasBriefing,
   settleAreasCacheKey,
-  settleAreasLegacyCacheKey,
   settleAreasGate,
   settleAreasSessionDef,
   type AreaSettlement,
@@ -466,9 +464,6 @@ interface CachedPoolOptions<TItem, TOutcome> {
   items: readonly TItem[]
   workItem(item: TItem): string
   cacheKey(item: TItem): string
-  /** The keys this kind computed before its formula changed, newest first; a
-   *  miss under `cacheKey` reads them in turn. Delete with the legacy hash. */
-  legacyCacheKeys?(item: TItem): readonly string[]
   schema: z.ZodType<TOutcome>
   session(item: TItem): SessionDef<TOutcome>
   briefing(item: TItem): string
@@ -538,7 +533,6 @@ async function runCachedSessionPool<TItem, TOutcome>(
       repoRoot: opts.repoRoot,
       cacheName: opts.cacheName,
       key: opts.cacheKey(item),
-      ...(opts.legacyCacheKeys ? { legacyKeys: opts.legacyCacheKeys(item) } : {}),
       schema: opts.schema,
       run: () => {
         toRun.push(item)
@@ -963,7 +957,6 @@ export async function runSpecScanSessions(
     items: curateItems,
     workItem: (doc) => curateDocWorkItem(doc.path),
     cacheKey: (doc) => curateDocCacheKey({ identity, doc }, [...instructionParts, ...originParts(doc)]),
-    legacyCacheKeys: (doc) => curateDocLegacyCacheKeys({ identity, doc }, [...instructionParts, ...originParts(doc)]),
     schema: DocVerdictSchema,
     session: (doc) => curateDocSessionDef({ doc, universe, liveVocab }),
     briefing: (doc) => curateDocBriefing(doc, identity, instructions, originOf(doc), priorTagsByRef.get(doc.path) ?? []),
@@ -1189,7 +1182,6 @@ export async function runSpecScanSessions(
       items: [SETTLE_AREAS_WORK_ITEM],
       workItem: () => SETTLE_AREAS_WORK_ITEM,
       cacheKey: () => settleAreasCacheKey(vocabView, instructionParts),
-      legacyCacheKeys: () => [settleAreasLegacyCacheKey(vocabView, instructionParts)],
       schema: AreaSettlementSchema,
       session: () => settleAreasSessionDef({ vocab: vocabView, universe, prior: priorAreaIds }),
       briefing: () => settleAreasBriefing(vocabView, universe, instructions, priorAreaIds),
