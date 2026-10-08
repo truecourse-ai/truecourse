@@ -49,7 +49,6 @@ import {
   GENERATE_SESSION_STEPS,
   checkEpicSet,
   checkFlowSet,
-  flowSectionKey,
   EpicSynthesisSchema,
   FlowSetSchema,
   type FlowsAreaSessionResult,
@@ -87,7 +86,6 @@ import {
   flowsSessionLegacyCacheKey,
   flowsSessionDef,
   flowsSessionWorkItem,
-  type FlowsCheckerContext,
 } from './flows.js'
 import {
   CachedWorkerEntrySchema,
@@ -443,11 +441,6 @@ export function createGuardGenerateSessionSeams(
 
   const flowsAreaSession: FlowsAreaSessionSeam = async (input) => {
     const universe = buildGuardDocUniverse(input.docs ?? [])
-    const checker: FlowsCheckerContext = {
-      sectionKeys: new Set(
-        (input.docs ?? []).flatMap((d) => d.sections.map((s) => flowSectionKey(s.doc, s.anchor))),
-      ),
-    }
     const byArea = new Map<string, FlowsAreaSessionResult>()
     const summary = await runCachedGuardPool({
       repoRoot: opts.repoRoot,
@@ -458,7 +451,7 @@ export function createGuardGenerateSessionSeams(
       cacheKey: (area) => flowsSessionCacheKey(area),
       legacyCacheKeys: (area) => [flowsSessionLegacyCacheKey(area)],
       schema: FlowSetSchema,
-      session: (area) => flowsSessionDef({ area, universe, checker, prior: input.prior?.get(flowAreaKey(area)) ?? [] }),
+      session: (area) => flowsSessionDef({ area, universe, prior: input.prior?.get(flowAreaKey(area)) ?? [] }),
       briefing: (area) => flowsSessionBriefing(area, input.grounding, input.prior?.get(flowAreaKey(area)) ?? []),
       driver: acquire,
       ...(replayOnly('flows') ? { cacheOnly: 'flows' as const } : {}),
@@ -467,7 +460,7 @@ export function createGuardGenerateSessionSeams(
       // The fold-side refusal (never trust the transcript): the SAME checker
       // `check_flows` ran in-session, so a draft that checked clean lands clean.
       rejectOutput: (area, output) =>
-        flowSetRefusalReason(checkFlowSet(output, { area, sectionKeys: checker.sectionKeys, prior: input.prior?.get(flowAreaKey(area)) ?? [] })),
+        flowSetRefusalReason(checkFlowSet(output, { area, prior: input.prior?.get(flowAreaKey(area)) ?? [] })),
       fold: (area, result) => {
         if (result.outcome.status === 'completed') {
           byArea.set(flowAreaKey(area), {

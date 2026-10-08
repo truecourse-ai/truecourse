@@ -50,7 +50,6 @@ describe('repository routes', () => {
       },
       summary: { total: 0, pass: 0, fail: 0, stale: 0, orphaned: 0, error: 0 },
       scenarios: [],
-      sections: [],
     };
     const guardFile = guardLatestPath(fixture.repoPath);
     fs.mkdirSync(path.dirname(guardFile), { recursive: true });

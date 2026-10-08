@@ -52,7 +52,7 @@ import {
   type ContextSourceScope,
 } from '@truecourse/core/services/context';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
-import { buildDocSectionIndex } from '@truecourse/guard-runner';
+import { parseDocTree } from '@truecourse/shared';
 import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import { getWorkspaceDecisions } from '@truecourse/core/commands/spec-in-process';
 import { claimWordsByDoc, readGuardClaims } from '@truecourse/core/commands/guard-read';
@@ -474,59 +474,53 @@ export async function readSourceDocuments(
   return { source: view, documents };
 }
 
-/** One section of a document, as its outline lists it. */
+/** One heading of a document, as its outline lists it. */
 export interface DocumentSectionOutline {
-  /** The section's address: what a flow milestone, a claim and a coverage row bind. */
-  anchor: string;
   heading: string;
   level: number;
-  /** First and last line, 1-based and inclusive. */
+  /** First and last line of the text under the heading, 1-based and inclusive. */
   lines: [number, number];
 }
 
-/** One document by its corpus ref: its text and its section outline. */
+/** One document by its corpus ref: its text and its outline. */
 export interface WorkspaceDocument {
   ref: string;
-  /** The whole document, or the named section's text when one was asked for. */
+  /** The whole document, or the asked-for lines of it. */
   content: string;
   sections: DocumentSectionOutline[];
-  /** The section `content` is, when one was asked for. */
-  section?: DocumentSectionOutline;
+  /** The lines `content` is, when a range was asked for. */
+  lines?: [number, number];
 }
 
 /**
- * One document's body by its corpus ref, with its section outline — the same
- * sections a flow milestone and a coverage row bind, derived by the runner's
- * section index. With `section` (an anchor), `content` is that section alone:
- * its heading to the next heading of the same or higher level.
+ * One document's body by its corpus ref, with its outline: each heading and the
+ * lines under it, from the shared document tree. With `lines` (1-based,
+ * inclusive), `content` is that range alone, clamped to the document.
  */
 export async function readWorkspaceDocument(
   org: string,
   ref: string,
-  section?: string,
+  lines?: [number, number],
 ): Promise<WorkspaceDocument> {
   const body = await readContextDocByRef(org, ref);
   if (body === null) throw createAppError(`Doc not found: ${ref}`, 404);
-  const sections: DocumentSectionOutline[] = buildDocSectionIndex(ref, body).sections.map((s) => ({
-    anchor: s.anchor,
+  const tree = parseDocTree(ref, body);
+  const sections: DocumentSectionOutline[] = tree.sections.map((s) => ({
     heading: s.headingText,
     level: s.level,
     lines: [s.startLine, s.endLine],
   }));
-  if (section === undefined) return { ref, content: body, sections };
-  const found = sections.find((s) => s.anchor === section);
-  if (!found) {
-    throw createAppError(
-      `No section "${section}" in ${ref}. Its sections: ${sections.map((s) => s.anchor).join(', ')}.`,
-      404,
-    );
+  if (lines === undefined) return { ref, content: body, sections };
+  const first = Math.max(1, lines[0]);
+  const last = Math.min(tree.lines.length, lines[1]);
+  if (first > last) {
+    throw createAppError(`Lines ${lines[0]}-${lines[1]} are outside ${ref}, which has ${tree.lines.length} lines.`, 404);
   }
-  const [first, last] = found.lines;
   return {
     ref,
-    content: body.split('\n').slice(first - 1, last).join('\n'),
+    content: tree.lines.slice(first - 1, last).join('\n'),
     sections,
-    section: found,
+    lines: [first, last],
   };
 }
 

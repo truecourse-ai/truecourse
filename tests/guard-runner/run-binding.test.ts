@@ -1,8 +1,9 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { runGuard, buildDocSectionIndex, evidenceRunDir, type GuardScenario } from '@truecourse/guard-runner'
-import { makeTempRepo, rmrf, writeRecipe, writeScenario, scenario, sectionBind, staleBind } from './helpers.js'
+import { runGuard, evidenceRunDir } from '@truecourse/guard-runner'
+import type { GuardScenario } from '@truecourse/shared'
+import { makeTempRepo, parseDocTree, rmrf, writeRecipe, writeScenario, scenario, sectionBind, staleBind } from './helpers.js'
 
 const repos: string[] = []
 afterEach(() => {
@@ -24,14 +25,14 @@ function writeDoc(root: string, content: string): void {
   fs.writeFileSync(target, content)
 }
 
-/** A passing scenario (runs `--version`) bound to a doc section by its live identity. */
+/** A passing scenario (runs `--version`) bound to the sentences of a doc section. */
 function boundScenario(id: string, content: string, headingText: string): GuardScenario {
-  const index = buildDocSectionIndex(DOC, content)
-  const section = index.sections.find((s) => s.headingText === headingText)
+  const tree = parseDocTree(DOC, content)
+  const section = tree.sections.find((s) => s.headingText === headingText)
   if (!section) throw new Error(`no section "${headingText}"`)
   return scenario({
     id,
-    binds: [sectionBind(index, section.anchor)],
+    binds: [sectionBind(tree, section.anchor)],
     steps: [{ run: ['--version'], expect: { exit: 0 } }],
   })
 }
@@ -41,7 +42,7 @@ const DOC_V1 = ['# Spec', '', '## Top', 'preamble', '', '### Rate limiting', 'Lo
 )
 
 describe('runGuard — binding resolution', () => {
-  it('executes a scenario whose section matches (green)', async () => {
+  it('executes a scenario whose bound sentences all stand (green)', async () => {
     const r = repo()
     writeRecipe(r)
     writeDoc(r, DOC_V1)
@@ -51,16 +52,15 @@ describe('runGuard — binding resolution', () => {
     if (res.status !== 'ok') throw new Error('expected ok')
     const s = res.latest.scenarios[0]
     expect(s.outcome).toBe('pass')
-    expect(s.remappedTo).toBeUndefined()
     // An executed pass now carries its own evidence transcript.
     expect(s.evidencePath).toBeTruthy()
     expect(res.latest.summary).toMatchObject({ total: 1, pass: 1, stale: 0, orphaned: 0 })
   })
 
-  it('marks a scenario stale when its section text was edited, and never runs it', async () => {
+  it('marks a scenario stale when a bound sentence was edited, and never runs it', async () => {
     const r = repo()
     writeRecipe(r)
-    // Bind against V1, then edit the section body under the same heading.
+    // Bind against V1, then edit the bound sentence under the same heading.
     writeScenario(r, 's.yaml', boundScenario('rate', DOC_V1, 'Rate limiting'))
     writeDoc(r, DOC_V1.replace('after 5 attempts', 'after 10 attempts'))
 
@@ -69,31 +69,27 @@ describe('runGuard — binding resolution', () => {
     const s = res.latest.scenarios[0]
     expect(s.outcome).toBe('stale')
     expect(s.durationMs).toBe(0) // not executed
-    expect(s.currentFingerprint).toMatch(/^sha256:/)
     // A non-executed outcome has nothing to transcribe — no evidence pointer.
     expect(s.evidencePath).toBeUndefined()
     expect(fs.existsSync(evidenceRunDir(r, res.latest.run.runId))).toBe(false)
     expect(res.latest.summary.stale).toBe(1)
   })
 
-  it('remaps and still runs a scenario whose section moved with its text intact', async () => {
+  it('still runs a scenario whose sentences moved under other headings', async () => {
     const r = repo()
     writeRecipe(r)
     // Bind against V1 (Rate limiting under "Top").
     writeScenario(r, 's.yaml', boundScenario('rate', DOC_V1, 'Rate limiting'))
-    // Move the section under a renamed parent — its own slice is byte-identical.
-    const moved = DOC_V1.replace('## Top', '## Other')
-    writeDoc(r, moved)
+    // Rename both headings above the bound sentence — the sentence itself stands.
+    writeDoc(r, DOC_V1.replace('## Top', '## Other').replace('### Rate limiting', '### Throttling'))
 
     const res = await runGuard({ repoRoot: r, skipBuild: true })
     if (res.status !== 'ok') throw new Error('expected ok')
-    const s = res.latest.scenarios[0]
-    expect(s.outcome).toBe('pass')
-    expect(s.remappedTo).toBe('spec/other/rate-limiting')
+    expect(res.latest.scenarios[0].outcome).toBe('pass')
     expect(res.latest.summary).toMatchObject({ pass: 1, stale: 0, orphaned: 0 })
   })
 
-  it('orphans a scenario whose section was removed', async () => {
+  it('marks a scenario stale when its bound sentences were removed from a doc that stands', async () => {
     const r = repo()
     writeRecipe(r)
     writeScenario(r, 's.yaml', boundScenario('rate', DOC_V1, 'Rate limiting'))
@@ -101,10 +97,10 @@ describe('runGuard — binding resolution', () => {
 
     const res = await runGuard({ repoRoot: r, skipBuild: true })
     if (res.status !== 'ok') throw new Error('expected ok')
-    expect(res.latest.scenarios[0].outcome).toBe('orphaned')
-    // An orphaned scenario never runs, so it carries no evidence pointer.
+    expect(res.latest.scenarios[0].outcome).toBe('stale')
+    // A scenario that never ran carries no evidence pointer.
     expect(res.latest.scenarios[0].evidencePath).toBeUndefined()
-    expect(res.latest.summary.orphaned).toBe(1)
+    expect(res.latest.summary).toMatchObject({ stale: 1, orphaned: 0 })
   })
 
   it('orphans a scenario whose bound doc is missing entirely', async () => {
@@ -116,20 +112,22 @@ describe('runGuard — binding resolution', () => {
     const res = await runGuard({ repoRoot: r, skipBuild: true })
     if (res.status !== 'ok') throw new Error('expected ok')
     expect(res.latest.scenarios[0].outcome).toBe('orphaned')
+    expect(res.latest.scenarios[0].evidencePath).toBeUndefined()
+    expect(res.latest.summary.orphaned).toBe(1)
   })
 
   it('mixes executed and non-executed outcomes in one run', async () => {
     const r = repo()
     writeRecipe(r)
     writeDoc(r, DOC_V1)
-    // One matches (green); one binds "spec/top" with a stale fingerprint.
+    // One matches (green); one binds "spec/top" with a sentence the doc no longer holds.
     writeScenario(r, 'ok.yaml', boundScenario('green', DOC_V1, 'Rate limiting'))
     writeScenario(
       r,
       'stale.yaml',
       scenario({
         id: 'stale',
-        binds: [staleBind(sectionBind(buildDocSectionIndex(DOC, DOC_V1), 'spec/top'))],
+        binds: [staleBind(sectionBind(parseDocTree(DOC, DOC_V1), 'spec/top'))],
         steps: [{ run: ['--version'], expect: { exit: 0 } }],
       }),
     )

@@ -9,19 +9,17 @@ import {
 } from '@truecourse/guard-generator'
 
 /** An OpenAPI operation section whose fullText is the canonical slice. */
-function opSection(method: string, path: string, operation: Record<string, unknown>, fingerprint = 'sha256:op'): SectionInput {
+function opSection(method: string, path: string, operation: Record<string, unknown>): SectionInput {
   return {
     doc: 'api/openapi.yaml',
     anchor: `paths/${method}-${path}`,
-    fingerprint,
     headingText: `${method.toUpperCase()} ${path}`,
     level: 0,
+    startLine: 1,
+    ownEndLine: 1,
     ownText: '',
     fullText: canonicalStringify({ method, path, operation }),
     areaTags: [],
-    suppressionFingerprint: '',
-    endpointSchemaFingerprint: '',
-    securityFingerprint: '',
   }
 }
 
@@ -30,15 +28,13 @@ function mdSection(): SectionInput {
   return {
     doc: 'docs/api.md',
     anchor: 'api',
-    fingerprint: 'sha256:md',
     headingText: 'api',
     level: 2,
+    startLine: 1,
+    ownEndLine: 1,
     ownText: 'prose',
     fullText: 'prose',
     areaTags: [],
-    suppressionFingerprint: '',
-    endpointSchemaFingerprint: '',
-    securityFingerprint: '',
   }
 }
 

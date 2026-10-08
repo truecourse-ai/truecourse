@@ -27,7 +27,7 @@ const DOC = 'docs/specs/tasks.md';
 
 const finding = (over: Partial<GuardBirthFinding> = {}): GuardBirthFinding => ({
   doc: DOC,
-  anchor: 'tasks/completing-tasks',
+  claimId: 'claim::docs/specs/tasks.md::completing-tasks',
   title: 'Completing a task reports it done',
   step: 2,
   expected: 'stdout contains “done”',

@@ -38,7 +38,6 @@ vi.mock('../../packages/core/src/services/llm/session-driver.js', () => ({
 import { getCacheEntry } from '@truecourse/llm'
 import { parseDocTree, sentenceKey } from '@truecourse/shared'
 import {
-  collectWorkDocs,
   planGuardWork,
   type FlowSynthesisArea,
   type GuardDoc,
@@ -56,8 +55,8 @@ import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-se
 
 const DOC = 'docs/tasks.md'
 const CONTENT = ['# Tasks', '', '## Creating tasks', '', '`relkit add <title>` creates a task.'].join('\n')
-const ANCHOR = 'tasks/creating-tasks'
 const CLAIM = '`relkit add <title>` creates a task'
+const CLAIM_ID = 'claim::tasks::create'
 
 const repos: string[] = []
 
@@ -85,7 +84,7 @@ function docRepo(): string {
   return r
 }
 
-const docsOf = (r: string): GuardDoc[] => collectWorkDocs(r, planGuardWork(r))
+const docsOf = (r: string): GuardDoc[] => planGuardWork(r).docs
 
 /** Call a session tool the way a driver does. */
 async function callTool(call: StubCall, name: string, args: unknown): Promise<void> {
@@ -98,11 +97,6 @@ async function callTool(call: StubCall, name: string, args: unknown): Promise<vo
   await call.emit({ type: 'tool-result', toolName: name, content: result.content, isError: result.isError })
 }
 
-const EXTRACT_DRAFT = {
-  claims: [{ claim: CLAIM, driver: 'cli' as const, sectionAnchor: ANCHOR, reason: 'stdout carries the new id', verification: { scope: 'configuration', method: 'behavior', observable: 'Task id on stdout', cases: [{ id: 'created-id', claim: 'Prints the created task id', method: 'behavior', requires: ['process'], conditions: [] }] }, needs: [] }],
-  untestable: [],
-}
-
 const transportFailure = { kind: 'failure' as const, failure: { kind: 'transport' as const, detail: 'gone', class: 'provider' as const, retryability: 'none' as const } }
 
 // ---------------------------------------------------------------------------
@@ -112,7 +106,7 @@ const transportFailure = { kind: 'failure' as const, failure: { kind: 'transport
 
 const AREA = (r: string): FlowSynthesisArea => ({
   areaId: 'tasks',
-  claims: [{ id: 'claim::tasks::create', doc: DOC, anchor: ANCHOR, title: CLAIM, sentences: [sentenceKey(parseDocTree(DOC, CONTENT).sentences.find((s) => s.text.includes(CLAIM))!.text)] }],
+  claims: [{ id: CLAIM_ID, doc: DOC, title: CLAIM, sentences: [sentenceKey(parseDocTree(DOC, CONTENT).sentences.find((s) => s.text.includes(CLAIM))!.text)] }],
   docs: [
     {
       doc: DOC,
@@ -122,11 +116,11 @@ const AREA = (r: string): FlowSynthesisArea => ({
 })
 
 const CLEAN_FLOWS = {
-  flows: [{ title: 'Create a task', goal: 'a user adds a task', milestones: [{ order: 1, doc: DOC, anchor: ANCHOR, claimTitle: CLAIM }] }],
+  flows: [{ title: 'Create a task', goal: 'a user adds a task', milestones: [{ order: 1, claimId: CLAIM_ID }] }],
   noFlowClaims: [],
 }
 const DIRTY_FLOWS = {
-  flows: [{ title: 'Invented', goal: 'g', milestones: [{ order: 1, doc: DOC, anchor: ANCHOR, claimTitle: 'nothing like a claim' }] }],
+  flows: [{ title: 'Invented', goal: 'g', milestones: [{ order: 1, claimId: 'claim::tasks::invented' }] }],
   noFlowClaims: [],
 }
 

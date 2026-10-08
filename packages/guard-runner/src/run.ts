@@ -31,7 +31,7 @@ import {
   type GuardOutcome,
   type GuardScenario,
   type GuardScenarioResult,
-  type GuardSectionRollup,
+  type DocTree,
   guardHistoryEntryOf,
 } from '@truecourse/shared'
 import { responseJsonSchema, openApiServerBasePath } from '@truecourse/shared/openapi'
@@ -99,15 +99,8 @@ import {
 } from './store.js'
 import { mergeGuardBoard, summarizeResults } from './board.js'
 import { DEFAULT_STEP_TIMEOUT_MS } from './executor.js'
-import { indexRepoDocs, nodeRefContext } from './doc-index.js'
-import {
-  resolveScenarioBinds,
-  isOpenApiDoc,
-  extractSectionTexts,
-  type BindingResolution,
-  type DocSectionIndex,
-  type ScenarioBindingVerdict,
-} from './section-index.js'
+import { readRepoDocTrees } from './doc-index.js'
+import { resolveScenarioBinds, type ScenarioBindingVerdict } from './binding.js'
 import { isInterfaceDrifted } from './interface-drift.js'
 import { readManifest } from './manifest.js'
 import { expandScenarioRepeats } from './repeat.js'
@@ -438,18 +431,19 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
   // calling, else the set handed to this run (which its own `scenarioId` narrowed).
   const corpusIds = new Set(opts.corpusIds ?? scenarios.map((s) => s.id))
 
-  // Check EVERY binding against the live section index before running anything: a
-  // scenario realizes a flow, so it binds one section per milestone. A section that
-  // was edited (stale) or removed (orphaned) blocks execution; a section that moved
-  // with its text intact remaps and still runs. See {@link resolveScenarioBinds} for
-  // the fold from per-bind resolutions to the one scenario verdict.
-  const docIndexes = indexRepoDocs(repoRoot, new Set(selected.flatMap((s) => s.binds.map((b) => b.doc))))
-  const indexFor = (doc: string): DocSectionIndex | null => docIndexes.indexes.get(doc) ?? null
+  // Check EVERY binding against the live documents before running anything: a
+  // scenario realizes a flow, so it is bound to the sentences its milestones are
+  // read from. A sentence gone (stale) or a document gone (orphaned) blocks
+  // execution; anything else that changed around the sentences leaves the scenario
+  // running. See {@link resolveScenarioBinds} for the fold from per-bind
+  // resolutions to the one scenario verdict.
+  const docTrees = readRepoDocTrees(repoRoot, new Set(selected.flatMap((s) => s.binds.map((b) => b.doc))))
+  const treeFor = (doc: string): DocTree | null => docTrees.trees.get(doc) ?? null
   const currentFlows = readGuardFlowsCorpus(repoRoot)?.flows ?? []
   const sourceFlowFor = (scenario: GuardScenario) => currentFlows.find(f => f.id === scenario.flow?.id)
   const planned = selected.map((scenario) => ({
     scenario,
-    verdict: resolveScenarioBinds(scenario.binds, indexFor),
+    verdict: resolveScenarioBinds(scenario.binds, treeFor),
   }))
   const executable = planned.filter((p) => p.verdict.kind === 'executable')
   const nonExecutable = planned.filter((p) => p.verdict.kind !== 'executable')
@@ -630,18 +624,6 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
    */
   const prerequisiteRunnableApi = runnable.filter(p => isApiServerScenario(p.scenario))
   const worldNeeded = runnable.some((p) => needsPreparedWorld(p.scenario))
-
-  // B5: build the OpenAPI operation-schema index ONCE for the docs bound by api
-  // scenarios that assert `schema: true`. Built only when at least one such scenario
-  // exists, so a repo not using response-conformance reads no extra files (the flow
-  // stays byte-identical). Empty otherwise; `resolveScenarioResponseSchemas` then
-  // returns undefined and any stray `schema: true` step errors.
-  const schemaBoundDocs = new Set(
-    apiExec
-      .filter((p) => p.scenario.steps.some((s) => isApiRequestStep(s) && s.expect.schema === true))
-      .flatMap((p) => p.scenario.binds.map((b) => b.doc)),
-  )
-  const operationSchemaIndex = schemaBoundDocs.size > 0 ? buildOperationSchemaIndex(repoRoot, schemaBoundDocs) : new Map()
 
   // We own the build (and thus the entry pre-flight) only on a real run; birth
   // validation reuses the generator's single build + pre-flight and passes skipBuild.
@@ -1085,7 +1067,6 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
           expected: `the recipe to prepare the ${guardScenarioDrivers(scenario)[0]} driver`,
           actual: missing,
         },
-        ...(verdict.kind === 'executable' && verdict.remappedTo ? { remappedTo: verdict.remappedTo } : {}),
         ...annotate(scenario),
       }
       results.push(result)
@@ -1101,7 +1082,6 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
         ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
         outcome: 'blocked', durationMs: 0,
         failure: { step: 1, expected: 'supported observations for every selected case', actual: reason },
-        ...(verdict.kind === 'executable' && verdict.remappedTo ? { remappedTo: verdict.remappedTo } : {}),
         ...annotate(scenario),
       }
       results.push(result)
@@ -1133,7 +1113,6 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
           needs: block.needs,
           registerIn: block.registerIn,
         },
-        ...(verdict.kind === 'executable' && verdict.remappedTo ? { remappedTo: verdict.remappedTo } : {}),
         ...annotate(scenario),
       }
       results.push(result)
@@ -1161,7 +1140,6 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
           expected: `external service "${external.service}" to be configured`,
           actual: incompleteExternalMessage(external),
         },
-        ...(verdict.kind === 'executable' && verdict.remappedTo ? { remappedTo: verdict.remappedTo } : {}),
         ...annotate(scenario),
       }
       results.push(result)
@@ -1321,11 +1299,6 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
               externalSecrets: executionSecrets,
               externalTargets,
               fixtures: privateWorld?.fixtures ?? apiFixtures,
-              responseSchemas: resolveScenarioResponseSchemas(
-                operationSchemaIndex,
-                scenario as GuardApiScenario,
-                verdict.resolutions,
-              ),
               stepTimeoutMs,
               capturePassEvidence,
               signal: cancel.signal,
@@ -1381,7 +1354,6 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       const result: GuardScenarioResult = {
         ...outcome,
         ...(privateWorld ? { preparation: privateWorld.evidence } : {}),
-        ...(verdict.kind === 'executable' && verdict.remappedTo ? { remappedTo: verdict.remappedTo } : {}),
         ...annotate(scenario),
       }
       settled += 1
@@ -1508,7 +1480,6 @@ export async function runGuard(opts: RunGuardOptions): Promise<RunGuardResult> {
       },
       summary: summarizeResults(results),
       scenarios: results,
-      sections: rollupSections(results, new Map(selected.map((s) => [s.id, s.binds]))),
     }
 
     // Birth validation runs with `persist: false` and must write NOTHING to the
@@ -1626,130 +1597,9 @@ function nonExecutableResult(
     ...(scenario.flow ? { flowId: scenario.flow.id } : {}),
     durationMs: 0,
   }
-  if (verdict.kind === 'stale') {
-    return {
-      ...base,
-      outcome: 'stale',
-      // Absent when the staleness came from a REMOVED bound section — nothing to hash.
-      ...(verdict.currentFingerprint ? { currentFingerprint: verdict.currentFingerprint } : {}),
-    }
-  }
-  return { ...base, outcome: 'orphaned' }
+  return { ...base, outcome: verdict.kind === 'stale' ? 'stale' : 'orphaned' }
 }
 
-/**
- * Per-section rollup over EVERY section each scenario binds — a scenario that
- * realizes a multi-milestone flow paints its outcome onto all of them, not just its
- * primary bind (which is all the result itself carries). `bindsById` supplies the
- * full binding set from the scenarios that were selected for the run.
- */
-function rollupSections(
-  results: readonly GuardScenarioResult[],
-  bindsById: ReadonlyMap<string, readonly GuardBinds[]>,
-): GuardSectionRollup[] {
-  const byKey = new Map<string, { doc: string; section: string; outcomes: GuardOutcome[]; ids: string[] }>()
-  for (const r of results) {
-    for (const bind of bindsById.get(r.id) ?? [r.binds]) {
-      const key = `${bind.doc}\x00${bind.section}`
-      let entry = byKey.get(key)
-      if (!entry) {
-        entry = { doc: bind.doc, section: bind.section, outcomes: [], ids: [] }
-        byKey.set(key, entry)
-      }
-      entry.outcomes.push(r.outcome)
-      entry.ids.push(r.id)
-    }
-  }
-  return [...byKey.values()]
-    .map((e) => ({
-      doc: e.doc,
-      section: e.section,
-      status: worstOutcome(e.outcomes),
-      scenarioIds: e.ids.slice().sort(),
-    }))
-    .sort((a, b) => a.doc.localeCompare(b.doc) || a.section.localeCompare(b.section))
-}
-
-/** One bound OpenAPI operation slice, parsed from its canonical section text. */
-interface ParsedOperation {
-  method: string
-  path: string
-  operation: unknown
-}
-
-/** Parse an operation section's canonical `{ method, path, operation }` text, or null. */
-function parseOperationCanonical(fullText: string): ParsedOperation | null {
-  let value: unknown
-  try {
-    value = JSON.parse(fullText)
-  } catch {
-    return null
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const obj = value as Record<string, unknown>
-  if (typeof obj.method !== 'string' || typeof obj.path !== 'string' || obj.operation === undefined) return null
-  return { method: obj.method, path: obj.path, operation: obj.operation }
-}
-
-/**
- * Build `doc → (anchor → parsed operation)` for the given docs that are OpenAPI
- * documents, reading each once. The anchors match {@link buildDocSectionIndex}'s, so
- * a scenario's resolved binding anchor keys straight into it. Non-OpenAPI docs and
- * unparseable sections are skipped.
- */
-function buildOperationSchemaIndex(repoRoot: string, docs: Set<string>): Map<string, Map<string, ParsedOperation>> {
-  const out = new Map<string, Map<string, ParsedOperation>>()
-  for (const doc of docs) {
-    const abs = path.resolve(repoRoot, doc)
-    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) continue
-    const content = fs.readFileSync(abs, 'utf-8')
-    if (!isOpenApiDoc(doc, content)) continue
-    // The canonical section text carries only the bare `paths`-key path; reunite it
-    // with the doc's `servers` base path so a bound op's comparable path matches
-    // scenario request URLs (which include the base path). '' for base-path-less specs.
-    const basePath = openApiServerBasePath(content)
-    const byAnchor = new Map<string, ParsedOperation>()
-    for (const [anchor, text] of extractSectionTexts(doc, content, nodeRefContext(repoRoot, abs))) {
-      const parsed = parseOperationCanonical(text.fullText)
-      if (parsed) byAnchor.set(anchor, basePath ? { ...parsed, path: basePath + parsed.path } : parsed)
-    }
-    out.set(doc, byAnchor)
-  }
-  return out
-}
-
-/**
- * The `responseSchemas` context for one api scenario: the bound operation's identity
- * plus its declared JSON response schema for each status the scenario's `schema: true`
- * steps assert. The operation comes from the FIRST binding that resolves to one — a
- * scenario realizing a flow binds several sections and the OpenAPI operation need not
- * be the primary. Undefined when no binding is an OpenAPI operation — then a
- * `schema: true` step is a scenario error (resolved in `runApiScenario`).
- */
-function resolveScenarioResponseSchemas(
-  index: Map<string, Map<string, ParsedOperation>>,
-  scenario: GuardApiScenario,
-  resolutions: readonly BindingResolution[],
-): { method: string; path: string; byStatus: ReadonlyMap<number, unknown> } | undefined {
-  let op: ParsedOperation | undefined
-  for (const [i, bind] of scenario.binds.entries()) {
-    const resolution = resolutions[i]
-    // The live anchor: a bind that remapped is indexed where its section moved to.
-    const anchor = resolution && 'section' in resolution ? resolution.section.anchor : bind.section
-    op = index.get(bind.doc)?.get(anchor)
-    if (op) break
-  }
-  if (!op) return undefined
-  const byStatus = new Map<number, unknown>()
-  for (const step of scenario.steps) {
-    if (!isApiRequestStep(step)) continue
-    if (step.expect.schema === true && step.expect.status !== undefined) {
-      const schema = responseJsonSchema(op.operation, step.expect.status)
-      if (schema !== undefined) byStatus.set(step.expect.status, schema)
-    }
-  }
-  return { method: op.method.toUpperCase(), path: op.path, byStatus }
-}
 
 /**
  * Default scenario-sandbox concurrency: `TRUECOURSE_MAX_CONCURRENCY` when it parses

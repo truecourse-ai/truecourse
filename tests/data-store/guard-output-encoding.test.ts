@@ -17,17 +17,15 @@ const REPO = 'acme/pdf';
 const REF = { repoKey: REPO, commitSha: 'c1' };
 const OUTPUT = '%PDF-1.7\nstream\n\u0000\ud800 bytes \udfff\nendstream';
 const report = (reason = OUTPUT): GuardGenerateReport => ({
-  generatedAt: '2026-01-01T00:00:00Z', status: 'ok', sectionsTotal: 1,
-  sectionsChanged: 1, skippedUnchanged: 0, noChanges: false, written: [],
-  coverageGaps: [{ doc: 'README.md', anchor: 'download', kind: 'no-interface', reason }],
-  birthFindings: [], errors: [], extractionFailures: [], orphaned: [],
+  generatedAt: '2026-01-01T00:00:00Z', status: 'ok', noChanges: false, written: [],
+  coverageGaps: [{ flowId: 'download', kind: 'no-interface', reason }],
+  birthFindings: [], errors: [], extractionFailures: [],
 });
 const latest = (actual = OUTPUT): GuardLatest => ({
   run: { runId: 'baseline-1', ranAt: '2026-01-01T00:00:00Z', branch: 'main', commit: 'c1', recipeFingerprint: 'sha256:r' },
   summary: { total: 1, pass: 0, fail: 1, stale: 0, orphaned: 0, error: 0, blocked: 0 },
-  scenarios: [{ id: 'download', title: 'download PDF', binds: [{ doc: 'README.md', section: 'download', fingerprint: 'sha256:d', sentences: ['download'] }],
+  scenarios: [{ id: 'download', title: 'download PDF', binds: { doc: 'README.md', sentences: ['download'] },
     outcome: 'fail', durationMs: 1, failure: { step: 1, expected: 'public', actual, stdout: actual } }],
-  sections: [],
 });
 
 let client: PGlite;

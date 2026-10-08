@@ -20,7 +20,7 @@ import {
   writeGuardClaims,
   type RunScenarioContext,
 } from '@truecourse/guard-runner'
-import { claimContentHash, type GuardClaimsFile } from '@truecourse/shared'
+import { type ClaimsFile } from '@truecourse/shared'
 import type { StepObservation } from '@truecourse/guard-runner'
 import { makeTempRepo, rmrf, writeSpecDoc, writeRecipe, writeScenario, scenario, FIXTURE_BIN } from './helpers.js'
 
@@ -227,12 +227,20 @@ describe('scenario loader — teardown steps validate like main steps', () => {
   it('resolves a teardown step milestone against the claims store', () => {
     const r = repo()
     writeRecipe(r)
-    const body = { doc: 'docs/spec.md', anchor: 'a/b', title: 'it uninstalls', claim: 'It uninstalls.' }
-    const claims: GuardClaimsFile = {
+    const claims: ClaimsFile = {
       version: 1,
       generatedAt: '2026-08-07T00:00:00.000Z',
-      claims: [{ id: 'uninstall-claim', ...body, contentHash: claimContentHash(body) }],
-      untestable: [],
+      claims: [
+        {
+          id: 'uninstall-claim',
+          doc: 'docs/spec.md',
+          sentences: ['sentence:it-uninstalls'],
+          subject: 'uninstall',
+          statement: 'It uninstalls.',
+          areas: [],
+          testable: true,
+        },
+      ],
     }
     writeGuardClaims(r, claims)
     writeScenario(

@@ -153,7 +153,7 @@ export function GuardClaimDetail({
       <div className="min-w-0 border-b border-border bg-card px-6 py-4">
         <ArtifactModeSwitch format="JSON" mode={mode} onSelect={setMode} className="float-right ml-2" />
         <GuardStatusBadge status={claim.status} />
-        <h2 className="mt-1 break-words text-sm font-semibold text-foreground">{claim.claim}</h2>
+        <h2 className="mt-1 break-words text-sm font-semibold text-foreground">{claim.statement}</h2>
         {claim.reason && (
           <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
             {claim.needsSetup ? guardNeedsSetupNeed(claim.needsSetup) : claim.reason}
@@ -167,13 +167,6 @@ export function GuardClaimDetail({
           <ArtifactRaw content={rawSource.content} label="claim source" />
         ) : (
           <>
-            {claim.verifyVia && (
-              <div>
-                <div className={LABEL}>Verify via</div>
-                <p className="text-[12px] leading-relaxed text-muted-foreground">{claim.verifyVia}</p>
-              </div>
-            )}
-
             {/* DOWN, first link: the flows that carry the claim, each with its own word. */}
             <div>
               <div className={LABEL}>Carried by flows</div>
@@ -227,14 +220,6 @@ export function GuardClaimDetail({
                 <dt className="w-16 shrink-0 text-muted-foreground">Claim</dt>
                 <dd className="min-w-0 flex-1 truncate font-mono text-muted-foreground">{claim.id}</dd>
               </div>
-              <div className="flex min-w-0 items-baseline gap-2">
-                <dt className="w-16 shrink-0 text-muted-foreground">Content</dt>
-                <dd className="min-w-0 flex-1 truncate font-mono text-muted-foreground">
-                  <HoverPopover portal width="narrow" content="Hash over the claim's text and where it was read from, what tells a re-generate the source moved.">
-                    <span className="underline decoration-dotted underline-offset-2">{claim.contentHash}</span>
-                  </HoverPopover>
-                </dd>
-              </div>
             </dl>
           </>
         )}
@@ -263,7 +248,7 @@ export function GuardUntestableDetail({
             Not testable
           </span>
         </HoverPopover>
-        <h2 className="mt-1 break-words text-sm font-semibold text-foreground">{row.text}</h2>
+        <h2 className="mt-1 break-words text-sm font-semibold text-foreground">{row.statement}</h2>
         <SourceLine doc={row.doc} onOpenDoc={onOpenDoc} />
       </div>
       <div className="min-w-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden px-6 py-4">

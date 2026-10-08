@@ -1,6 +1,6 @@
 /**
  * A FLOW'S STEPS, AS THEY ARE QUOTED — each milestone of a flow with the claim
- * it names and the document section that claim was read from.
+ * it names and the document text that claim was read from.
  *
  * The session that writes a flow's test and the judge that reads the test
  * afterwards are shown the same words, rendered here once: what the judge
@@ -10,25 +10,26 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { extractSectionTexts, readGuardClaimsCorpus } from '@truecourse/guard-runner';
-import type { GuardClaim, GuardFlow } from '@truecourse/shared';
+import { readGuardClaimsCorpus } from '@truecourse/guard-runner';
+import { claimsById, parseDocTree, sectionOfSentences, sectionOwnText, type Claim, type DocTree, type GuardFlow } from '@truecourse/shared';
 
-/** How much of one document section is quoted. */
+/** How much of one document passage is quoted. */
 const SECTION_QUOTE_CHARS = 4_000;
 
 /** One step of a flow: the claim and the text it was read from. */
 export interface FlowTestStep {
   order: number;
   claimTitle: string;
-  /** The claim as extracted, when the claim corpus has it. */
+  /** The claim as the scan read it, when the claim corpus has it. */
   claim?: string;
   doc: string;
-  anchor: string;
-  /** The section the claim lives in, when the document could be read. */
+  /** The heading the claim's sentences sit under, when the document could be read. */
+  heading?: string;
+  /** The text of the section the claim's sentences sit in, when the document could be read. */
   sectionText?: string;
 }
 
-/** A step's section as it is quoted: the whole of a short one, the start of a long one. */
+/** A step's passage as it is quoted: the whole of a short one, the start of a long one. */
 export function quotedSection(step: FlowTestStep): string | undefined {
   const text = step.sectionText;
   if (text === undefined) return undefined;
@@ -37,15 +38,15 @@ export function quotedSection(step: FlowTestStep): string | undefined {
     : `${text.slice(0, SECTION_QUOTE_CHARS)}\n… (${text.length - SECTION_QUOTE_CHARS} more characters in the document)`;
 }
 
-/** The steps as a briefing lists them: `<order>. <claim title>`, the claim, the document, the section. */
+/** The steps as a briefing lists them: `<order>. <claim title>`, the claim, the document, the passage. */
 export function flowStepQuotes(steps: readonly FlowTestStep[]): string[] {
   return steps.flatMap((step) => {
     const section = quotedSection(step);
     return [
       `${step.order}. ${step.claimTitle}`,
       ...(step.claim ? [`   claim: ${step.claim}`] : []),
-      `   document: ${step.doc} § ${step.anchor}`,
-      ...(section ? ['   the section, as written:', ...section.split('\n').map((line) => `   | ${line}`)] : []),
+      `   document: ${step.doc}${step.heading ? ` § ${step.heading}` : ''}`,
+      ...(section ? ['   the passage, as written:', ...section.split('\n').map((line) => `   | ${line}`)] : []),
       '',
     ];
   });
@@ -53,42 +54,35 @@ export function flowStepQuotes(steps: readonly FlowTestStep[]): string[] {
 
 /**
  * Reads a flow's steps out of a work tree: each milestone with the claim it
- * names and the section that claim was read from. Documents are read once
- * each, however many flows cite them.
+ * names and the section its sentences sit in. Documents are read once each,
+ * however many flows cite them.
  */
 export function flowStepReader(repoRoot: string): (flow: GuardFlow) => FlowTestStep[] {
-  const claims = new Map<string, GuardClaim>();
-  for (const claim of readGuardClaimsCorpus(repoRoot)?.claims ?? []) {
-    claims.set(claimKey(claim.doc, claim.anchor, claim.title), claim);
-  }
-  const sections = new Map<string, ReturnType<typeof extractSectionTexts> | null>();
-  const sectionsOf = (doc: string): ReturnType<typeof extractSectionTexts> | null => {
-    let texts = sections.get(doc);
-    if (texts === undefined) {
+  const claims: Map<string, Claim> = claimsById(readGuardClaimsCorpus(repoRoot)?.claims ?? []);
+  const trees = new Map<string, DocTree | null>();
+  const treeOf = (doc: string): DocTree | null => {
+    let tree = trees.get(doc);
+    if (tree === undefined) {
       try {
-        texts = extractSectionTexts(doc, fs.readFileSync(path.resolve(repoRoot, doc), 'utf-8'));
+        tree = parseDocTree(doc, fs.readFileSync(path.resolve(repoRoot, doc), 'utf-8'));
       } catch {
-        texts = null;
+        tree = null;
       }
-      sections.set(doc, texts);
+      trees.set(doc, tree);
     }
-    return texts;
+    return tree;
   };
   return (flow) =>
     [...flow.milestones].sort((a, b) => a.order - b.order).map((milestone) => {
-      const claim = claims.get(claimKey(milestone.doc, milestone.anchor, milestone.claimTitle));
-      const section = sectionsOf(milestone.doc)?.get(milestone.anchor);
+      const claim = claims.get(milestone.claimId);
+      const tree = treeOf(milestone.doc);
+      const section = tree ? sectionOfSentences(tree, milestone.sentences) : null;
       return {
         order: milestone.order,
         claimTitle: milestone.claimTitle,
-        ...(claim ? { claim: claim.claim } : {}),
+        ...(claim ? { claim: claim.statement } : {}),
         doc: milestone.doc,
-        anchor: milestone.anchor,
-        ...(section ? { sectionText: section.ownText } : {}),
+        ...(tree && section ? { heading: section.headingText, sectionText: sectionOwnText(tree, section) } : {}),
       };
     });
-}
-
-function claimKey(doc: string, anchor: string, title: string): string {
-  return `${doc}\0${anchor}\0${title}`;
 }

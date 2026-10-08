@@ -13,6 +13,7 @@ import {
   GuardInterfacesViewSchema,
   GuardRunFlowSchema,
   GUARD_COVERAGE_STATUS_WORD,
+  claimId,
   guardCoverageWord,
   type GuardCoveragePlainStatus,
 } from '../../packages/shared/src/index';
@@ -26,12 +27,11 @@ import { installMemorySpecStore, resetSpecStore } from '../helpers/memory-spec-s
 
 
 /**
- * The FLOW read surfaces: the coverage inversion (a section lists the flows
- * that traverse it), the Flows tab's list + detail, the Interfaces catalog with its
- * reverse index, and the run payload's flow-instance join.
+ * The FLOW read surfaces: the Flows tab's list + detail, the Interfaces catalog
+ * with its reverse index, and the run payload's flow-instance join.
  *
  * The fixture is a small CLI task manager ("taskbird"): a three-section spec doc,
- * one synthesized flow across all three sections plus a second, unrealized one, a
+ * one synthesized flow across claims of all three sections plus a second, unrealized one, a
  * generated cli scenario, a hand-written scenario (the Manual pseudo-flow), a
  * interface catalog with one entry no flow grounds on, and a run where the flow
  * failed at its third milestone. Temp-repo fixture + supertest over the real app.
@@ -57,16 +57,16 @@ const DOC_CONTENT = [
   '',
 ].join('\n');
 
-// The live section fingerprints of DOC_CONTENT (the section index is the source
-// of truth for these — a flow binds them, and one bind is deliberately stale).
-const FP = {
-  tasks: 'sha256:eee52142964222cc2e003365290f017278b6dcc04148bcedba0ffdd5ad6187e0',
-  creating: 'sha256:ebc6b465e85fb844c57ac0005cb0df7048c28dd7a00b0e01590972c58ea6f856',
-  listing: 'sha256:77c991ddd5e25deff5b5a039a74013e829483b01df99ce3a651c07e8a72c8e9c',
-  completing: 'sha256:0d66eec0e91e0bdd30cad1eda3087408a19d0e3303ff014e3b099f1e0a352b7e',
+// The claims the flows are made of, each read from the sentence keyed by the
+// section it sits in; two claims read from one sentence are told apart by order.
+const CLAIM = {
+  stored: claimId(DOC, ['tasks']),
+  creating: claimId(DOC, ['tasks/creating-tasks']),
+  listing: claimId(DOC, ['tasks/listing-tasks']),
+  exporting: claimId(DOC, ['tasks/listing-tasks'], 1),
+  completing: claimId(DOC, ['tasks/completing-tasks']),
+  filtering: claimId(DOC, ['tasks/completing-tasks'], 1),
 };
-// The flow bound "Completing tasks" before it was edited — the drift signal.
-const STALE_COMPLETING = 'sha256:0000000000000000000000000000000000000000000000000000000000000000';
 
 const FLOW_ID = 'task-lifecycle';
 const SCENARIO_ID = 'task-lifecycle.cli.1';
@@ -83,15 +83,15 @@ const FLOWS_FILE = {
       goal: 'Create, list, complete and filter a task from the CLI',
       fingerprint: 'sha256:41ac',
       milestones: [
-        { order: 1, doc: DOC, anchor: 'tasks/creating-tasks', claimTitle: 'Creating a task prints its id', sentences: ['tasks/creating-tasks'] },
-        { order: 2, doc: DOC, anchor: 'tasks/listing-tasks', claimTitle: 'The list shows tasks newest-first', sentences: ['tasks/listing-tasks'] },
-        { order: 3, doc: DOC, anchor: 'tasks/completing-tasks', claimTitle: 'A task can be marked done', sentences: ['tasks/completing-tasks'] },
-        { order: 4, doc: DOC, anchor: 'tasks/completing-tasks', claimTitle: 'Done tasks appear under --done', sentences: ['tasks/completing-tasks'] },
+        { order: 1, doc: DOC, claimId: CLAIM.creating, claimTitle: 'Creating a task prints its id', sentences: ['tasks/creating-tasks'] },
+        { order: 2, doc: DOC, claimId: CLAIM.listing, claimTitle: 'The list shows tasks newest-first', sentences: ['tasks/listing-tasks'] },
+        { order: 3, doc: DOC, claimId: CLAIM.completing, claimTitle: 'A task can be marked done', sentences: ['tasks/completing-tasks'] },
+        { order: 4, doc: DOC, claimId: CLAIM.filtering, claimTitle: 'Done tasks appear under --done', sentences: ['tasks/completing-tasks'] },
       ],
       bindings: [
-        { doc: DOC, anchor: 'tasks/creating-tasks', fingerprint: FP.creating, sentences: ['tasks/creating-tasks'] },
-        { doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: FP.listing, sentences: ['tasks/listing-tasks'] },
-        { doc: DOC, anchor: 'tasks/completing-tasks', fingerprint: STALE_COMPLETING, sentences: ['tasks/completing-tasks'] },
+        { doc: DOC, sentences: ['tasks/creating-tasks'] },
+        { doc: DOC, sentences: ['tasks/listing-tasks'] },
+        { doc: DOC, sentences: ['tasks/completing-tasks'] },
       ],
       composedOf: [],
       synthesisInputsHash: 'sha256:inputs',
@@ -102,18 +102,16 @@ const FLOWS_FILE = {
       goal: 'Export tasks to a file from the CLI',
       fingerprint: 'sha256:77bb',
       milestones: [
-        { order: 1, doc: DOC, anchor: 'tasks/listing-tasks', claimTitle: 'The list can be written to a file', sentences: ['tasks/listing-tasks'] },
+        { order: 1, doc: DOC, claimId: CLAIM.exporting, claimTitle: 'The list can be written to a file', sentences: ['tasks/listing-tasks'] },
       ],
-      bindings: [{ doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: FP.listing, sentences: ['tasks/listing-tasks'] }],
+      bindings: [{ doc: DOC, sentences: ['tasks/listing-tasks'] }],
       composedOf: [],
       synthesisInputsHash: 'sha256:inputs',
     },
   ],
   noFlowClaims: [
     {
-      doc: DOC,
-      anchor: 'tasks',
-      claimTitle: 'Tasks are stored in a local file',
+      claimId: CLAIM.stored,
       reason: 'implementation detail — nothing observable on any surface',
     },
   ],
@@ -145,16 +143,12 @@ const MANIFEST = {
 const RESULT = {
   generatedAt: '2026-07-24T13:40:00.000Z',
   status: 'ok',
-  sectionsTotal: 4,
-  sectionsChanged: 3,
-  skippedUnchanged: 1,
   noChanges: false,
   written: [
     {
       id: SCENARIO_ID,
       title: 'Tasks are created, listed newest-first, completed and filterable',
       doc: DOC,
-      anchor: 'tasks/creating-tasks',
       file: SCENARIO_FILE,
       flowId: FLOW_ID,
       surface: 'cli',
@@ -162,20 +156,17 @@ const RESULT = {
   ],
   coverageGaps: [
     {
-      doc: DOC,
-      anchor: 'tasks/creating-tasks',
       kind: 'awaiting-driver',
       driver: 'tui',
       reason: 'the board is browser-only',
       flowId: FLOW_ID,
       surface: 'tui',
     },
-    { doc: DOC, anchor: 'tasks', kind: 'no-claim', reason: 'the overview asserts nothing' },
   ],
   birthFindings: [
     {
       doc: DOC,
-      anchor: 'tasks/completing-tasks',
+      claimId: CLAIM.filtering,
       kind: 'fidelity',
       title: 'Done tasks appear under --done',
       step: 4,
@@ -189,7 +180,6 @@ const RESULT = {
   ],
   errors: [],
   extractionFailures: [],
-  orphaned: [],
   flows: {
     total: 2,
     settled: 1,
@@ -217,7 +207,7 @@ const LATEST = {
     {
       id: SCENARIO_ID,
       title: 'Tasks are created, listed newest-first, completed and filterable',
-      binds: { doc: DOC, section: 'tasks/creating-tasks', fingerprint: FP.creating, sentences: ['tasks/creating-tasks'] },
+      binds: { doc: DOC, sentences: ['tasks/creating-tasks'] },
       outcome: 'fail',
       durationMs: 412,
       failure: { step: 3, expected: 'exit 0', actual: 'exit 1: unknown command `done`' },
@@ -229,12 +219,11 @@ const LATEST = {
     {
       id: MANUAL_ID,
       title: '`tasks --help` prints usage',
-      binds: { doc: DOC, section: 'tasks', fingerprint: FP.tasks, sentences: ['tasks'] },
+      binds: { doc: DOC, sentences: ['tasks'] },
       outcome: 'pass',
       durationMs: 21,
     },
   ],
-  sections: [],
 };
 
 const INTERFACES = {
@@ -286,9 +275,9 @@ const SCENARIO_YAML = [
   '  path: [cli/tasks-add, cli/tasks-list, cli/tasks-done]',
   '  fingerprints: ["sha256:j1", "sha256:j2", "sha256:j3"]',
   'binds:',
-  `  - { doc: ${DOC}, section: tasks/creating-tasks, fingerprint: "${FP.creating}", sentences: [tasks/creating-tasks] }`,
-  `  - { doc: ${DOC}, section: tasks/listing-tasks, fingerprint: "${FP.listing}", sentences: [tasks/listing-tasks] }`,
-  `  - { doc: ${DOC}, section: tasks/completing-tasks, fingerprint: "${STALE_COMPLETING}", sentences: [tasks/completing-tasks] }`,
+  `  - { doc: ${DOC}, sentences: [tasks/creating-tasks] }`,
+  `  - { doc: ${DOC}, sentences: [tasks/listing-tasks] }`,
+  `  - { doc: ${DOC}, sentences: [tasks/completing-tasks] }`,
   'driver: cli',
   'steps:',
   '  - run: [add, "Buy milk"]',
@@ -310,7 +299,7 @@ const MANUAL_YAML = [
   `id: ${MANUAL_ID}`,
   'title: "`tasks --help` prints usage"',
   'binds:',
-  `  - { doc: ${DOC}, section: tasks, fingerprint: "${FP.tasks}", sentences: [tasks] }`,
+  `  - { doc: ${DOC}, sentences: [tasks] }`,
   'driver: cli',
   'steps:',
   '  - run: [--help]',
@@ -385,12 +374,12 @@ describe('Guard flow read surfaces', () => {
       { id: 'create', claim: 'Created item appears', method: 'behavior', requires: ['browser'], conditions: [] },
       { id: 'reload', claim: 'Item survives reload', method: 'behavior', requires: ['browser'], conditions: [] },
     ] };
-    const milestones = [{ order: 1, doc: DOC, anchor: 'tasks/creating-tasks', claimTitle: 'Create and reload', sentences: ['tasks/creating-tasks'], proofDrivers: ['web'], verification }];
-    const bindings = [{ doc: DOC, anchor: 'tasks/creating-tasks', fingerprint: FP.creating, sentences: ['tasks/creating-tasks'] }];
+    const milestones = [{ order: 1, doc: DOC, claimId: CLAIM.creating, claimTitle: 'Create and reload', sentences: ['tasks/creating-tasks'], proofDrivers: ['web'], verification }];
+    const bindings = [{ doc: DOC, sentences: ['tasks/creating-tasks'] }];
     write(DOC, DOC_CONTENT);
     writeJson('.truecourse/scenarios/flows.json', { version: 1, generatedAt: '2026-09-09T00:00:00Z', flows: [{ id: 'case-flow', title: 'Create and reload', goal: 'Create and reload', fingerprint: 'sha256:cases', milestones, bindings, composedOf: [], synthesisInputsHash: 'sha256:inputs' }], noFlowClaims: [] });
     const evidence = [{ milestone: 1, caseId: 'create', steps: [1], reason: 'The created item is visible.' }];
-    const scenario = { id: 'case-test', title: 'Create', binds: [{ doc: DOC, section: bindings[0].anchor, fingerprint: FP.creating, sentences: [bindings[0].anchor] }], flow: { id: 'case-flow', fingerprint: 'sha256:cases' }, steps: [{ driver: 'web', navigate: '/items', milestone: 1, checks: ['create'], expect: { visible: { text: 'Created item' } } }] };
+    const scenario = { id: 'case-test', title: 'Create', binds: [{ doc: DOC, sentences: bindings[0].sentences }], flow: { id: 'case-flow', fingerprint: 'sha256:cases' }, steps: [{ driver: 'web', navigate: '/items', milestone: 1, checks: ['create'], expect: { visible: { text: 'Created item' } } }] };
     // JSON is valid YAML and uses the ordinary scenario loader.
     writeJson('.truecourse/scenarios/tasks/case-test.yaml', scenario);
     const manifest = { flows: [{ flowId: 'case-flow', flowFingerprint: 'sha256:cases', milestones, bindings, scenarios: [{ id: 'case-test', drivers: ['web'], status: 'passing', reviewed: true, caseEvidence: evidence, reviewPolicyVersion: GUARD_REVIEW_POLICY_VERSION, reviewedScenarioFingerprint: scenarioReviewFingerprint(GuardScenarioSchema.parse(scenario)), milestoneCoverage: [{ milestone: 1, driver: 'web', checks: ['create'] }] }], gaps: [{ surface: 'web', kind: 'blocked-on', milestones: [1], obligations: [{ milestone: 1, caseId: 'reload' }], reason: 'Milestone 1: reload is not verified', blocker: { kind: 'generation' } }, { surface: 'web', kind: 'no-interface', milestones: [1], obligations: [{ milestone: 1, caseId: 'create' }], reason: 'Historical missing create action', blocker: { kind: 'generation' } }] }] };
@@ -485,7 +474,6 @@ describe('Guard flow read surfaces', () => {
         epic: false,
         manual: false,
         milestoneCount: 4,
-        sectionCount: 3,
         docs: [DOC],
         // The fixture's finding is a FIDELITY rejection — our own defect, never
         // stored — so it never counts as drift. It rides in `toolDefects`
@@ -613,10 +601,11 @@ describe('Guard flow read surfaces', () => {
       const res = await request(app).get(url(`flows/${FLOW_ID}`)).expect(200);
       expect(res.body).toMatchObject({ flowId: FLOW_ID, status: 'fail', bucket: 'partial', manual: false, epic: false });
       expect(res.body.milestones).toHaveLength(4);
-      expect(res.body.milestones[0]).toMatchObject({ order: 1, doc: DOC, anchor: 'tasks/creating-tasks' });
+      expect(res.body.milestones[0]).toMatchObject({ order: 1, doc: DOC, claimId: CLAIM.creating });
       // No section is joined: a milestone is its claim and the document it is stated in.
+      expect(res.body.milestones[0]).not.toHaveProperty('anchor');
       expect(res.body.milestones[0].headingText).toBeUndefined();
-      expect(res.body.milestones[2]).toMatchObject({ anchor: 'tasks/completing-tasks' });
+      expect(res.body.milestones[2]).toMatchObject({ claimId: CLAIM.completing });
     });
 
     it('carries the per-surface scenario rows, gaps, interfaces and findings', async () => {
@@ -699,13 +688,13 @@ describe('Guard flow read surfaces', () => {
       const message = 'external service "hit-pay" is only partly configured: no key was resolved.';
       writeJson('.truecourse/guard/result.json', {
         ...RESULT,
-        errors: [{ doc: '(guard run)', anchor: '(refused)', kind: 'refusal', message }],
+        errors: [{ doc: '(guard run)', kind: 'refusal', message }],
         refusal: { status: 'missing-external-env', message, flowIds: [FLOW_ID] },
       });
 
       const blocked = await request(app).get(url(`flows/${FLOW_ID}`)).expect(200);
       expect(blocked.body.errors).toEqual([
-        { doc: '(guard run)', anchor: '(refused)', kind: 'refusal', message },
+        { doc: '(guard run)', kind: 'refusal', message },
       ]);
 
       // A flow the refusal does NOT name is untouched by it.
@@ -713,17 +702,15 @@ describe('Guard flow read surfaces', () => {
       expect(other.body.errors).toEqual([]);
     });
 
-    // Section attribution is the fallback, not the rule: an error the generator
-    // attributed to a flow joins on that id, so a section many flows bind can no
-    // longer smear one flow's authoring failure across its neighbours.
-    it('joins a flow-attributed error by flow id, not by its section', async () => {
+    // An error joins its flow by id alone, so a document many flows bind can
+    // never smear one flow's authoring failure across its neighbours.
+    it('joins a flow-attributed error by flow id, not by its document', async () => {
       seed();
       writeJson('.truecourse/guard/result.json', {
         ...RESULT,
         errors: [
           {
             doc: DOC,
-            anchor: 'tasks/creating-tasks',
             kind: 'authoring',
             flowId: 'task-export',
             message: 'authoring (cli) invalid yaml',
@@ -733,7 +720,7 @@ describe('Guard flow read surfaces', () => {
 
       const owner = await request(app).get(url('flows/task-export')).expect(200);
       expect(owner.body.errors).toHaveLength(1);
-      // FLOW_ID binds that very section, and still does not inherit the error.
+      // FLOW_ID binds that very document, and still does not inherit the error.
       const neighbour = await request(app).get(url(`flows/${FLOW_ID}`)).expect(200);
       expect(neighbour.body.errors).toEqual([]);
     });
@@ -922,7 +909,7 @@ describe('Guard flow read surfaces', () => {
       'title: Purged tasks leave the list',
       `flow: { id: ${ORPHAN_ID}, fingerprint: "sha256:purge" }`,
       'binds:',
-      `  - { doc: ${DOC}, section: tasks/listing-tasks, fingerprint: "${FP.listing}", sentences: [tasks/listing-tasks] }`,
+      `  - { doc: ${DOC}, sentences: [tasks/listing-tasks] }`,
       'driver: cli',
       'steps:',
       '  - run: [purge, --force]',
@@ -946,7 +933,7 @@ describe('Guard flow read surfaces', () => {
           {
             flowId: ORPHAN_ID,
             flowFingerprint: 'sha256:purge',
-            bindings: [{ doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: FP.listing, sentences: ['tasks/listing-tasks'] }],
+            bindings: [{ doc: DOC, sentences: ['tasks/listing-tasks'] }],
             scenarios: [{ id: ORPHAN_SCENARIO, surface: 'cli', status: 'passing' }],
             generationInputsHash: 'sha256:gen',
             gaps: [],
@@ -1158,7 +1145,7 @@ describe('Guard flow read surfaces', () => {
       expect(res.body.runFlows[0]).toMatchObject({ flowId: FLOW_ID, title: FLOWS_FILE.flows[0].title, epic: false });
       expect(res.body.runFlows[0].milestones.map((m: any) => m.order)).toEqual([1, 2, 3, 4]);
       expect(res.body.runFlows[0].milestones[2]).toMatchObject({
-        anchor: 'tasks/completing-tasks',
+        claimId: CLAIM.completing,
         claimTitle: 'A task can be marked done',
       });
     });
@@ -1206,9 +1193,9 @@ describe('Guard flow read surfaces', () => {
             goal: 'Analyze a repo containing a minified bundle without freezing',
             fingerprint: 'sha256:red',
             milestones: [
-              { order: 1, doc: DOC, anchor: 'tasks/listing-tasks', claimTitle: 'The list shows tasks newest-first', sentences: ['tasks/listing-tasks'] },
+              { order: 1, doc: DOC, claimId: CLAIM.listing, claimTitle: 'The list shows tasks newest-first', sentences: ['tasks/listing-tasks'] },
             ],
-            bindings: [{ doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: FP.listing, sentences: ['tasks/listing-tasks'] }],
+            bindings: [{ doc: DOC, sentences: ['tasks/listing-tasks'] }],
             composedOf: [],
             synthesisInputsHash: 'sha256:inputs',
           },
@@ -1220,7 +1207,7 @@ describe('Guard flow read surfaces', () => {
           {
             flowId: RED_FLOW,
             flowFingerprint: 'sha256:red',
-            bindings: [{ doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: FP.listing, sentences: ['tasks/listing-tasks'] }],
+            bindings: [{ doc: DOC, sentences: ['tasks/listing-tasks'] }],
             // Committed with the status its birth execution gave it.
             scenarios: [{ id: RED_SCENARIO, surface: 'cli', status: 'failing' }],
             generationInputsHash: 'sha256:gen',
@@ -1235,7 +1222,7 @@ describe('Guard flow read surfaces', () => {
           'title: Analyze survives a pathological file',
           `flow: { id: ${RED_FLOW}, fingerprint: "sha256:red" }`,
           'binds:',
-          `  - { doc: ${DOC}, section: tasks/listing-tasks, fingerprint: "${FP.listing}", sentences: [tasks/listing-tasks] }`,
+          `  - { doc: ${DOC}, sentences: [tasks/listing-tasks] }`,
           'driver: cli',
           'steps:',
           '  - run: [list]',
@@ -1247,16 +1234,12 @@ describe('Guard flow read surfaces', () => {
       writeJson('.truecourse/guard/result.json', {
         generatedAt: '2026-07-26T09:00:00.000Z',
         status: 'ok',
-        sectionsTotal: 4,
-        sectionsChanged: 1,
-        skippedUnchanged: 3,
         noChanges: false,
         written: [
           {
             id: RED_SCENARIO,
             title: 'Analyze survives a pathological file',
             doc: DOC,
-            anchor: 'tasks/listing-tasks',
             file: RED_FILE,
             flowId: RED_FLOW,
             surface: 'cli',
@@ -1267,7 +1250,7 @@ describe('Guard flow read surfaces', () => {
         birthFindings: [
           {
             doc: DOC,
-            anchor: 'tasks/listing-tasks',
+            claimId: CLAIM.listing,
             scenarioId: RED_SCENARIO,
             committed: true,
             file: RED_FILE,
@@ -1290,7 +1273,6 @@ describe('Guard flow read surfaces', () => {
         ],
         errors: [],
         extractionFailures: [],
-        orphaned: [],
         flows: {
           total: 1,
           settled: 1,
@@ -1353,7 +1335,7 @@ describe('Guard flow read surfaces', () => {
       );
       manifest.flows[0].scenarios[0].diagnosis = {
         doc: DOC,
-        anchor: 'tasks/listing-tasks',
+        claimId: CLAIM.listing,
         title: 'Analyze survives a pathological file',
         step: 1,
         expected: 'exit 0',
@@ -1363,7 +1345,7 @@ describe('Guard flow read surfaces', () => {
         triage: {
           verdict: 'doc-drift',
           confidence: 'medium',
-          brief: 'The section overstates what analyze guarantees.',
+          brief: 'The document overstates what analyze guarantees.',
           recommendation: 'Soften the promise, or bound the work.',
         },
       };
@@ -1390,13 +1372,12 @@ describe('Guard flow read surfaces', () => {
           {
             id: RED_SCENARIO,
             title: 'Analyze survives a pathological file',
-            binds: { doc: DOC, section: 'tasks/listing-tasks', fingerprint: FP.listing, sentences: ['tasks/listing-tasks'] },
+            binds: { doc: DOC, sentences: ['tasks/listing-tasks'] },
             outcome: 'pass',
             durationMs: 40,
             flowId: RED_FLOW,
           },
         ],
-        sections: [],
       });
 
       const res = await request(app).get(url(`flows/${RED_FLOW}`)).expect(200);
@@ -1452,13 +1433,12 @@ describe('Guard flow read surfaces', () => {
             {
               id: RED_SCENARIO,
               title: 'Analyze survives a pathological file',
-              binds: { doc: DOC, section: 'tasks/listing-tasks', fingerprint: FP.listing, sentences: ['tasks/listing-tasks'] },
+              binds: { doc: DOC, sentences: ['tasks/listing-tasks'] },
               outcome: 'pass',
               durationMs: 40,
               flowId: RED_FLOW,
             },
           ],
-          sections: [],
         });
         const res = await request(app).get(url(`flows/${RED_FLOW}`)).expect(200);
         expect(res.body.surfaces[0]).toMatchObject({ status: 'pass', stage: 'run' });

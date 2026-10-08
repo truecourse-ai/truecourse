@@ -1120,14 +1120,13 @@ export interface AuthorUserContext {
   priorFlag?: { title: string; mismatch: string }
   /**
    * Incremental authoring — the flow's COMMITTED scenarios, to be edited rather
-   * than re-sampled, plus what moved since they were authored: the bound
-   * sections whose text changed (their new text is already in the briefing) and
-   * the interfaces whose code surface changed. Never set beside `priorFlag`: a
-   * rejected prior is authored away from, not edited.
+   * than re-sampled, plus what moved since they were authored: the interfaces
+   * whose code surface changed (the flow's own text is already in the briefing).
+   * Never set beside `priorFlag`: a rejected prior is authored away from, not
+   * edited.
    */
   priorScenarios?: readonly { id: string; yaml: string }[]
   movedInputs?: {
-    sections: readonly { doc: string; anchor: string; heading: string }[]
     interfaces: readonly string[]
   }
   /**
@@ -1749,21 +1748,17 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     }
   }
   if (ctx.priorScenarios && ctx.priorScenarios.length > 0) {
-    const moved = ctx.movedInputs ?? { sections: [], interfaces: [] }
+    const moved = ctx.movedInputs ?? { interfaces: [] }
     lines.push(
       '',
       'PRIOR SCENARIOS — this flow already has COMMITTED scenarios. EDIT them; do not',
       'start over. What moved since they were authored:',
     )
-    if (moved.sections.length > 0) {
-      lines.push('  sections whose text changed (their CURRENT text is above):')
-      for (const s of moved.sections) lines.push(`    - ${s.doc} #${s.anchor} — "${s.heading}"`)
-    }
     if (moved.interfaces.length > 0) {
       lines.push('  interfaces whose code surface changed:')
       for (const id of moved.interfaces) lines.push(`    - ${id}`)
     }
-    if (moved.sections.length === 0 && moved.interfaces.length === 0) {
+    if (moved.interfaces.length === 0) {
       lines.push('  (the inputs moved in a way the engine could not attribute — re-verify every step)')
     }
     lines.push(
@@ -1771,7 +1766,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       '  1. Keep every step that still holds BYTE-FOR-BYTE. Re-submitting a scenario',
       '     unchanged (with its `replaces` id) is the correct answer when nothing moved',
       '     under it.',
-      '  2. Change only the steps the moved sections/interfaces invalidate. Never weaken',
+      '  2. Change only the steps the moved text/interfaces invalidate. Never weaken',
       '     an assertion or drop a milestone to make a step pass.',
       '  3. `submit_scenario` with `replaces: <id>` keeps that id and its place in the',
       '     corpus. Omit `replaces` ONLY for an obligation the current text states that',
@@ -2644,7 +2639,7 @@ export interface FlowDigest {
   areaId: string
   title: string
   goal: string
-  milestones: { doc: string; anchor: string; claimTitle: string; sentences: string[]; caseIds?: string[] }[]
+  milestones: { doc: string; claimId: string; claimTitle: string; sentences: string[]; caseIds?: string[] }[]
 }
 
 /** The epic pass's engine feedback for its ONE corrective re-ask. */

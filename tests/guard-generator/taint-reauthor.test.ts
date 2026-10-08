@@ -12,6 +12,7 @@ import { autoResolutionKey } from '@truecourse/shared'
 import { readGuardAutoResolutions, writeGuardAutoResolutions, writeManifest } from '@truecourse/guard-runner'
 import type { FlowWorkerTask } from '@truecourse/guard-generator'
 import {
+  FIXTURE_BIN,
   PASSING_STEPS,
   claimsBy,
   flowWorkerSessionOf,
@@ -178,8 +179,9 @@ describe('flow taint — what the worker is told, and when the taint clears', ()
       flowWorkerSession: submitWorkerSessions(() => raw('relkit --version prints the version', PASSING_STEPS)),
     })
     expect(first.written.length).toBe(1)
-    // …then move the bound section AND taint the flow: the taint wins.
-    writeDoc(r, DOC, DOC_CONTENT.replace('prints the version', 'prints the SEMVER version'))
+    // …then move the cli entry (the flow re-opens, its composition unchanged)
+    // AND taint the flow: the taint wins.
+    writeRecipe(r, { entry: ['node', '--no-warnings', FIXTURE_BIN] })
     const mismatch = 'asserts exit 0 where the claim quotes exact output'
     writeGuardAutoResolutions(r, taintedLedger(mismatch))
 

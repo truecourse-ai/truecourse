@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { GuardFlowMilestoneSchema, SessionExtractedClaimSchema, flowFingerprint, scenarioMilestoneScopeDefect, verificationCapabilityGap } from '@truecourse/shared'
+import { GuardFlowMilestoneSchema, flowFingerprint, scenarioMilestoneScopeDefect, verificationCapabilityGap } from '@truecourse/shared'
 
-const milestone = { order: 1, doc: 'spec.md', anchor: 'money', claimTitle: 'Returns integer cents', sentences: ['money'], proofDrivers: ['api'] as const }
+const milestone = { order: 1, doc: 'spec.md', claimId: 'claim::spec.md::money', claimTitle: 'Returns integer cents', sentences: ['money'], proofDrivers: ['api'] as const }
 const m = GuardFlowMilestoneSchema.parse(milestone)
 describe('verification obligations and scoped proof', () => {
   it('retains legacy milestones and fingerprints verification changes', () => {
@@ -60,7 +60,7 @@ describe('case observation boundaries', () => {
     expect(GuardManifestGapSchema.parse(legacy)).toEqual(legacy)
     const obligations = [{ milestone: 1, caseId: 'description-link' }]
     expect(GuardManifestGapSchema.parse({ ...legacy, obligations }).obligations).toEqual(obligations)
-    expect(GuardCoverageGapSchema.parse({ doc: 'spec.md', anchor: 'list', kind: 'no-interface', reason: 'missing', milestones: [1], obligations }).obligations).toEqual(obligations)
+    expect(GuardCoverageGapSchema.parse({ flowId: 'list', kind: 'no-interface', reason: 'missing', milestones: [1], obligations }).obligations).toEqual(obligations)
   })
 })
 

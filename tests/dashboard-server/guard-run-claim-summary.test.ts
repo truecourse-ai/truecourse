@@ -14,7 +14,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { guardFlowsPath, manifestPath, writeGuardClaims } from '@truecourse/guard-runner';
-import { claimContentHash, type GuardLatest } from '@truecourse/shared';
+import { claimId, type GuardLatest } from '@truecourse/shared';
 import { readGuardRunCoverage } from '@truecourse/core/lib/guard-store';
 import { readGuardRunFlowSummaryFromTree } from '@truecourse/core/commands/guard-read';
 import { log } from '@truecourse/core/lib/logger';
@@ -26,23 +26,20 @@ import { persistGuardRun } from '../../apps/dashboard/server/src/jobs/materializ
 import { setupTestFixture, teardownTestFixture, type TestFixture } from '../helpers/test-fixture';
 
 const DOC = 'context/site-docs-acme/refunds.md';
-const REFUNDS_CLAIM = `claim::${DOC}::refunds`;
-const TIMING_CLAIM = `claim::${DOC}::timing`;
+const REFUNDS_CLAIM = claimId(DOC, ['refunds']);
+const TIMING_CLAIM = claimId(DOC, ['timing']);
 
 let repo: TestFixture;
 
 /** The claim corpus: two claims, one the flow carries and one nothing does. */
 function writeClaims(repoPath: string): void {
-  const refunds = { doc: DOC, anchor: 'refunds', title: 'a refund settles', claim: 'A refund settles within two business days.' };
-  const timing = { doc: DOC, anchor: 'timing', title: 'within two days', claim: 'Within two days.' };
   writeGuardClaims(repoPath, {
     version: 1,
     generatedAt: '2026-09-01T00:00:00.000Z',
     claims: [
-      { id: REFUNDS_CLAIM, ...refunds, contentHash: claimContentHash(refunds) },
-      { id: TIMING_CLAIM, ...timing, contentHash: claimContentHash(timing) },
+      { id: REFUNDS_CLAIM, doc: DOC, sentences: ['refunds'], subject: 'refund', statement: 'A refund settles within two business days.', areas: [], testable: true },
+      { id: TIMING_CLAIM, doc: DOC, sentences: ['timing'], subject: 'refund', statement: 'A refund settles within two days.', areas: [], testable: true },
     ],
-    untestable: [],
   });
 }
 
@@ -57,8 +54,8 @@ function writeManifest(repoPath: string, extraFlows: object[] = []): void {
       flows: [
         {
           id: 'f1', title: 'a refund settles', goal: 'settle a refund', fingerprint: 'sha256:f',
-          milestones: [{ order: 1, doc: DOC, anchor: 'refunds', claimTitle: 'a refund settles', sentences: ['refunds'] }],
-          bindings: [{ doc: DOC, anchor: 'refunds', fingerprint: 'sha256:x', sentences: ['refunds'] }],
+          milestones: [{ order: 1, doc: DOC, claimId: REFUNDS_CLAIM, claimTitle: 'a refund settles', sentences: ['refunds'] }],
+          bindings: [{ doc: DOC, sentences: ['refunds'] }],
           composedOf: [], synthesisInputsHash: 'sha256:i',
         },
       ],
@@ -72,7 +69,7 @@ function writeManifest(repoPath: string, extraFlows: object[] = []): void {
         {
           flowId: 'f1',
           flowFingerprint: 'sha256:f',
-          bindings: [{ doc: DOC, anchor: 'refunds', fingerprint: 'sha256:x', sentences: ['refunds'] }],
+          bindings: [{ doc: DOC, sentences: ['refunds'] }],
           scenarios: [{ id: 's1', drivers: ['cli'] }],
           interfaces: [],
           generationInputsHash: null,
@@ -99,12 +96,11 @@ function run(runId: string, ranAt: string): GuardLatest {
       {
         id: 's1',
         title: 'a refund settles',
-        binds: { doc: DOC, section: 'refunds', fingerprint: 'sha256:x', sentences: ['refunds'] },
+        binds: { doc: DOC, sentences: ['refunds'] },
         outcome: 'fail',
         durationMs: 1,
       },
     ],
-    sections: [],
   } as GuardLatest;
 }
 
@@ -158,7 +154,7 @@ describe('a run’s coverage summaries', () => {
       {
         flowId: 'retired-flow',
         flowFingerprint: 'sha256:old',
-        bindings: [{ doc: DOC, anchor: 'timing', fingerprint: 'sha256:old', sentences: ['timing'] }],
+        bindings: [{ doc: DOC, sentences: ['timing'] }],
         scenarios: [{ id: 's-old', drivers: ['cli'], status: 'passing' }],
         interfaces: [],
         generationInputsHash: null,
@@ -185,7 +181,7 @@ describe('a run’s coverage summaries', () => {
       {
         flowId: 'retired-flow',
         flowFingerprint: 'sha256:old',
-        bindings: [{ doc: DOC, anchor: 'timing', fingerprint: 'sha256:old', sentences: ['timing'] }],
+        bindings: [{ doc: DOC, sentences: ['timing'] }],
         scenarios: [{ id: 's-old', drivers: ['cli'], status: 'passing' }],
         interfaces: [],
         generationInputsHash: null,

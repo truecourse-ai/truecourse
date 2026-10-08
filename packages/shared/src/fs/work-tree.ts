@@ -19,7 +19,6 @@
  *   guard/LATEST.json              the current run state
  *   guard/runs/<runId>.json        per-run snapshots
  *   guard/history.json             per-run summaries, append-only
- *   guard/sections/<runId>.json    a run's per-section summary
  *   guard/result.json              the last `guard generate` report
  *   guard/setup.json               the last `guard setup` record
  *   guard/interfaces.json          the derived interface catalog
@@ -63,7 +62,6 @@ const SPECS_DIR = 'specs';
 const GUARD_DIR = 'guard';
 const SCENARIOS_DIR = 'scenarios';
 const RUNS_DIR = 'runs';
-const SECTIONS_DIR = 'sections';
 const EVIDENCE_DIR = 'evidence';
 const CACHE_DIR = '.cache';
 const WORLD_DIR = 'world';
@@ -145,14 +143,6 @@ export function guardRunPath(workDir: string, runId: string): string {
 
 export function guardHistoryPath(workDir: string): string {
   return path.join(guardDir(workDir), HISTORY_FILE);
-}
-
-export function guardSectionsDir(workDir: string): string {
-  return path.join(guardDir(workDir), SECTIONS_DIR);
-}
-
-export function guardSectionsPath(workDir: string, runId: string): string {
-  return path.join(guardSectionsDir(workDir), `${runId}.json`);
 }
 
 export function guardResultPath(workDir: string): string {

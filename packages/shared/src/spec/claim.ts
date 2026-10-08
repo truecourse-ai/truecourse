@@ -77,6 +77,13 @@ export function claimId(doc: string, sentences: readonly string[], repeat = 0): 
   return repeat > 0 ? `${base}-${repeat + 1}` : base
 }
 
+/** Claim id → claim. Later duplicates lose (the loader reports them separately). */
+export function claimsById<T extends { id: string }>(claims: readonly T[]): Map<string, T> {
+  const out = new Map<string, T>()
+  for (const c of claims) if (!out.has(c.id)) out.set(c.id, c)
+  return out
+}
+
 export function isClaimId(id: string): boolean {
   return id.startsWith(CLAIM_ID_PREFIX)
 }

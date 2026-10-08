@@ -63,15 +63,12 @@ import {
   guardFlowPlainStatus,
   type GuardCoveragePlainStatus,
   type GuardClaimTotals,
-  GuardClaimsFileSchema,
+  ClaimsFileSchema,
   GuardFlowsFileSchema,
   GuardOutcomeSchema,
   GuardCoverageGapKindSchema,
   isGuardFailure,
   awaitingDriverIds,
-  claimIdentityKey,
-  claimsByIdentity,
-  guardClaimKey,
   milestoneClaims,
   deriveNeedsSetup,
   describeGuardScenarioSetup,
@@ -95,14 +92,13 @@ import {
   guardResultRunId,
   type GuardBirthFinding,
   type GuardTriage,
-  type GuardClaim,
+  type Claim,
   type GuardClaimFlow,
   type GuardClaimRow,
   type GuardClaimScenarioRef,
-  type GuardClaimsFile,
+  type ClaimsFile,
   type GuardClaimsView,
   type GuardUntestableRow,
-  type GuardUntestableStatement,
   type GuardCoverageGap,
   type GuardCoverageGapKind,
   type GuardDecisions,
@@ -138,8 +134,6 @@ import {
   type GuardExternalSetupIndex,
   type GuardManifest,
   type GuardManifestFlow,
-  guardManifestSections,
-  type GuardManifestSectionView,
   type GuardNeedsSetup,
   type GuardGenerateReport,
   type GuardRecipeCard,
@@ -244,7 +238,7 @@ export interface GuardCoverageSources {
    */
   flows?: GuardFlowsFile | null
   /** The claim corpus (`scenarios/claims.json`): the rows the coverage is keyed by. */
-  claims?: GuardClaimsFile | null
+  claims?: ClaimsFile | null
   /** The flows a Playwright test proves, by flow id; a test's verdict is its flow's status. */
   tests?: ReadonlyMap<string, FlowTestRecord>
   /** The decisions ledger: a dismissed claim wears `dismissed`, a dismissed flow is marked. */
@@ -308,14 +302,13 @@ function composeClaimsView(view: FlowViewSources): GuardClaimsView {
       }
     }
   }
-  const noFlowByIdentity = new Map(
-    (view.flowsFile?.noFlowClaims ?? []).map((c) => [claimIdentityKey(c.doc, c.anchor, c.claimTitle), c]),
-  )
+  const noFlowByClaim = new Map((view.flowsFile?.noFlowClaims ?? []).map((c) => [c.claimId, c]))
 
-  const claims = file.claims.map((c) =>
+  const testable = file.claims.filter((c) => c.testable === true)
+  const claims = testable.map((c) =>
     resolveClaimCoverage(c, view, {
       dismissal: view.claimDismissals.get(c.id),
-      noFlow: noFlowByIdentity.get(guardClaimKey(c)),
+      noFlow: noFlowByClaim.get(c.id),
       proofs: [...(proofsByClaim.get(c.id)?.values() ?? [])].map((p) => {
         const outcome = outcomeByScenarioId.get(p.scenarioId)
         return outcome ? { ...p, outcome } : p
@@ -324,16 +317,19 @@ function composeClaimsView(view: FlowViewSources): GuardClaimsView {
   )
   const byStatus = Object.fromEntries(GUARD_COVERAGE_PLAIN_ORDER.map((w) => [w, 0])) as Record<GuardCoveragePlainStatus, number>
   for (const c of claims) byStatus[guardCoveragePlainStatus(c.status)]++
+  const untestable: GuardUntestableRow[] = file.claims.flatMap((c) =>
+    c.testable === true ? [] : [{ id: c.id, doc: c.doc, statement: c.statement, reason: c.testable.reason }],
+  )
   return {
     extracted: true,
     generatedAt: file.generatedAt,
     claims,
-    untestable: file.untestable.map((u) => ({ doc: u.doc, text: u.text, reason: u.reason })),
+    untestable,
     totals: {
       claims: claims.length,
       byStatus,
       dismissed: claims.filter((c) => c.dismissed).length,
-      untestable: file.untestable.length,
+      untestable: untestable.length,
     },
   }
 }
@@ -409,7 +405,7 @@ async function runSummaryCommit(
 
 /**
  * The FLOW SUMMARY of one run: every flow of the repository as the word it wore
- * then. Written beside the section summary when the run is persisted, and read
+ * then. Written beside the claim summary when the run is persisted, and read
  * back as the trend on Home, so a point of it costs no re-derivation.
  *
  * The word comes from {@link flowListItem} through {@link guardFlowPlainStatus},
@@ -586,7 +582,7 @@ interface FlowJoin {
    * elsewhere and neither means "no test could be written".
    */
   authoringErrorsByFlow: Map<string, GuardGenerateError[]>
-  /** Flow ids whose milestones name a claim, by {@link claimIdentityKey}, corpus order, deduped. */
+  /** Flow ids whose milestones name a claim, by claim id, corpus order, deduped. */
   flowIdsByClaim: Map<string, string[]>
   /** Providable-external index; null ⇒ every `blocked-on` stays plain. */
   externals: GuardExternalSetupIndex | null
@@ -660,9 +656,8 @@ function buildFlowJoin(sources: FlowJoinSources): FlowJoin {
   const flowIdsByClaim = new Map<string, string[]>()
   for (const flow of corpus.values()) {
     for (const m of flow.milestones) {
-      const key = claimIdentityKey(m.doc, m.anchor, m.claimTitle)
-      const list = flowIdsByClaim.get(key)
-      if (!list) flowIdsByClaim.set(key, [flow.id])
+      const list = flowIdsByClaim.get(m.claimId)
+      if (!list) flowIdsByClaim.set(m.claimId, [flow.id])
       else if (!list.includes(flow.id)) list.push(flow.id)
     }
   }
@@ -874,8 +869,8 @@ function rollUpFlow(surfaces: readonly GuardFlowSurface[]): {
  * (its test's verdict when a test proves it, else its scenarios' surfaces),
  * with the orders of the milestones that prove THIS claim.
  */
-function claimFlows(identity: string, view: FlowViewSources): GuardClaimFlow[] {
-  const flows = (view.join.flowIdsByClaim.get(identity) ?? []).map((flowId) => {
+function claimFlows(claimId: string, view: FlowViewSources): GuardClaimFlow[] {
+  const flows = (view.join.flowIdsByClaim.get(claimId) ?? []).map((flowId) => {
     const item = flowListItem(flowId, view)
     const roll = rollUpFlow(item.surfaces)
     const test = view.tests.get(flowId)
@@ -889,7 +884,7 @@ function claimFlows(identity: string, view: FlowViewSources): GuardClaimFlow[] {
       epic: item.epic,
       manual: item.manual,
       milestoneOrders: (view.join.corpus.get(flowId)?.milestones ?? [])
-        .filter((m) => claimIdentityKey(m.doc, m.anchor, m.claimTitle) === identity)
+        .filter((m) => m.claimId === claimId)
         .map((m) => m.order)
         .sort((a, b) => a - b),
       milestoneCount: item.milestoneCount,
@@ -914,7 +909,7 @@ function statusRank(status: GuardCoverageStatus): number {
  * the ruling stands until the next generate drops them.
  */
 function resolveClaimCoverage(
-  claim: GuardClaim,
+  claim: Claim,
   view: FlowViewSources,
   joins: {
     dismissal: GuardDismissedClaim | undefined
@@ -922,7 +917,7 @@ function resolveClaimCoverage(
     proofs: GuardClaimScenarioRef[]
   },
 ): GuardClaimRow {
-  const flows = claimFlows(guardClaimKey(claim), view)
+  const flows = claimFlows(claim.id, view)
   const candidates: Array<{ status: GuardCoverageStatus; reason?: string; needsSetup?: GuardNeedsSetup }> = flows.map((f) => ({
     status: f.status,
     ...(f.reason ? { reason: f.reason } : {}),
@@ -942,10 +937,8 @@ function resolveClaimCoverage(
   return {
     id: claim.id,
     doc: claim.doc,
-    title: claim.title,
-    claim: claim.claim,
-    contentHash: claim.contentHash,
-    ...(claim.verifyVia ? { verifyVia: claim.verifyVia } : {}),
+    statement: claim.statement,
+    sentences: [...claim.sentences],
     status,
     ...(reason ? { reason } : {}),
     ...(status === 'needs-setup'
@@ -970,7 +963,7 @@ function push<T>(map: Map<string, T[]>, key: string, value: T): void {
 /**
  * List every stored scenario for the inventory read, plus the preparation-recipe
  * card. Generated AND hand-written scenarios are included: hand-written = an id no
- * manifest section binds (the manifest lists the ids the generator authored). The
+ * manifest flow lists (the manifest lists the ids the generator authored). The
  * last-run outcome / orphaned flag are joined client-side from the run store —
  * this list is run-independent, so the stored scenario set shows before any run
  * has covered it.
@@ -991,7 +984,7 @@ export async function listGuardScenarios(repoKey: string, ref?: string): Promise
     }
   }
 
-  // The row shows the FIRST bound section (a flow binds several) and names the
+  // The row shows the FIRST bound document (a flow binds several) and names the
   // flow it realizes — hand-written work under its Manual pseudo-flow, so the
   // Flows page's drill-down covers every stored scenario.
   const fileById = await scenarioFilesById(repoKey, commit)
@@ -1003,7 +996,6 @@ export async function listGuardScenarios(repoKey: string, ref?: string): Promise
         id: s.id,
         title: s.title,
         doc: s.binds[0].doc,
-        anchor: s.binds[0].section,
         file: fileById.get(s.id) ?? '',
         handWritten: !ownerByScenario.has(s.id),
         flowId,
@@ -1011,9 +1003,7 @@ export async function listGuardScenarios(repoKey: string, ref?: string): Promise
         ...(status ? { status } : {}),
       }
     })
-    .sort(
-      (a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor) || a.id.localeCompare(b.id),
-    )
+    .sort((a, b) => a.doc.localeCompare(b.doc) || a.id.localeCompare(b.id))
 
   return {
     recipe: await readGuardRecipeCard(repoKey, commit),
@@ -1170,7 +1160,7 @@ interface FlowViewSources {
   /** The decisions ledger's claim dismissals, by claim id. */
   claimDismissals: Map<string, GuardDismissedClaim>
   /** The claim corpus at the view's commit; null when none was written. */
-  claims: GuardClaimsFile | null
+  claims: ClaimsFile | null
 }
 
 /** A flow's dismissal as the flow views carry it. */
@@ -1235,27 +1225,21 @@ function allFlowIds(view: FlowViewSources): string[] {
   return ids
 }
 
-/** The sections a flow binds: the corpus' bindings, else the manifest's, else its
+/** The documents a flow binds, sorted: the corpus' bindings, else the manifest's, else its
  *  scenarios' own binds (a hand-written scenario declares its own). */
-function flowSections(flowId: string, join: FlowJoin): Array<{ doc: string; anchor: string }> {
+function flowDocs(flowId: string, join: FlowJoin): string[] {
   const flow = join.corpus.get(flowId)
-  if (flow) return flow.bindings.map((b) => ({ doc: b.doc, anchor: b.anchor }))
+  if (flow) return [...new Set(flow.bindings.map((b) => b.doc))].sort()
   const entry = join.manifestFlows.get(flowId)
-  if (entry) return entry.bindings.map((b) => ({ doc: b.doc, anchor: b.anchor }))
-  const out: Array<{ doc: string; anchor: string }> = []
+  if (entry) return [...new Set(entry.bindings.map((b) => b.doc))].sort()
+  const out = new Set<string>()
   for (const id of join.scenarioIdsByFlow.get(flowId) ?? []) {
     const scenario = join.scenarioById.get(id)
-    for (const b of scenario?.binds ?? []) {
-      if (!out.some((s) => s.doc === b.doc && s.anchor === b.section)) {
-        out.push({ doc: b.doc, anchor: b.section })
-      }
-    }
+    for (const b of scenario?.binds ?? []) out.add(b.doc)
     const run = join.runById.get(id)
-    if (!scenario && run && !out.some((s) => s.doc === run.binds.doc && s.anchor === run.binds.section)) {
-      out.push({ doc: run.binds.doc, anchor: run.binds.section })
-    }
+    if (!scenario && run) out.add(run.binds.doc)
   }
-  return out
+  return [...out].sort()
 }
 
 /**
@@ -1300,10 +1284,8 @@ function scenarioIdsFor(flowId: string, join: FlowJoin): string[] {
 }
 
 /**
- * The generate errors that belong to this flow. An error the generator attributed to
- * a flow joins on that id exactly; an older (or genuinely section-scoped) error falls
- * back to the flow's bound sections — best effort, since many flows can bind one
- * section, and stated as such in the payload docs.
+ * The generate errors that belong to this flow: the ones the generator
+ * attributed to it by id.
  *
  * A RUN-LEVEL refusal is attributed last and separately: it names the flows whose
  * validation it cancelled, so each of them can say what blocked it while the report
@@ -1314,10 +1296,7 @@ function flowErrors(
   join: FlowJoin,
   result: GuardGenerateReport | null,
 ): GuardGenerateError[] {
-  const sections = new Set(flowSections(flowId, join).map((s) => `${s.doc}\0${s.anchor}`))
-  const errors = (result?.errors ?? []).filter((e) =>
-    e.flowId ? e.flowId === flowId : sections.has(`${e.doc}\0${e.anchor}`),
-  )
+  const errors = (result?.errors ?? []).filter((e) => e.flowId === flowId)
   const refusal = result?.refusal
   if (refusal?.flowIds.includes(flowId)) errors.push(runRefusalError(refusal))
   return errors
@@ -1483,7 +1462,6 @@ function flowListItem(
   const { join, result } = view
   const flow = join.corpus.get(flowId)
   const surfaces = flowSurfaces(flowId, join)
-  const sections = flowSections(flowId, join)
   const test = view.tests.get(flowId)
   return {
     flowId,
@@ -1495,8 +1473,7 @@ function flowListItem(
     composedOf: flow?.composedOf ?? [],
     manual: isManualFlowId(flowId),
     milestoneCount: flow?.milestones.length ?? 0,
-    sectionCount: sections.length,
-    docs: [...new Set(sections.map((s) => s.doc))].sort(),
+    docs: flowDocs(flowId, join),
     surfaces,
     drivers: flowDrivers(surfaces, join),
     // Only DRIFT-class findings say the flow is failing. A withheld generation
@@ -1580,8 +1557,7 @@ export async function guardFlowExists(repoKey: string, flowId: string, ref?: str
 }
 
 /**
- * One flow's detail: the milestone chain joined to the LIVE spec sections (heading
- * text, live/gone, and whether the bound section drifted), the per-surface
+ * One flow's detail: the milestone chain (each step's claim), the per-surface
  * scenario rows (source file, birth/run state, evidence pointer, interface path),
  * the gaps, and the findings the last generate attributed to the flow. `null` when
  * no flow (real or Manual) carries the id — the route answers 404.
@@ -1597,14 +1573,11 @@ export async function readGuardFlowDetail(
 
   const flow = join.corpus.get(flowId)
   const surfaces = flowSurfaces(flowId, join)
-  const sections = flowSections(flowId, join)
 
-  const claimByIdentity = claimsByIdentity(view.claims?.claims ?? [])
   const milestones: GuardFlowMilestoneView[] = (flow?.milestones ?? [])
     .slice()
     .sort((a, b) => a.order - b.order)
     .map((m) => {
-      const claim = claimByIdentity.get(claimIdentityKey(m.doc, m.anchor, m.claimTitle))
       // The cases ride as cases. They used to be folded into the claim sentence
       // as one semicolon-joined run-on, which a milestone with a dozen of them
       // turned into an unreadable paragraph and named none of them.
@@ -1612,9 +1585,8 @@ export async function readGuardFlowDetail(
       return {
         order: m.order,
         doc: m.doc,
-        anchor: m.anchor,
+        claimId: m.claimId,
         claimTitle: m.claimTitle,
-        ...(claim ? { claimId: claim.id } : {}),
         ...(cases.length > 0 ? { cases } : {}),
         ...(m.note ? { note: m.note } : {}),
       }
@@ -1785,7 +1757,7 @@ export async function readGuardRunFlows(
       milestones: f.milestones
         .slice()
         .sort((a, b) => a.order - b.order)
-        .map((m) => ({ order: m.order, doc: m.doc, anchor: m.anchor, claimTitle: m.claimTitle })),
+        .map((m) => ({ order: m.order, doc: m.doc, claimId: m.claimId, claimTitle: m.claimTitle })),
     }))
 }
 
@@ -1896,7 +1868,7 @@ function claimsRelPath(repoKey: string): string {
 export async function readGuardClaimsFile(
   repoKey: string,
   commit?: string,
-): Promise<GuardClaimsFile | null> {
+): Promise<ClaimsFile | null> {
   const raw = await readScenarioFile(repoKey, claimsRelPath(repoKey), at(commit))
   if (raw == null) return null
   let parsed: unknown
@@ -1905,12 +1877,12 @@ export async function readGuardClaimsFile(
   } catch {
     return null
   }
-  const result = GuardClaimsFileSchema.safeParse(parsed)
+  const result = ClaimsFileSchema.safeParse(parsed)
   return result.success ? result.data : null
 }
 
 /** The claim corpus a (possibly commit-pinned) view reads — baseline fallback included. */
-export function readGuardClaimsForView(repoKey: string, ref?: string): Promise<GuardClaimsFile | null> {
+export function readGuardClaimsForView(repoKey: string, ref?: string): Promise<ClaimsFile | null> {
   return readPinnedWithBaselineFallback(repoKey, ref, (c) => readGuardClaimsFile(repoKey, c))
 }
 

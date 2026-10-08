@@ -28,13 +28,9 @@ const report = (generatedAt: string): GuardGenerateReport => ({
   noChanges: false,
   written: [],
   birthFindings: [],
-  sectionsTotal: 0,
-  sectionsChanged: 0,
-  skippedUnchanged: 0,
   coverageGaps: [],
   errors: [],
   extractionFailures: [],
-  orphaned: [],
 });
 
 /** A scenario set with one flow, saved at `commit`. */

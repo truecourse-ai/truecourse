@@ -1,13 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import {
-  claimContentHash,
-  guardClaimKey,
-  type GuardClaim,
-  type GuardClaimsFile,
-  type GuardFlowsFile,
-} from '@truecourse/shared'
+import { type Claim, type ClaimsFile, type GuardFlowsFile } from '@truecourse/shared'
 import {
   crossCheckClaimRefs,
   guardClaimsPath,
@@ -32,20 +26,19 @@ function repo(): string {
 }
 
 const DOC = 'docs/spec.md'
-const claim = (over: Partial<GuardClaim> & Pick<GuardClaim, 'id' | 'title'>): GuardClaim => {
-  const body = {
-    doc: over.doc ?? DOC,
-    anchor: over.anchor ?? 'a/b',
-    title: over.title,
-    claim: over.claim ?? `${over.title} holds.`,
-  }
-  return { id: over.id, ...body, contentHash: claimContentHash(body) }
-}
-const claimsFile = (claims: GuardClaim[]): GuardClaimsFile => ({
+const claim = (id: string, statement: string): Claim => ({
+  id,
+  doc: DOC,
+  sentences: [`sentence:${id}`],
+  subject: 'the thing',
+  statement,
+  areas: [],
+  testable: true,
+})
+const claimsFile = (claims: Claim[]): ClaimsFile => ({
   version: 1,
   generatedAt: '2026-08-07T00:00:00.000Z',
   claims,
-  untestable: [],
 })
 const flowsFile = (over: Partial<GuardFlowsFile> = {}): GuardFlowsFile => ({
   version: 1,
@@ -54,30 +47,32 @@ const flowsFile = (over: Partial<GuardFlowsFile> = {}): GuardFlowsFile => ({
   noFlowClaims: [],
   ...over,
 })
-const flow = (milestoneTitles: string[]): GuardFlowsFile['flows'][number] => ({
+/** A flow whose milestones prove the claims named, in order. */
+const flow = (claimIds: string[]): GuardFlowsFile['flows'][number] => ({
   id: 'f1',
   title: 'A flow',
   goal: 'A goal',
   fingerprint: 'sha256:f',
-  milestones: milestoneTitles.map((claimTitle, i) => ({
+  milestones: claimIds.map((claimId, i) => ({
     order: i + 1,
     doc: DOC,
-    anchor: 'a/b',
-    claimTitle, sentences: ['a/b'],
+    claimId,
+    claimTitle: `the statement of ${claimId}`,
+    sentences: [`sentence:${claimId}`],
   })),
-  bindings: [{ doc: DOC, anchor: 'a/b', fingerprint: 'sha256:s', sentences: ['a/b'] }],
+  bindings: [{ doc: DOC, sentences: claimIds.map((id) => `sentence:${id}`) }],
   composedOf: [],
   synthesisInputsHash: 'sha256:i',
 })
 
 describe('crossCheckClaimRefs', () => {
-  const known = claim({ id: 'known-claim', title: 'the thing works' })
+  const known = claim('known-claim', 'The thing works.')
 
   it('is a no-op when the repo has no claims store', () => {
     expect(
       crossCheckClaimRefs({
         claims: null,
-        flows: flowsFile({ flows: [flow(['anything at all'])] }),
+        flows: flowsFile({ flows: [flow(['anything-at-all'])] }),
         scenarios: [],
       }),
     ).toEqual([])
@@ -91,7 +86,7 @@ describe('crossCheckClaimRefs', () => {
     expect(
       crossCheckClaimRefs({
         claims: claimsFile([known]),
-        flows: flowsFile({ flows: [flow([known.title])] }),
+        flows: flowsFile({ flows: [flow([known.id])] }),
         scenarios: [{ scenario: s, file: 'a.yaml' }],
       }),
     ).toEqual([])
@@ -116,34 +111,34 @@ describe('crossCheckClaimRefs', () => {
     expect(errors[0].message).toContain('ghost-claim')
   })
 
-  it('reports a flow milestone whose claim IDENTITY resolves to nothing', () => {
+  it('reports a flow milestone whose claim id resolves to nothing', () => {
     const errors = crossCheckClaimRefs({
       claims: claimsFile([known]),
-      flows: flowsFile({ flows: [flow([known.title, 'a claim nobody extracted'])] }),
+      flows: flowsFile({ flows: [flow([known.id, 'never-extracted'])] }),
       scenarios: [],
     })
     expect(errors).toHaveLength(1)
     expect(errors[0].file).toContain('flows.json')
     expect(errors[0].message).toContain('milestone 2')
-    expect(errors[0].message).toContain('a claim nobody extracted')
+    expect(errors[0].message).toContain('never-extracted')
   })
 
   it('reports a noFlowClaims entry the store does not declare', () => {
     const errors = crossCheckClaimRefs({
       claims: claimsFile([known]),
       flows: flowsFile({
-        noFlowClaims: [{ doc: DOC, anchor: 'a/b', claimTitle: 'unknown gap', reason: 'unobservable' }],
+        noFlowClaims: [{ claimId: 'unknown-gap', reason: 'unobservable' }],
       }),
       scenarios: [],
     })
     expect(errors).toHaveLength(1)
     expect(errors[0].file).toContain('flows.json')
-    expect(errors[0].message).toContain('unknown gap')
+    expect(errors[0].message).toContain('unknown-gap')
   })
 
   it('reports a duplicated claim id — a milestone tag naming it would be ambiguous', () => {
     const errors = crossCheckClaimRefs({
-      claims: claimsFile([known, claim({ id: known.id, title: 'a different claim' })]),
+      claims: claimsFile([known, claim(known.id, 'A different claim.')]),
       flows: null,
       scenarios: [],
     })
@@ -152,21 +147,21 @@ describe('crossCheckClaimRefs', () => {
     expect(errors[0].message).toContain('duplicate claim id')
   })
 
-  it('resolves an identity by doc + anchor + title, not by title alone', () => {
+  it('resolves a milestone by its claim id, never by its title', () => {
     const errors = crossCheckClaimRefs({
       claims: claimsFile([known]),
       flows: flowsFile({
         flows: [
           {
-            ...flow([known.title]),
-            milestones: [{ order: 1, doc: DOC, anchor: 'other/section', claimTitle: known.title, sentences: ['other/section'] }],
+            ...flow([known.id]),
+            milestones: [{ order: 1, doc: DOC, claimId: 'other-claim', claimTitle: known.statement, sentences: ['sentence:other'] }],
           },
         ],
       }),
       scenarios: [],
     })
     expect(errors).toHaveLength(1)
-    expect(errors[0].message).toContain('other/section')
+    expect(errors[0].message).toContain('other-claim')
   })
 })
 
@@ -174,7 +169,7 @@ describe('the claims store on disk', () => {
   it('reads back what it wrote, and reads null when absent or corrupt', () => {
     const r = repo()
     expect(readGuardClaimsCorpus(r)).toBeNull()
-    const file = claimsFile([claim({ id: 'x', title: 'a claim' })])
+    const file = claimsFile([claim('x', 'A claim.')])
     writeGuardClaims(r, file)
     expect(guardClaimsPath(r)).toBe(path.join(scenariosDir(r), 'claims.json'))
     expect(readGuardClaimsCorpus(r)).toEqual(file)
@@ -203,7 +198,7 @@ describe('loadScenarios — claim-reference diagnostics', () => {
   it('reports a dangling milestone id as a load error WITHOUT dropping the scenario', () => {
     const r = repo()
     writeRecipe(r)
-    writeGuardClaims(r, claimsFile([claim({ id: 'known-claim', title: 'the thing works' })]))
+    writeGuardClaims(r, claimsFile([claim('known-claim', 'The thing works.')]))
     writeScenario(
       r,
       'cli/a.yaml',
@@ -231,16 +226,15 @@ describe('loadScenarios — claim-reference diagnostics', () => {
   it('resolves a claim-tagged scenario cleanly when the store declares it', () => {
     const r = repo()
     writeRecipe(r)
-    const c = claim({ id: 'known-claim', title: 'the thing works' })
+    const c = claim('known-claim', 'The thing works.')
     writeGuardClaims(r, claimsFile([c]))
     fs.mkdirSync(scenariosDir(r), { recursive: true })
-    fs.writeFileSync(guardFlowsPath(r), JSON.stringify(flowsFile({ flows: [flow([c.title])] })))
+    fs.writeFileSync(guardFlowsPath(r), JSON.stringify(flowsFile({ flows: [flow([c.id])] })))
     writeScenario(
       r,
       'cli/a.yaml',
       scenario({ id: 'a', steps: [{ run: ['--version'], expect: { exit: 0 }, milestone: c.id }] }),
     )
     expect(loadScenarios(r).errors).toEqual([])
-    expect(guardClaimKey(c)).toBe(guardClaimKey({ doc: DOC, anchor: 'a/b', title: c.title }))
   })
 })

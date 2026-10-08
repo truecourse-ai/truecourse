@@ -38,7 +38,7 @@ function writeCatalog(root: string, interfaces: Interface[]): void {
 }
 
 describe('runGuard — api driver flow annotations', () => {
-  it('carries flowId, the failing milestone, and the drift annotation, and folds plural binds', async () => {
+  it('carries flowId, the failing milestone, and the drift annotation over plural binds', async () => {
     const r = repo()
     writeApiRecipe(r)
     writeCatalog(r, [TODOS])
@@ -95,10 +95,10 @@ describe('runGuard — api driver flow annotations', () => {
     expect(failed.flowId).toBe('todo-lifecycle')
     expect(failed.failedMilestone).toBe(2)
     expect(failed.interfaceDrifted).toBeUndefined()
-    // Evidence names the flow and both bound sections.
+    // Evidence names the flow and both binds.
     const transcript = fs.readFileSync(path.join(r, failed.evidencePath!, 'transcript.txt'), 'utf-8')
     expect(transcript).toContain('flow:     todo-lifecycle')
-    expect(transcript).toContain('cli/whoami')
+    expect(transcript.split(`${SPEC_DOC} (1 sentence)`).length - 1).toBe(2)
 
     expect(by.get('todo-lifecycle.api.2')).toMatchObject({
       outcome: 'pass',
@@ -109,12 +109,6 @@ describe('runGuard — api driver flow annotations', () => {
     const stale = by.get('todo-lifecycle.api.3')!
     expect(stale.outcome).toBe('stale')
     expect(stale.flowId).toBe('todo-lifecycle')
-    expect(stale.currentFingerprint).toBe(specBinds('cli/version')[0].fingerprint)
     expect(stale.durationMs).toBe(0)
-
-    // Both of the failing scenario's bound sections carry its red status.
-    const red = res.latest.sections.filter((s) => s.scenarioIds.includes('todo-lifecycle.api.1'))
-    expect(red.map((s) => s.section).sort()).toEqual(['cli/version', 'cli/whoami'])
-    expect(red.every((s) => s.status === 'fail')).toBe(true)
   })
 })

@@ -31,11 +31,6 @@ export function guardRunRef(env: GuardRunEnvelope): string {
   return [env.branch, env.commit ? env.commit.slice(0, 8) : null].filter(Boolean).join(' @ ');
 }
 
-/** The trailing heading of a section anchor (`cli/version` → `version`). */
-export function sectionLeaf(anchor: string): string {
-  return anchor.split('/').pop() || anchor;
-}
-
 /** A compact fingerprint for display (`sha256:9f2c…` → `9f2c…`, first 12 chars). */
 export function shortFingerprint(fp: string): string {
   return fp.replace(/^sha256:/, '').slice(0, 12);

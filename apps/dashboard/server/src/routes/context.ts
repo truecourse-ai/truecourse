@@ -172,8 +172,8 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   });
 
   // One document's body by its corpus ref — the address the Documents view,
-  // the claims and the scenarios all use — with its section outline, or with
-  // `?section=<anchor>` that section alone.
+  // the claims and the scenarios all use — with its outline, or with
+  // `?from=<line>&to=<line>` those lines alone.
   router.get('/doc', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
@@ -182,8 +182,11 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         res.status(400).json({ error: 'Missing ?ref=context/<source>/<document>.' });
         return;
       }
-      const section = typeof req.query.section === 'string' ? req.query.section : undefined;
-      res.json(await readWorkspaceDocument(org, ref, section));
+      const from = Number(req.query.from);
+      const to = Number(req.query.to);
+      const lines: [number, number] | undefined =
+        Number.isInteger(from) && Number.isInteger(to) && from > 0 && to > 0 ? [from, to] : undefined;
+      res.json(await readWorkspaceDocument(org, ref, lines));
     } catch (e) {
       respond(res, next, e);
     }

@@ -1,6 +1,7 @@
 /**
- * Incremental authoring: a flow whose bound section moved (same milestone
- * composition) is briefed with its COMMITTED scenarios and edits them —
+ * Incremental authoring: a flow re-opened by an input that moved under the
+ * same milestone composition (here the recipe's cli entry) is briefed with its
+ * COMMITTED scenarios and edits them —
  * `submit_scenario` with `replaces` keeps an id, an omitted `replaces` adds a
  * scenario, `drop_scenario` retires one with a reason — instead of re-sampling
  * from scratch. Taint, `--from-scratch`, and a changed composition still author
@@ -16,6 +17,7 @@ import {
   rmrf,
   writeRecipe,
   writeDoc,
+  FIXTURE_BIN,
   writeCorpus,
   raw,
   claimsBy,
@@ -38,8 +40,12 @@ const DOC_CONTENT = [
   '## background',
   'The history of relkit; nothing externally observable here.',
 ].join('\n')
-/** A real obligation change in the bound section — the flow must re-author. */
-const EDITED = DOC_CONTENT.replace('prints the version and exits 0.', 'prints the SEMVER version and exits 0.')
+/** The cli entry moves: the flow's recipe slice re-opens it, while its claims,
+ *  and so its milestone composition, stay what they were. (A reworded sentence
+ *  is a new claim, so a new flow, authored from scratch.) */
+function moveEntry(r: string): void {
+  writeRecipe(r, { entry: ['node', '--no-warnings', FIXTURE_BIN] })
+}
 
 const extraction = () => claimsBy({ background: { untestable: 'design history, nothing observable' } })
 const ORIGINAL = raw('relkit --version prints the version', PASSING_STEPS)
@@ -84,10 +90,10 @@ async function committed(r: string): Promise<{ id: string; file: string; bytes: 
 }
 
 describe('incremental authoring — editing committed scenarios', () => {
-  it('briefs the worker with its prior scenario and the moved section, and never with PRIOR FLAG', async () => {
+  it('briefs the worker with its prior scenario, and never with PRIOR FLAG', async () => {
     const r = seed()
     const prior = await committed(r)
-    writeDoc(r, DOC, EDITED)
+    moveEntry(r)
 
     const briefings: string[] = []
     const res = await generate(r, (ids) => ({ edit: [{ replaces: ids[0]!, scenario: ORIGINAL }] }), { briefings })
@@ -96,23 +102,19 @@ describe('incremental authoring — editing committed scenarios', () => {
     expect(briefings[0]).toContain('PRIOR SCENARIOS')
     expect(briefings[0]).toContain(`--- prior scenario ${prior.id}`)
     expect(briefings[0]).toContain(prior.bytes.trim())
-    expect(briefings[0]).toContain('#version')
     expect(briefings[0]).not.toContain('PRIOR FLAG')
   }, 90_000)
 
   it('a kept-verbatim edit lands on the same id and the same steps, and the flow settles', async () => {
     const r = seed()
     const prior = await committed(r)
-    writeDoc(r, DOC, EDITED)
+    moveEntry(r)
 
     const res = await generate(r, (ids) => ({ edit: [{ replaces: ids[0]!, scenario: ORIGINAL }] }))
     expect(res.status).toBe('ok')
     expect(res.written.map((w) => w.id)).toEqual([prior.id])
-    // Byte-identical except the bind's section fingerprint and sentence keys,
-    // which the engine re-stamps to the text the scenario now stands against.
-    const sansBinds = (yaml: string) => yaml.replace(/^\s*(fingerprint: sha256:[0-9a-f]+|- [0-9a-f]{8})$/gm, '')
-    expect(sansBinds(fs.readFileSync(prior.file, 'utf-8'))).toBe(sansBinds(prior.bytes))
-    expect(fs.readFileSync(prior.file, 'utf-8')).not.toBe(prior.bytes)
+    // The document did not move, so neither did the binds: byte-identical.
+    expect(fs.readFileSync(prior.file, 'utf-8')).toBe(prior.bytes)
     const flow = readManifest(r)!.flows[0]!
     expect(flow.generationInputsHash).toMatch(/^sha256:/)
     expect(flow.scenarios.map((s) => s.id)).toEqual([prior.id])
@@ -122,7 +124,7 @@ describe('incremental authoring — editing committed scenarios', () => {
   it('an edited scenario keeps its id with new bytes', async () => {
     const r = seed()
     const prior = await committed(r)
-    writeDoc(r, DOC, EDITED)
+    moveEntry(r)
 
     const res = await generate(r, (ids) => ({ edit: [{ replaces: ids[0]!, scenario: REVISED }] }))
     expect(res.status).toBe('ok')
@@ -135,7 +137,7 @@ describe('incremental authoring — editing committed scenarios', () => {
   it('a later complete revision replaces the earlier candidate under one identity', async () => {
     const r = seed()
     const prior = await committed(r)
-    writeDoc(r, DOC, EDITED)
+    moveEntry(r)
 
     const res = await generate(r, (ids) => ({ edit: [{ replaces: ids[0]!, scenario: ORIGINAL }], add: [EXTRA] }))
     expect(res.status).toBe('ok')
@@ -149,7 +151,7 @@ describe('incremental authoring — editing committed scenarios', () => {
   it('a dropped scenario is deleted, retired with its reason, and the flow still settles', async () => {
     const r = seed()
     const prior = await committed(r)
-    writeDoc(r, DOC, EDITED)
+    moveEntry(r)
 
     const res = await generate(r, (ids) => ({
       edit: [],
@@ -175,7 +177,7 @@ describe('incremental authoring — editing committed scenarios', () => {
   it('a drop of an id the briefing did not carry is refused in-loop', async () => {
     const r = seed()
     await committed(r)
-    writeDoc(r, DOC, EDITED)
+    moveEntry(r)
 
     const reports: { content: string; isError?: boolean }[] = []
     const res = await generate(
@@ -188,29 +190,29 @@ describe('incremental authoring — editing committed scenarios', () => {
     expect(refusal?.content).toContain('"nope" is not a prior scenario')
   }, 90_000)
 
-  it('a blocked worker keeps the prior scenario as coverage beside its gap instead of erasing it', async () => {
+  it('a blocked worker keeps the prior scenario as coverage instead of erasing it', async () => {
     const r = seed()
     const prior = await committed(r)
-    writeDoc(r, DOC, EDITED)
+    moveEntry(r)
 
     const res = await generate(r, { blocked: [{ order: 1, capability: 'a mail sink' }] })
     expect(res.status).toBe('ok')
-    // The file is untouched (its stale bind is what `guard run` surfaces), the
-    // manifest still lists it, and the block settles honestly as a gap — the
-    // pre-edit-mode outcome minus the deletion.
+    // The file is untouched and the manifest still lists it. Its proof still
+    // stands against the flow, so the block leaves no milestone uncovered.
     expect(fs.existsSync(prior.file)).toBe(true)
     expect(fs.readFileSync(prior.file, 'utf-8')).toBe(prior.bytes)
     expect(res.written).toEqual([])
     const flow = readManifest(r)!.flows[0]!
     expect(flow.scenarios.map((s) => s.id)).toEqual([prior.id])
-    expect(flow.gaps.some((g) => g.kind === 'blocked-on')).toBe(true)
+    expect(flow.gaps).toEqual([])
+    expect(flow.generationInputsHash).toMatch(/^sha256:/)
     expect(flow.retiredScenarios).toEqual([])
   }, 90_000)
 
   it('a failed worker session leaves the prior scenario in place and the flow unsettled', async () => {
     const r = seed()
     const prior = await committed(r)
-    writeDoc(r, DOC, EDITED)
+    moveEntry(r)
 
     // An edit spec that drops an unknown id makes the stub report a FAILED
     // session — the errored-task path, where nothing settles.
@@ -225,7 +227,7 @@ describe('incremental authoring — editing committed scenarios', () => {
   it('`fromScratch` authors without briefing the prior, on the same id', async () => {
     const r = seed()
     const prior = await committed(r)
-    writeDoc(r, DOC, EDITED)
+    moveEntry(r)
 
     const briefings: string[] = []
     const res = await generate(r, REVISED, { briefings, fromScratch: true })
@@ -244,7 +246,7 @@ describe('incremental authoring — editing committed scenarios', () => {
   }, 90_000)
 
   it('the worker cache key moves with the briefed priors in edit mode and not otherwise', () => {
-    const base = ['pf', { fingerprint: 'flow' }, 'cli', ['s1'], ['i1'], 'recipe'] as const
+    const base = ['pf', { fingerprint: 'flow' }, 'cli', ['i1'], 'recipe'] as const
     const scratch = workerCacheKey(...base)
     expect(workerCacheKey(...base, undefined)).toBe(scratch)
     const edit = workerCacheKey(...base, { priorShas: ['a'] })

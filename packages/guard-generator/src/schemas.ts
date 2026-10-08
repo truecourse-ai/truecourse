@@ -495,16 +495,13 @@ export type FidelityReview = z.infer<typeof FidelityReviewSchema>
 // ---------------------------------------------------------------------------
 
 /**
- * One milestone as synthesis returns it: an already-extracted claim, addressed by
- * the document + section anchor it was extracted under. The engine SNAPS this
- * triple against the area's claim inventory — synthesis orders and groups claims,
- * it never authors one — so `claimTitle` is a copy of a claim's text, not new prose.
- * `order` is advisory (the engine renumbers the path 1..n).
+ * One milestone as synthesis returns it: a claim of the area's inventory, by
+ * id. The engine resolves the id against the inventory — synthesis orders and
+ * groups claims, it never authors one. `order` is advisory (the engine
+ * renumbers the path 1..n).
  */
 export const SynthesizedMilestoneSchema = z.object({
-  doc: z.string().min(1),
-  anchor: z.string().min(1),
-  claimTitle: z.string().min(1),
+  claimId: z.string().min(1),
   caseIds: z.array(z.string().min(1)).min(1).optional(),
   order: z.number().int().positive().optional(),
   note: z.string().optional(),
@@ -527,9 +524,7 @@ export type SynthesizedFlow = z.infer<typeof SynthesizedFlowSchema>
 /** A claim synthesis deliberately placed in no flow, with its reason — the
  *  coverage honesty rule's other half. */
 export const SynthesizedNoFlowClaimSchema = z.object({
-  doc: z.string().min(1),
-  anchor: z.string().min(1),
-  claimTitle: z.string().min(1),
+  claimId: z.string().min(1),
   caseIds: z.array(z.string().min(1)).min(1).optional(),
   reason: z.string().min(1),
 })

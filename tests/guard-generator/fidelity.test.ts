@@ -95,7 +95,7 @@ describe('generateGuards — the fidelity child’s verdict', () => {
     expect(res.birthFindings).toHaveLength(1)
     const f = res.birthFindings[0]
     expect(f.kind).toBe('fidelity')
-    expect(f.anchor).toBe('version')
+    expect(f.doc).toBe(DOC)
     expect(f.flowId).toBe('version')
     expect(f.surface).toBe('cli')
     expect(f.title).toBe('weak')
@@ -143,16 +143,13 @@ describe('generateGuards — the fidelity child’s verdict', () => {
     const rep = {
       generatedAt: '2026-07-10T00:00:00.000Z',
       status: 'ok' as const,
-      sectionsTotal: 1,
-      sectionsChanged: 1,
-      skippedUnchanged: 0,
       noChanges: false,
       written: [],
       coverageGaps: [],
       birthFindings: [
         {
           doc: DOC,
-          anchor: 'version',
+          claimId: `claim::${DOC}::abc123`,
           kind: 'fidelity' as const,
           title: 'weak',
           step: 1,
@@ -166,7 +163,6 @@ describe('generateGuards — the fidelity child’s verdict', () => {
       ],
       errors: [],
       extractionFailures: [],
-      orphaned: [],
     }
     expect(() => GuardGenerateReportSchema.parse(rep)).not.toThrow()
   })

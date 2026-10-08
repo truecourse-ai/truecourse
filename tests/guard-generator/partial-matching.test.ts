@@ -15,10 +15,10 @@ const control: Interface = { id: 'web/cancel-add', title: 'Cancel adding', type:
   fingerprint: 'sha256:cancel' }
 const catalog = buildSurfaceCatalogs([control]).get('web')!
 function flow(extra: Partial<GuardFlowMilestone> = {}): GuardFlow {
-  const milestones: GuardFlowMilestone[] = [1, 2].map((order) => ({ order, doc: 'spec.md', anchor: 'expenses',
+  const milestones: GuardFlowMilestone[] = [1, 2].map((order) => ({ order, doc: 'spec.md', claimId: `claim::spec.md::o${order}`,
     claimTitle: `Obligation ${order}`, sentences: ['expenses'], proofDrivers: ['web'], ...(order === 2 ? extra : {}) }))
   return { id: 'expenses', title: 'Expenses', goal: 'Manage expenses', fingerprint: flowFingerprint(milestones),
-    milestones, bindings: [{ doc: 'spec.md', anchor: 'expenses', fingerprint: 'sha256:spec', sentences: ['expenses'] }], composedOf: [], synthesisInputsHash: 'inputs' }
+    milestones, bindings: [{ doc: 'spec.md', sentences: ['expenses'] }], composedOf: [], synthesisInputsHash: 'inputs' }
 }
 
 describe('matching incomplete catalogs and verification capabilities', () => {
@@ -153,7 +153,7 @@ describe('case-level realization assignments', () => {
   it('retains both sorts while the description action is missing, including cache replay', async () => {
     const root = repo(); const f = caseFlow()
     const runner = vi.fn(async () => ({ plan: [{ interfaceId: control.id, milestone: 1, checks: ['date-order', 'tie-order'] }],
-      gaps: [{ milestone: 1, checks: ['description-link'], kind: 'mapping', reason: 'Description navigation action missing; reconcile spec.md#expenses' }] }))
+      gaps: [{ milestone: 1, checks: ['description-link'], kind: 'mapping', reason: 'Description navigation action missing; reconcile spec.md' }] }))
     expect(await matchFlow(root, f, catalog, runner)).toMatchObject({ kind: 'plan', calls: 1,
       plan: { steps: [{ checks: ['date-order', 'tie-order'] }] }, gaps: [{ checks: ['description-link'] }] })
     expect(await readCachedMatch(root, f, catalog)).toMatchObject({ plan: { steps: [{ checks: ['date-order', 'tie-order'] }] } })
@@ -186,7 +186,7 @@ describe('case-level realization assignments', () => {
   it('gives omitted checks one correction, then preserves exact missing cases with source references', async () => {
     const runner = vi.fn(async () => ({ plan: [{ interfaceId: control.id, milestone: 1, checks: ['date-order'] }] }))
     expect(await matchFlow(repo(), caseFlow(), catalog, runner)).toMatchObject({ kind: 'plan', calls: 2,
-      gaps: [{ milestone: 1, checks: ['tie-order', 'description-link'], reason: expect.stringContaining('spec.md#expenses') }] })
+      gaps: [{ milestone: 1, checks: ['tie-order', 'description-link'], reason: expect.stringContaining('spec.md (claim claim::spec.md::o1)') }] })
     expect(runner.mock.calls[1][0].issues.gapErrors).toContain('milestone 1 has unaccounted checks: tie-order, description-link')
   })
   it('filters unavailable observations per case without removing a supported sibling', async () => {

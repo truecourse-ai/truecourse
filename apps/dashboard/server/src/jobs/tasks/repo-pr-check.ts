@@ -171,7 +171,7 @@ export function createRepoPullRequestCheckTask(
           base: { mergeBase, commit: base, nearestWithBase: null },
           fork,
           conflictsCreated: [],
-          sectionsMoved: [],
+          docsMoved: [],
           repositoriesAffected: [],
           run: null,
           specHalf: 'not-a-source',
@@ -448,7 +448,7 @@ async function scanHead(input: {
 
 /**
  * One created conflict as the report carries it: the doc pair with each
- * side's section anchors — this repository's own document first when one
+ * side's headings — this repository's own document first when one
  * side is one (the one the pull request changed, when both are), with its
  * path and its heading's line at the head, which is where the check's
  * annotation goes — and the repositories whose slices read either side.

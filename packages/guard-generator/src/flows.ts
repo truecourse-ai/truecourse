@@ -31,14 +31,11 @@ import { verificationGroup, verificationBoundaryProblems } from '@truecourse/sha
 
 import type { GuardVerification } from '@truecourse/shared'
 import { createHash } from 'node:crypto'
-import {
-  atomicWriteJson,
-  guardFlowsPath,
-  readGuardFlowsCorpus,
-  slugifyHeading,
-} from '@truecourse/guard-runner'
+import { atomicWriteJson, guardFlowsPath, readGuardFlowsCorpus } from '@truecourse/guard-runner'
 import {
   GuardFlowsFileSchema,
+  claimIdDoc,
+  slugifyHeading,
   flowContractKey,
   flowFingerprint,
   flowMilestoneKey,
@@ -78,8 +75,6 @@ export interface FlowClaimInput {
   id: string
   /** Repo-relative doc path the claim is read from. */
   doc: string
-  /** The live section anchor the claim is placed under. */
-  anchor: string
   /** The claim's statement — becomes a milestone's `claimTitle` verbatim. */
   title: string
   /** The keys of the sentences the claim is read from. */
@@ -87,11 +82,10 @@ export interface FlowClaimInput {
   verification?: GuardVerification
 }
 
-/** One document's synthesis context: its outline and its untestable sections. */
+/** One document's synthesis context: its outline. */
 export interface FlowDocInput {
   doc: string
   outline: OutlineEntry[]
-  untestable?: { anchor: string; reason: string }[]
 }
 
 /** One area's synthesis unit — the claims one LLM call composes. */
@@ -126,10 +120,6 @@ export function flowAreaKey(area: Pick<FlowSynthesisArea, 'areaId' | 'chunk'>): 
   return area.chunk === undefined ? area.areaId : `${area.areaId}#${area.chunk}`
 }
 
-/** `doc` + `anchor` key for the section-fingerprint lookup bindings resolve through. */
-export function flowSectionKey(doc: string, anchor: string): string {
-  return `${doc}\0${anchor}`
-}
 
 /**
  * A document's AREA — its first corpus area tag, or a per-document area when the
@@ -206,7 +196,7 @@ export function buildFlowAreas(docs: readonly FlowAreaDocInput[]): FlowSynthesis
       area = { areaId, claims: [], docs: [] }
       byArea.set(areaId, area)
     }
-    area.docs.push({ doc: d.doc, outline: d.outline, untestable: d.untestable })
+    area.docs.push({ doc: d.doc, outline: d.outline })
     area.claims.push(...d.claims)
   }
   return [...byArea.values()]
@@ -233,7 +223,7 @@ export function flowAreaClaimsMaterial(area: FlowSynthesisArea): string {
   return area.claims
     .map((c) => {
       const verification = c.verification ? `\0verification:${JSON.stringify(c.verification)}` : ''
-      return verification + `${c.doc}\0${normalizeText(c.anchor)}\0${normalizeText(c.title)}`
+      return verification + `${c.id}\0${normalizeText(c.title)}`
     })
     .sort()
     .join('\n')
@@ -244,8 +234,7 @@ export function flowAreaOutlinesMaterial(area: FlowSynthesisArea): string {
   return area.docs
     .map((d) => {
       const sections = d.outline.map((e) => `${e.anchor}\0${normalizeText(e.headingText)}\0${e.level}`).join('\n')
-      const untestable = (d.untestable ?? []).map((u) => `${u.anchor}\0${normalizeText(u.reason)}`).sort().join('\n')
-      return `${d.doc}\n${sections}\n${untestable}`
+      return `${d.doc}\n${sections}`
     })
     .sort()
     .join('\n--\n')
@@ -263,10 +252,6 @@ export function flowEpicDigestsMaterial(digests: readonly FlowDigest[]): string 
 // Claim inventory + milestone snapping
 // ---------------------------------------------------------------------------
 
-/** A claim's identity key — doc + anchor + normalized text (case-insensitive). */
-function claimKey(doc: string, anchor: string, title: string): string {
-  return `${doc}\0${normalizeText(anchor)}\0${normalizeText(title).toLowerCase()}`
-}
 
 /** A looser form for snapping: markup and trailing punctuation folded away. */
 function looseTitle(title: string): string {
@@ -280,63 +265,30 @@ function looseTitle(title: string): string {
 const MIN_CONTAINMENT_CHARS = 12
 
 interface ClaimIndex {
-  byKey: Map<string, FlowClaimInput>
-  byDocAnchor: Map<string, FlowClaimInput[]>
-  byDocLoose: Map<string, FlowClaimInput[]>
+  byId: Map<string, FlowClaimInput>
   all: FlowClaimInput[]
 }
 
 function buildClaimIndex(claims: readonly FlowClaimInput[]): ClaimIndex {
-  const index: ClaimIndex = { byKey: new Map(), byDocAnchor: new Map(), byDocLoose: new Map(), all: [...claims] }
-  for (const c of claims) {
-    index.byKey.set(claimKey(c.doc, c.anchor, c.title), c)
-    const da = flowSectionKey(c.doc, c.anchor)
-    const list = index.byDocAnchor.get(da)
-    if (list) list.push(c)
-    else index.byDocAnchor.set(da, [c])
-    const dl = `${c.doc}\0${looseTitle(c.title)}`
-    const ll = index.byDocLoose.get(dl)
-    if (ll) ll.push(c)
-    else index.byDocLoose.set(dl, [c])
-  }
-  return index
+  return { byId: new Map(claims.map((c) => [c.id, c])), all: [...claims] }
 }
 
 /**
- * Snap a model-returned claim reference onto the inventory, or reject it.
- * Precedence, tightest first: the exact identity triple; a unique loose-text match
- * inside the named section; a unique containment match inside the named section
- * (the model paraphrased or truncated); a unique loose-text match elsewhere in the
- * same document (the anchor was wrong). Anything else is REJECTED — a milestone is
- * never bound to a claim the model might not have meant.
+ * Resolve a model-returned claim reference against the inventory, or reject
+ * it: the id as written, else nothing — a milestone is never bound to a claim
+ * the model might not have meant.
  */
-function snapClaim(ref: { doc: string; anchor: string; claimTitle: string }, index: ClaimIndex): FlowClaimInput | null {
-  const exact = index.byKey.get(claimKey(ref.doc, ref.anchor, ref.claimTitle))
-  if (exact) return exact
-
-  const loose = looseTitle(ref.claimTitle)
-  const inSection = index.byDocAnchor.get(flowSectionKey(ref.doc, ref.anchor)) ?? []
-  const looseHits = inSection.filter((c) => looseTitle(c.title) === loose)
-  if (looseHits.length === 1) return looseHits[0]
-  if (loose.length >= MIN_CONTAINMENT_CHARS) {
-    const contained = inSection.filter((c) => {
-      const t = looseTitle(c.title)
-      return t.includes(loose) || loose.includes(t)
-    })
-    if (contained.length === 1) return contained[0]
-  }
-  const byDoc = index.byDocLoose.get(`${ref.doc}\0${loose}`) ?? []
-  if (byDoc.length === 1) return byDoc[0]
-  return null
+function snapClaim(ref: { claimId: string }, index: ClaimIndex): FlowClaimInput | null {
+  return index.byId.get(ref.claimId.trim()) ?? null
 }
 
 /** How a rejected reference is quoted back to the model on the re-ask. */
-function describeRef(ref: { doc: string; anchor: string; claimTitle: string }): string {
-  return `${ref.doc}#${ref.anchor} — "${normalizeText(ref.claimTitle)}"`
+function describeRef(ref: { claimId: string }): string {
+  return `claim ${ref.claimId}`
 }
 
 function describeClaim(claim: FlowClaimInput): string {
-  return `${claim.doc}#${claim.anchor} — "${normalizeText(claim.title)}"`
+  return `${claim.id} — "${normalizeText(claim.title)}"`
 }
 
 // ---------------------------------------------------------------------------
@@ -368,13 +320,13 @@ function orderMilestones(raw: { milestone: SynthesizedMilestone; claim: FlowClai
   const seen = new Set<string>()
   const milestones: GuardFlowMilestone[] = []
   for (const e of indexed) {
-    const key = flowMilestoneKey({ doc: e.claim.doc, anchor: e.claim.anchor, claimTitle: e.claim.title, caseIds: e.milestone.caseIds })
+    const key = flowMilestoneKey({ claimId: e.claim.id, caseIds: e.milestone.caseIds })
     if (seen.has(key)) continue
     seen.add(key)
     milestones.push({
       order: milestones.length + 1,
       doc: e.claim.doc,
-      anchor: e.claim.anchor,
+      claimId: e.claim.id,
       claimTitle: e.claim.title,
       sentences: [...e.claim.sentences],
       ...(e.milestone.caseIds ? { caseIds: [...e.milestone.caseIds].sort() } : {}),
@@ -393,8 +345,8 @@ function selectionProblem(ref: { caseIds?: string[] }, claim: FlowClaimInput): s
   if (ref.caseIds.some(id => !cases.some(c => c.id === id))) return 'unknown selected case ID'
   return undefined
 }
-function obligationKeys(claim: { doc: string; anchor: string; title: string; verification?: FlowClaimInput['verification'] }, caseIds?: string[]): string[] {
-  const key = claimKey(claim.doc, claim.anchor, claim.title)
+function obligationKeys(claim: { id: string; verification?: FlowClaimInput['verification'] }, caseIds?: string[]): string[] {
+  const key = claim.id
   return claim.verification?.cases?.length ? (caseIds ?? claim.verification.cases.map(c => c.id)).map(id => `${key}\0${id}`) : [key]
 }
 
@@ -505,7 +457,7 @@ function validateAreaSynthesis(
     }
     const milestones = orderMilestones(snapped)
     if (milestones.length === 0) continue
-    for (const m of milestones) for (const key of obligationKeys({ ...m, title: m.claimTitle }, m.caseIds)) covered.add(key)
+    for (const m of milestones) for (const key of obligationKeys({ id: m.claimId, verification: m.verification }, m.caseIds)) covered.add(key)
     flows.push({
       areaId: area.areaId,
       title: normalizeText(flow.title),
@@ -547,7 +499,7 @@ function validateAreaSynthesis(
     if (seenNoFlow.has(key)) continue
     seenNoFlow.add(key)
     const kept = priorByKey.get(key)
-    noFlowClaims.push({ doc: claim.doc, anchor: claim.anchor, claimTitle: claim.title, ...(entry.caseIds ? { caseIds: [...entry.caseIds].sort() } : {}), reason: kept ? kept.reason : normalizeText(entry.reason) })
+    noFlowClaims.push({ claimId: claim.id, ...(entry.caseIds ? { caseIds: [...entry.caseIds].sort() } : {}), reason: kept ? kept.reason : normalizeText(entry.reason) })
   }
   const unaccountedNoFlow: string[] = []
   for (const [key, p] of priorByKey) {
@@ -585,8 +537,6 @@ function validateAreaSynthesis(
 export interface FlowSetCheckContext {
   /** The area whose claim inventory the draft must snap onto. */
   area: FlowSynthesisArea
-  /** Live {@link flowSectionKey}s — the bindability check. Omit to skip. */
-  sectionKeys?: ReadonlySet<string>
   /** The area's EXISTING flows the draft must reconcile against. Omit when
    *  there are none (a first synthesis). */
   prior?: readonly GuardFlow[]
@@ -614,8 +564,6 @@ export interface FlowSetCheckReport {
   unaccountedNoFlow: string[]
   /** Exact behavior duplicates the fold will drop (report, don't delete). */
   subsumed: SubsumedFlow[]
-  /** Milestones whose section is outside the live index — no flow can bind them. */
-  unbindable: string[]
 }
 
 /** True when the report carries no refusal-class defect. */
@@ -634,22 +582,12 @@ export function checkFlowSet(data: FlowSet, ctx: FlowSetCheckContext): FlowSetCh
   const v = validateAreaSynthesis(ctx.area, data, index, '', ctx.prior ?? [], true, ctx.priorNoFlow ?? [])
   const subsumed = applySubsumption(v.flows).dropped
 
-  const unbindable: string[] = []
-  for (const flow of v.flows) {
-    for (const m of flow.milestones) {
-      if (ctx.sectionKeys && !ctx.sectionKeys.has(flowSectionKey(m.doc, m.anchor))) {
-        unbindable.push(`${m.doc}#${m.anchor} — "${normalizeText(m.claimTitle)}"`)
-      }
-    }
-  }
-
   return {
     unknownReferences: v.unknownReferences,
     uncoveredClaims: v.uncoveredClaims,
     unaccountedFlows: v.unaccountedFlows,
     unaccountedNoFlow: v.unaccountedNoFlow,
     subsumed,
-    unbindable,
   }
 }
 
@@ -724,7 +662,7 @@ function digestFlow(d: FlowDigest): DraftFlow {
     areaId: d.areaId,
     title: d.title,
     goal: d.goal,
-    milestones: d.milestones.map((m, i) => ({ order: i + 1, doc: m.doc, anchor: m.anchor, claimTitle: m.claimTitle, sentences: m.sentences, ...(m.caseIds ? { caseIds: m.caseIds } : {}) })),
+    milestones: d.milestones.map((m, i) => ({ order: i + 1, doc: m.doc, claimId: m.claimId, claimTitle: m.claimTitle, sentences: m.sentences, ...(m.caseIds ? { caseIds: m.caseIds } : {}) })),
     composedRefs: [],
     synthesisInputsHash: '',
   }
@@ -749,7 +687,7 @@ function digestsOf(flows: readonly DraftFlow[]): FlowDigest[] {
     areaId: f.areaId,
     title: f.title,
     goal: f.goal,
-    milestones: f.milestones.map((m) => ({ doc: m.doc, anchor: m.anchor, claimTitle: m.claimTitle, sentences: m.sentences, ...(m.caseIds ? { caseIds: m.caseIds } : {}) })),
+    milestones: f.milestones.map((m) => ({ doc: m.doc, claimId: m.claimId, claimTitle: m.claimTitle, sentences: m.sentences, ...(m.caseIds ? { caseIds: m.caseIds } : {}) })),
   }))
 }
 
@@ -791,7 +729,7 @@ function buildEpicDrafts(
     // The milestone vocabulary of an epic is exactly its composed flows' milestones.
     const allowed = new Set<string>()
     for (const r of refs) {
-      for (const m of flows[byRef.get(r)!].milestones) for (const key of obligationKeys({ ...m, title: m.claimTitle }, m.caseIds)) allowed.add(key)
+      for (const m of flows[byRef.get(r)!].milestones) for (const key of obligationKeys({ id: m.claimId, verification: m.verification }, m.caseIds)) allowed.add(key)
     }
     const snapped: { milestone: SynthesizedMilestone; claim: FlowClaimInput }[] = []
     for (const milestone of epic.milestones) {
@@ -948,7 +886,7 @@ export type FlowsAreaSessionSeam = (input: {
    *  checked against beside the flows. */
   priorNoFlow?: ReadonlyMap<string, readonly GuardNoFlowClaim[]>
   grounding?: FlowsSessionGrounding
-  /** The work docs (section texts) the sessions' `read_section` reads from. */
+  /** The docs (with their sections) the sessions' `read_section` reads from. */
   docs?: readonly GuardDoc[]
   /** Ticks once per settled area (cache hits included). */
   onArea?: (areaId: string) => void
@@ -984,10 +922,8 @@ export interface SynthesizeFlowsOptions {
   epicSession: FlowsEpicSessionSeam
   /** Interface digests + dependency catalog for the session briefings. */
   sessionGrounding?: FlowsSessionGrounding
-  /** The work docs (section texts) for the sessions' `read_section` tool. */
+  /** The docs (with their sections) for the sessions' `read_section` tool. */
   sessionDocs?: readonly GuardDoc[]
-  /** `doc`+`anchor` ({@link flowSectionKey}) → the section's live fingerprint. */
-  sectionFingerprints: ReadonlyMap<string, string>
   /** The committed flows the sessions reconcile against; defaults to `flows.json`. */
   previous?: readonly GuardFlow[]
   /** The committed no-flow decisions the sessions reconcile against; defaults
@@ -1125,24 +1061,8 @@ function partitionPriorFlows(
  * `unsettled`, while every other area's flows are reconciled.
  */
 export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<FlowSynthesisResult> {
-  const { repoRoot, sectionFingerprints } = opts
-
-  // Claims whose section has no live fingerprint cannot be bound, so they never
-  // enter synthesis — they are recorded as no-flow claims with that reason.
-  const unbindable: GuardNoFlowClaim[] = []
-  const areas: FlowSynthesisArea[] = opts.areas.map((area) => {
-    const claims = area.claims.filter((c) => {
-      if (sectionFingerprints.has(flowSectionKey(c.doc, c.anchor))) return true
-      unbindable.push({
-        doc: c.doc,
-        anchor: c.anchor,
-        claimTitle: c.title,
-        reason: 'its section is not in the live section index, so no flow can bind it',
-      })
-      return false
-    })
-    return { ...area, claims }
-  })
+  const { repoRoot } = opts
+  const areas: FlowSynthesisArea[] = [...opts.areas]
 
   const previousFile = opts.previous && opts.previousNoFlowClaims ? undefined : readFlowsFile(repoRoot)
   const previous = opts.previous ?? previousFile?.flows ?? []
@@ -1161,7 +1081,7 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
       indexByUnit.set(key, buildClaimIndex(area.claims))
     }
     for (const c of opts.previousNoFlowClaims ?? previousFile?.noFlowClaims ?? []) {
-      const unit = unitByDoc.get(c.doc)
+      const unit = unitByDoc.get(claimIdDoc(c.claimId) ?? '')
       if (unit === undefined || !snapClaim(c, indexByUnit.get(unit)!)) continue
       const list = priorNoFlowByUnit.get(unit) ?? []
       list.push(c)
@@ -1212,7 +1132,7 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
   })
 
   const unsettled: UnsettledArea[] = []
-  const noFlowClaims: GuardNoFlowClaim[] = [...unbindable]
+  const noFlowClaims: GuardNoFlowClaim[] = []
   // A committed flow of a unit that did not settle stands as it was: nothing
   // said it changed, and dropping it would orphan proven coverage on a session
   // failure. Its no-flow claims stand with it.
@@ -1232,7 +1152,7 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
     noFlowClaims.push(...outcome.noFlowClaims)
     for (const r of outcome.retiredFlows) retiredByModel.set(r.id, r.reason)
   })
-  noFlowClaims.push(...(opts.previousNoFlowClaims ?? previousFile?.noFlowClaims ?? []).filter((c) => carriedDocs.has(c.doc)))
+  noFlowClaims.push(...(opts.previousNoFlowClaims ?? previousFile?.noFlowClaims ?? []).filter((c) => carriedDocs.has(claimIdDoc(c.claimId) ?? '')))
 
   const subsumed: SubsumedFlow[] = []
   const areaPass = applySubsumption(drafts)
@@ -1294,18 +1214,17 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
   }
   if (!epicsResolved) carried.push(...prior.epics)
 
-  // Bindings + fingerprints, then identity against the committed corpus.
+  // Bindings, then identity against the committed corpus.
   const provisional = new Set<string>()
   const liveClaims = buildClaimIndex(areas.flatMap((a) => a.claims))
   const bindingsOf = (milestones: readonly GuardFlowMilestone[]): GuardFlowBinding[] => {
-    const bySection = new Map<string, GuardFlowBinding>()
+    const byDoc = new Map<string, GuardFlowBinding>()
     for (const m of milestones) {
-      const key = flowSectionKey(m.doc, m.anchor)
-      const binding = bySection.get(key)
+      const binding = byDoc.get(m.doc)
       if (binding) binding.sentences = [...new Set([...binding.sentences, ...m.sentences])].sort()
-      else bySection.set(key, { doc: m.doc, anchor: m.anchor, fingerprint: sectionFingerprints.get(key)!, sentences: [...new Set(m.sentences)].sort() })
+      else byDoc.set(m.doc, { doc: m.doc, sentences: [...new Set(m.sentences)].sort() })
     }
-    return [...bySection.values()]
+    return [...byDoc.values()]
   }
   const next: GuardFlow[] = drafts.map((draft) => {
     const id = freeId(slugForTitle(draft.title), provisional)

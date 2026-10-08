@@ -60,15 +60,11 @@ function writeReport(r: string, report: Partial<GuardGenerateReport> = {}): void
     generatedAt: '2026-07-28T00:00:00Z',
     status: 'ok',
     noChanges: false,
-    sectionsTotal: 1,
-    sectionsChanged: 1,
-    skippedUnchanged: 0,
     written: [],
     coverageGaps: [],
     birthFindings: [],
     errors: [],
     extractionFailures: [],
-    orphaned: [],
     ...report,
   });
 }
@@ -135,10 +131,10 @@ describe('readGuardExternalsView', () => {
         { service: 'stripe', category: 'payment', evidence: [{ filePath: 'src/pay.ts', importSource: 'stripe' }] },
       ],
       coverageGaps: [
-        { doc: 'docs/a.md', anchor: 'x', kind: 'blocked-on', reason: 'blocked on open-meteo: forecast', flowId: 'f1' },
-        { doc: 'docs/a.md', anchor: 'y', kind: 'blocked-on', reason: 'blocked on open-meteo, stripe: pay', flowId: 'f2' },
+        { kind: 'blocked-on', reason: 'blocked on open-meteo: forecast', flowId: 'f1' },
+        { kind: 'blocked-on', reason: 'blocked on open-meteo, stripe: pay', flowId: 'f2' },
         // The same flow blocked on the same service twice counts once.
-        { doc: 'docs/a.md', anchor: 'z', kind: 'blocked-on', reason: 'blocked on open-meteo: again', flowId: 'f1' },
+        { kind: 'blocked-on', reason: 'blocked on open-meteo: again', flowId: 'f1' },
       ],
     });
 
@@ -266,11 +262,11 @@ describe('the needs-setup derivation off the view', () => {
         { service: 'stripe', category: 'payment', evidence: [{ filePath: 'src/pay.ts', importSource: 'stripe' }] },
       ],
       coverageGaps: [
-        { doc: 'docs/a.md', anchor: 'x', kind: 'blocked-on', reason: 'blocked on open-meteo: forecast', flowId: 'f1' },
-        { doc: 'docs/a.md', anchor: 'y', kind: 'blocked-on', reason: 'blocked on open-meteo: history', flowId: 'f2' },
-        { doc: 'docs/a.md', anchor: 'z', kind: 'blocked-on', reason: 'blocked on stripe: pay', flowId: 'f3' },
+        { kind: 'blocked-on', reason: 'blocked on open-meteo: forecast', flowId: 'f1' },
+        { kind: 'blocked-on', reason: 'blocked on open-meteo: history', flowId: 'f2' },
+        { kind: 'blocked-on', reason: 'blocked on stripe: pay', flowId: 'f3' },
         // A generic noun is nobody's service — it must not invent a row.
-        { doc: 'docs/a.md', anchor: 'w', kind: 'blocked-on', reason: 'blocked on external-service: something', flowId: 'f4' },
+        { kind: 'blocked-on', reason: 'blocked on external-service: something', flowId: 'f4' },
       ],
     });
     return r;
@@ -303,9 +299,9 @@ describe('the needs-setup derivation off the view', () => {
     );
     writeReport(r, {
       coverageGaps: [
-        { doc: 'docs/a.md', anchor: 'x', kind: 'blocked-on', reason: 'blocked on open-meteo: forecast', flowId: 'f1' },
-        { doc: 'docs/a.md', anchor: 'y', kind: 'blocked-on', reason: 'blocked on stripe: pay', flowId: 'f2' },
-        { doc: 'docs/a.md', anchor: 'z', kind: 'blocked-on', reason: 'blocked on stripe: refund', flowId: 'f3' },
+        { kind: 'blocked-on', reason: 'blocked on open-meteo: forecast', flowId: 'f1' },
+        { kind: 'blocked-on', reason: 'blocked on stripe: pay', flowId: 'f2' },
+        { kind: 'blocked-on', reason: 'blocked on stripe: refund', flowId: 'f3' },
       ],
     });
     const view = readGuardExternalsView(r);

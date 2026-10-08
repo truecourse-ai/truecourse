@@ -14,16 +14,12 @@ import {
 const BASE = {
   generatedAt: '2026-07-25T00:00:00.000Z',
   status: 'ok' as const,
-  sectionsTotal: 3,
-  sectionsChanged: 1,
-  skippedUnchanged: 2,
   noChanges: false,
   written: [],
   coverageGaps: [],
   birthFindings: [],
   errors: [],
   extractionFailures: [],
-  orphaned: [],
 }
 
 describe('guard report — the realization gap kinds', () => {
@@ -34,8 +30,6 @@ describe('guard report — the realization gap kinds', () => {
 
   it('a flow-level gap names its flow and surface without claiming a driver', () => {
     const gap = GuardCoverageGapSchema.parse({
-      doc: 'docs/tasks.md',
-      anchor: 'tasks/creating',
       kind: 'no-interface',
       reason: 'no cli interface was mapped from this repository',
       flowId: 'task-lifecycle',
@@ -54,8 +48,7 @@ describe('guard report — the realization gap kinds', () => {
     expect(totals['no-interface']).toBe(0)
     expect(totals.unrealizable).toBe(0)
     const gap = GuardCoverageGapSchema.parse({
-      doc: 'd',
-      anchor: 'a',
+      flowId: 'task-lifecycle',
       kind: 'unrealizable',
       reason: 'no interface path serves milestone 2',
     })
@@ -64,8 +57,6 @@ describe('guard report — the realization gap kinds', () => {
 
   it('an awaiting-driver gap still keys by its driver, never by the kind', () => {
     const gap = GuardCoverageGapSchema.parse({
-      doc: 'd',
-      anchor: 'a',
       kind: 'awaiting-driver',
       driver: 'tui',
       reason: 'Needs TUI driver',
@@ -80,7 +71,6 @@ describe('guard findings — the composition-triage pair', () => {
   const finding = (extra: Partial<GuardBirthFinding>): GuardBirthFinding =>
     GuardBirthFindingSchema.parse({
       doc: 'docs/tasks.md',
-      anchor: 'tasks/completing',
       title: 'the task lifecycle',
       step: 3,
       expected: 'exit 0',
@@ -120,7 +110,6 @@ describe('guard report — flow-led counts', () => {
           id: 'task-lifecycle.cli.1',
           title: 'the task lifecycle',
           doc: 'docs/tasks.md',
-          anchor: 'tasks/creating',
           file: '.truecourse/scenarios/tasks/task-lifecycle.cli.1.yaml',
           flowId: 'task-lifecycle',
           surface: 'cli',

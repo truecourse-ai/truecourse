@@ -22,18 +22,17 @@ import type {
   GuardScenario,
   GuardScenarioResult,
 } from '@truecourse/shared'
-import type { SectionInput } from './section-plan.js'
 
 /**
  * A scenario awaiting birth validation, tagged with the (flow, surface) it
  * realizes so a failure can be re-authored with its evidence and attributed to the
- * flow. `section` is the flow's PRIMARY binding — the section a finding pivots on
- * when the failing step carries no milestone.
+ * flow. `primary` is the flow's PRIMARY document — where a finding is filed when
+ * the failing step carries no milestone.
  */
 export interface BirthCandidate {
   flow: GuardFlow
   surface: GuardDriverId
-  section: SectionInput
+  primary: { doc: string }
   scenario: GuardScenario
   /** `<flow-id>\0<surface>` — the retry/persist grouping key. */
   ref: string
@@ -184,7 +183,7 @@ export async function birthValidate(
       }
     }
     // A synthetic result mirrors what the runner would have produced: the PRIMARY
-    // bind (the result schema carries one section) plus the candidate's flow.
+    // bind (the result schema carries one) plus the candidate's flow.
     return {
       outcomes: candidates.map((candidate) => ({
         candidate,

@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import request from 'supertest';
-import { claimContentHash } from '@truecourse/shared';
+import { claimId } from '@truecourse/shared';
 import { type Express } from 'express';
 import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
@@ -37,17 +37,16 @@ const DOC_CONTENT = '# Alpha\nbody a\n# Beta\nbody b\n';
 const HEAD = 'prhead1234567';
 const OTHER = 'otherhead9999';
 
-const yaml = (id: string, section: string): string =>
+/** A one-step test of the flow named `topic`, bound to the sentence keyed `topic`. */
+const yaml = (id: string, topic: string): string =>
   [
     `id: ${id}`,
-    `title: ${section} claim`,
+    `title: ${topic} claim`,
     'binds:',
     `  - doc: ${DOC}`,
-    `    section: ${section}`,
-    '    fingerprint: "sha256:x"',
-    `    sentences: [${section}]`,
+    `    sentences: [${topic}]`,
     'flow:',
-    `  id: ${DOC}#${section}`,
+    `  id: ${topic}`,
     '  fingerprint: "sha256:x"',
     'driver: cli',
     'steps:',
@@ -61,8 +60,7 @@ const yaml = (id: string, section: string): string =>
 const runAt = (commit: string, id: string, outcome: GuardLatest['scenarios'][number]['outcome']): GuardLatest => ({
   run: { runId: `run-${commit}`, ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit, recipeFingerprint: 'sha256:r' },
   summary: { total: 1, pass: outcome === 'pass' ? 1 : 0, fail: outcome === 'fail' ? 1 : 0, stale: 0, orphaned: 0, error: 0 },
-  scenarios: [{ id, title: `${id} claim`, binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x', sentences: ['alpha'] }, outcome, durationMs: 2 }],
-  sections: [],
+  scenarios: [{ id, title: `${id} claim`, binds: { doc: DOC, sentences: ['alpha'] }, outcome, durationMs: 2 }],
 });
 
 let client: PGlite;
@@ -81,27 +79,30 @@ async function saveSet(commit: string, ids: Array<[string, string]>, scope?: str
     const flows: unknown[] = [];
     const claims: unknown[] = [];
     const corpusFlows: unknown[] = [];
-    for (const [id, section] of ids) {
-      fs.writeFileSync(path.join(src, 'core', `${id}.yaml`), yaml(id, section));
-      const body = { doc: DOC, anchor: section, title: section, claim: `${section}.` };
-      claims.push({ id: `claim::${DOC}::${section}`, ...body, contentHash: claimContentHash(body) });
+    for (const [id, topic] of ids) {
+      fs.writeFileSync(path.join(src, 'core', `${id}.yaml`), yaml(id, topic));
+      const claim = claimId(DOC, [topic]);
+      claims.push({ id: claim, doc: DOC, sentences: [topic], subject: topic, statement: `${topic}.`, areas: [], testable: true });
+      const milestones = [{ order: 1, doc: DOC, claimId: claim, claimTitle: topic, sentences: [topic] }];
+      const bindings = [{ doc: DOC, sentences: [topic] }];
       corpusFlows.push({
-        id: `${DOC}#${section}`, title: section, goal: section, fingerprint: 'sha256:x',
-        milestones: [{ order: 1, doc: DOC, anchor: section, claimTitle: section, sentences: [section] }],
-        bindings: [{ doc: DOC, anchor: section, fingerprint: 'sha256:x', sentences: [section] }],
+        id: topic, title: topic, goal: topic, fingerprint: 'sha256:x',
+        milestones,
+        bindings,
         composedOf: [], synthesisInputsHash: 'sha256:i',
       });
       flows.push({
-        flowId: `${DOC}#${section}`,
+        flowId: topic,
         flowFingerprint: 'sha256:x',
-        bindings: [{ doc: DOC, anchor: section, fingerprint: 'sha256:x', sentences: [section] }],
+        milestones,
+        bindings,
         scenarios: [{ id, surface: 'cli' }],
         generationInputsHash: null,
         gaps: [],
       });
     }
     fs.writeFileSync(path.join(src, 'manifest.json'), JSON.stringify({ flows }));
-    fs.writeFileSync(path.join(src, 'claims.json'), JSON.stringify({ version: 1, generatedAt: '2026-07-09T00:00:00.000Z', claims, untestable: [] }));
+    fs.writeFileSync(path.join(src, 'claims.json'), JSON.stringify({ version: 1, generatedAt: '2026-07-09T00:00:00.000Z', claims }));
     fs.writeFileSync(path.join(src, 'flows.json'), JSON.stringify({ version: 1, generatedAt: '2026-07-09T00:00:00.000Z', flows: corpusFlows, noFlowClaims: [] }));
     await guardStore.saveScenarios({ repoKey, commitSha: commit, ...(scope ? { scope } : {}) }, src);
   } finally {
@@ -175,16 +176,12 @@ describe('Guard routes — hosted, commit-scoped', () => {
       {
         generatedAt: '2026-07-01T00:00:00.000Z',
         status: 'ok',
-        sectionsTotal: 1,
-        sectionsChanged: 1,
-        skippedUnchanged: 0,
         noChanges: false,
         written: [],
         coverageGaps: [],
         birthFindings: [],
         errors: [],
         extractionFailures: [],
-        orphaned: [],
       },
     );
     await saveSet('baselinesha', [['a1', 'alpha']]);
@@ -196,22 +193,18 @@ describe('Guard routes — hosted, commit-scoped', () => {
       {
         generatedAt: '2026-07-09T00:00:00.000Z',
         status: 'ok',
-        sectionsTotal: 2,
-        sectionsChanged: 2,
-        skippedUnchanged: 0,
         noChanges: false,
         written: [],
         coverageGaps: [],
         birthFindings: [],
         errors: [],
         extractionFailures: [],
-        orphaned: [],
       },
     );
 
     const res = await request(app).get(url('status')).expect(200);
-    // The baseline manifest (1 section), not the PR head's newer 2-section set.
-    expect(res.body.coverage).toMatchObject({ totalSections: 1 });
+    // The baseline manifest (1 flow), not the PR head's newer 2-flow set.
+    expect(res.body.flows).toMatchObject({ total: 1 });
     // The baseline's own report, never the PR head's newer one.
     expect(res.body.lastGenerate).toMatchObject({ generatedAt: '2026-07-01T00:00:00.000Z' });
   });
@@ -223,16 +216,12 @@ describe('Guard routes — hosted, commit-scoped', () => {
       {
         generatedAt: '2026-07-09T00:00:00.000Z',
         status: 'ok',
-        sectionsTotal: 2,
-        sectionsChanged: 2,
-        skippedUnchanged: 0,
         noChanges: false,
         written: [],
         coverageGaps: [],
         birthFindings: [],
         errors: [],
         extractionFailures: [],
-        orphaned: [],
       },
     );
     await saveSet('baselinesha', [['a1', 'alpha']]);
@@ -263,8 +252,8 @@ describe('Guard routes — versions of the scenario set', () => {
     const [to, from] = list.body.versions as Array<{ id: string }>;
     const diff = await request(app).get(url(`versions/diff?from=${from!.id}&to=${to!.id}`)).expect(200);
     expect(diff.body.from.id).toBe(from!.id);
-    expect(diff.body.diff.flows.added).toEqual([`${DOC}#beta`]);
-    expect(diff.body.diff.sections.gained).toEqual([{ doc: DOC, anchor: 'beta' }]);
+    expect(diff.body.diff.flows.added).toEqual(['beta']);
+    expect(diff.body.diff.claims.gained).toEqual([claimId(DOC, ['beta'])]);
     await request(app).get(url('versions/diff?from=nope&to=' + to!.id)).expect(404);
     await request(app).get(url('versions/diff')).expect(400);
   });

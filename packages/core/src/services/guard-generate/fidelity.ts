@@ -153,32 +153,32 @@ export type FidelityVerdict = z.infer<typeof FidelityVerdictSchema>
 
 /**
  * The one-shot fidelity cache key's structure, kept: prompt fp :: flow fp ::
- * sorted section keys :: scenarioBehavior — with the CHILD's prompt
+ * scenarioBehavior — with the CHILD's prompt
  * fingerprint, so editing the child prompt invalidates exactly this cache.
  */
-export function fidelitySessionCacheKey(input: Pick<WorkerFidelityInput, 'flowFingerprint' | 'sectionKeys' | 'scenarioBehavior'>): string {
+export function fidelitySessionCacheKey(input: Pick<WorkerFidelityInput, 'flowFingerprint' | 'scenarioBehavior'>): string {
   return fidelityKeyOver(`fidelity-v${FIDELITY_STAGE_VERSION}`, input)
 }
 
 /** {@link fidelitySessionCacheKey} as it was computed while the prompt was in
  *  it — the key a miss falls back to. Delete with the legacy hash. */
-export function fidelitySessionLegacyCacheKey(input: Pick<WorkerFidelityInput, 'flowFingerprint' | 'sectionKeys' | 'scenarioBehavior'>): string {
+export function fidelitySessionLegacyCacheKey(input: Pick<WorkerFidelityInput, 'flowFingerprint' | 'scenarioBehavior'>): string {
   return fidelityKeyOver(LEGACY_FIDELITY_SESSION_PROMPT_FINGERPRINT, input)
 }
 
 function fidelityKeyOver(
   stage: string,
-  input: Pick<WorkerFidelityInput, 'flowFingerprint' | 'sectionKeys' | 'scenarioBehavior'>,
+  input: Pick<WorkerFidelityInput, 'flowFingerprint' | 'scenarioBehavior'>,
 ): string {
   return createHash('sha256')
-    .update([stage, input.flowFingerprint, [...input.sectionKeys].sort().join('~'), input.scenarioBehavior].join('::'))
+    .update([stage, input.flowFingerprint, input.scenarioBehavior].join('::'))
     .digest('hex')
 }
 
 const READ_CLAIM_SECTION = defineToolSpec({
   name: 'read_claim_section',
   description:
-    "Re-read one claim's spec section precisely: pass the doc ref and the section anchor (or heading) as the briefing shows them.",
+    "Re-read one claim's spec section precisely: pass the doc ref and the heading as the briefing shows them.",
   kind: 'read-claim-section',
   readOnly: true,
   destructive: false,

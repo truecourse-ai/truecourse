@@ -3,7 +3,7 @@
  * from: order-free, stable while the sentences stand, new when they change.
  */
 import { describe, expect, it } from 'vitest'
-import { ClaimSchema, ClaimsFileSchema, claimId, isClaimId, sentenceKey } from '@truecourse/shared'
+import { ClaimSchema, ClaimsFileSchema, claimId, claimIdDoc, claimsById, isClaimId, sentenceKey } from '@truecourse/shared'
 
 describe('claimId', () => {
   const a = sentenceKey('Export my data is under Settings, Account.')
@@ -19,6 +19,13 @@ describe('claimId', () => {
 
   it('keeps the doc readable in the id', () => {
     expect(claimId('docs/export.md', [a]).startsWith('claim::docs/export.md::')).toBe(true)
+    expect(claimIdDoc(claimId('docs/export.md', [a]))).toBe('docs/export.md')
+    expect(claimIdDoc('conflict::x')).toBeNull()
+  })
+
+  it('tells apart two claims read from the same sentences by their order', () => {
+    expect(claimId('docs/export.md', [a], 1)).not.toBe(claimId('docs/export.md', [a]))
+    expect(claimId('docs/export.md', [a], 0)).toBe(claimId('docs/export.md', [a]))
   })
 })
 
@@ -47,5 +54,16 @@ describe('ClaimSchema', () => {
   it('files claims under version 1', () => {
     expect(ClaimsFileSchema.safeParse({ version: 1, generatedAt: '2026-10-07T00:00:00.000Z', claims: [claim] }).success).toBe(true)
     expect(ClaimsFileSchema.safeParse({ version: 2, generatedAt: '', claims: [] }).success).toBe(false)
+  })
+})
+
+describe('claimsById', () => {
+  it('keeps the FIRST of a duplicated id, so a lookup is never ambiguous', () => {
+    const first = { id: 'claim::d::x', statement: 'first' }
+    const second = { id: 'claim::d::y', statement: 'second' }
+    const dupe = { id: 'claim::d::x', statement: 'a later duplicate' }
+    const byId = claimsById([first, second, dupe])
+    expect([...byId.keys()]).toEqual([first.id, second.id])
+    expect(byId.get(first.id)).toBe(first)
   })
 })

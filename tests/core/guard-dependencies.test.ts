@@ -104,15 +104,11 @@ function writeResult(r: string, coverageGaps: unknown[]): void {
     generatedAt: '2026-08-07T00:00:00.000Z',
     status: 'ok',
     noChanges: false,
-    sectionsTotal: 1,
-    sectionsChanged: 1,
-    skippedUnchanged: 0,
     written: [],
     coverageGaps,
     birthFindings: [],
     errors: [],
     extractionFailures: [],
-    orphaned: [],
   });
 }
 
@@ -125,8 +121,8 @@ function writeFlows(r: string, flows: { id: string; title: string }[]): void {
       title: f.title,
       goal: `${f.title}.`,
       fingerprint: 'sha256:aa',
-      milestones: [{ order: 1, doc: 'docs/spec.md', anchor: 'a', claimTitle: `${f.title} works`, sentences: ['a'] }],
-      bindings: [{ doc: 'docs/spec.md', anchor: 'a', fingerprint: 'sha256:bb', sentences: ['a'] }],
+      milestones: [{ order: 1, doc: 'docs/spec.md', claimId: 'claim::a', claimTitle: `${f.title} works`, sentences: ['a'] }],
+      bindings: [{ doc: 'docs/spec.md', sentences: ['a'] }],
       composedOf: [],
       synthesisInputsHash: 'sha256:cc',
     })),
@@ -144,7 +140,7 @@ function writeScenario(r: string, id: string, flowId: string, needs: string[]): 
       id,
       title: `${id} runs`,
       flow: { id: flowId, fingerprint: 'sha256:aa' },
-      binds: [{ doc: 'docs/spec.md', section: 'a', fingerprint: 'sha256:bb', sentences: ['a'] }],
+      binds: [{ doc: 'docs/spec.md', sentences: ['a'] }],
       needs,
       driver: 'cli',
       steps: [{ run: ['bin', '--help'], expect: { exit: 0 } }],
@@ -166,7 +162,7 @@ describe('readGuardDependenciesView', () => {
     // A previously authored test may be retained while its replacement is blocked.
     writeScenario(r, 'older-test', 'run-llm-rules', ['anthropic']);
     writeResult(r, [{
-      doc: 'docs/spec.md', anchor: 'llm', kind: 'blocked-on', flowId: 'run-llm-rules',
+      kind: 'blocked-on', flowId: 'run-llm-rules',
       reason: 'blocked on anthropic: requires an account',
       blocker: { kind: 'configuration', dependencies: ['anthropic'] },
     }]);
@@ -263,14 +259,9 @@ describe('readGuardDependenciesView', () => {
       generatedAt: '2026-08-07T00:00:00.000Z',
       status: 'ok',
       noChanges: false,
-      sectionsTotal: 1,
-      sectionsChanged: 1,
-      skippedUnchanged: 0,
       written: [],
       coverageGaps: [
         {
-          doc: 'docs/spec.md',
-          anchor: 'llm',
           kind: 'blocked-on',
           reason: 'blocked on anthropic: the LLM rules need a key',
           flowId: 'run-llm-rules',
@@ -279,7 +270,6 @@ describe('readGuardDependenciesView', () => {
       birthFindings: [],
       errors: [],
       extractionFailures: [],
-      orphaned: [],
     });
 
     const view = readGuardDependenciesView(r);
@@ -606,8 +596,6 @@ describe('readGuardDependenciesView', () => {
     ]);
     writeResult(r, [
       {
-        doc: 'docs/spec.md',
-        anchor: 'events',
         kind: 'blocked-on',
         reason: 'blocked on posthog: the analytics flow needs a project key',
         flowId: 'emit-an-event',

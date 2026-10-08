@@ -13,7 +13,7 @@
  * `/x/:id`, `/x/<id>` and `/x/42` all normalize equal, and an ambiguous reference
  * (one that matches two operations) is skipped rather than guessed. Enrichment is
  * additive: a section that matches nothing is byte-identical to before this module
- * existed (empty {@link matchedSchemaFingerprint}, no prompt block).
+ * existed (no prompt block).
  */
 
 import { createHash } from 'node:crypto'
@@ -26,9 +26,6 @@ export interface OperationEntry {
   anchor: string
   /** Repo-relative doc path the operation came from. */
   doc: string
-  /** The operation section's fingerprint — folded into the re-plan gate so a schema
-   *  edit re-authors the markdown sections that reference it. */
-  fingerprint: string
   /** Uppercase HTTP verb (`POST`). */
   method: string
   /** The raw route template, verbatim (`/v2/bookings/{id}`). */
@@ -74,7 +71,6 @@ export function parseOperationSection(section: SectionInput, basePath = ''): Ope
   return {
     anchor: section.anchor,
     doc: section.doc,
-    fingerprint: section.fingerprint,
     method: upper,
     path,
     basePath,
@@ -168,19 +164,4 @@ export function matchedRequestSchemas(
       requestSchema: JSON.stringify(e.requestSchema, null, 2),
     }))
     .sort((a, b) => `${a.method} ${a.path}`.localeCompare(`${b.method} ${b.path}`))
-}
-
-/**
- * A content key over the write-op schemas a section matches — `''` when it matches
- * none (byte-identity guarantee: an unmatched section's cache/plan keys are unchanged
- * from before enrichment). Non-empty and content-derived otherwise, so it moves when
- * a referenced operation's schema (hence its section fingerprint) changes.
- */
-export function matchedSchemaFingerprint(section: SectionInput, index: OperationEntry[]): string {
-  const fingerprints = matchOperationsForSection(section, index)
-    .filter((e) => e.requestSchema !== undefined)
-    .map((e) => e.fingerprint)
-    .sort()
-  if (fingerprints.length === 0) return ''
-  return 'sha256:' + createHash('sha256').update(fingerprints.join('\0')).digest('hex')
 }

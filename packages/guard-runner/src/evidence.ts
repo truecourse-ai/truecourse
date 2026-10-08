@@ -236,7 +236,7 @@ export interface WriteEvidenceParams {
   runId: string
   scenarioId: string
   title: string
-  /** Every section the scenario binds, in scenario order (the first is the primary). */
+  /** Every document the scenario binds, with its sentences, in scenario order (the first is the primary). */
   binds: readonly GuardBinds[]
   /** The flow the scenario realizes; absent for a hand-written scenario. */
   flowId?: string
@@ -360,7 +360,7 @@ function renderTranscript(params: WriteEvidenceParams): string {
   lines.push(`title:    ${params.title}`)
   if (params.flowId) lines.push(`flow:     ${params.flowId}`)
   for (const [i, b] of params.binds.entries()) {
-    lines.push(`${i === 0 ? 'binds:   ' : '         '} ${b.doc} #${b.section}`)
+    lines.push(`${i === 0 ? 'binds:   ' : '         '} ${b.doc} (${b.sentences.length} sentence${b.sentences.length === 1 ? '' : 's'})`)
   }
   lines.push(`outcome:  ${params.outcome}`)
   lines.push('')

@@ -11,7 +11,7 @@ import {
   type FlowWorkerTask,
   type MatchRunner,
 } from '@truecourse/guard-generator'
-import { autoResolutionKey, type GuardFlow, type Interface } from '@truecourse/shared'
+import { autoResolutionKey, claimId, type GuardFlow, type Interface } from '@truecourse/shared'
 import {
   loadScenarios,
   readGuardAutoResolutions,
@@ -27,7 +27,6 @@ import {
 import {
   GuardManifestSchema,
   GuardGenerateReportSchema,
-  guardManifestSections,
   isCompositionFinding,
   unaccountedSurfaces,
   violatesSettleInvariant,
@@ -49,6 +48,7 @@ import {
   flowWorkerSessionOf,
   submitWorkerSessions,
   flowsAreaSessionOf,
+  flowTitleOf,
   matchAll,
   matchBy,
   cliInterface,
@@ -73,11 +73,6 @@ function repo(): string {
   const r = makeTempRepo()
   repos.push(r)
   return r
-}
-
-/** The manifest's per-section view — the flow-keyed file projected at read time. */
-function manifestSections(repoRoot: string) {
-  return guardManifestSections(readManifest(repoRoot))
 }
 
 /** The manifest entry for one flow — the v2 unit. */
@@ -131,7 +126,7 @@ const webInterface = (): Interface => ({
 const authorsEvery = (scenario = raw('v', PASSING_STEPS)) => submitWorkerSessions(() => scenario)
 
 describe('generateGuards — extraction honesty + gaps', () => {
-  it('records untestable sections as coverage gaps and guards the rest', async () => {
+  it('composes no flow from an untestable claim, records no gap for it, and guards the rest', async () => {
     const r = seed(DOC_CONTENT, ['tools/relkit'])
 
     const res = await runGenerate({
@@ -142,17 +137,16 @@ describe('generateGuards — extraction honesty + gaps', () => {
 
     expect(res.status).toBe('ok')
     expect(res.written.map((w) => w.flowId)).toEqual(['version'])
-    const gap = res.coverageGaps.find((g) => g.anchor === 'background')!
-    expect(gap.kind).toBe('untestable')
-    expect(gap.reason).toBe('not testable: not-observable')
+    // An untestable claim is the read model's to list, not a coverage gap:
+    // every gap belongs to a flow.
+    expect(res.coverageGaps.every((g) => g.flowId !== undefined)).toBe(true)
 
-    // The guarded section is reachable through its flow; the untestable one binds
-    // no flow at all, which is exactly what makes it a visible gap.
-    const manifest = manifestSections(r)
-    expect(manifest.find((s) => s.anchor === 'background')).toBeUndefined()
-    const ver = manifest.find((s) => s.anchor === 'version')!
-    expect(ver.scenarioIds).toEqual(['version'])
-    expect(ver.flowIds).toEqual(['version'])
+    // The guarded claim is reachable through its flow; the untestable one is in
+    // no flow, so no binding holds its sentence.
+    const manifest = readManifest(r)!
+    expect(manifest.flows.map((f) => f.flowId)).toEqual(['version'])
+    expect(manifest.flows[0].bindings).toEqual(bindsFor(r, DOC, 'version'))
+    expect(manifest.flows[0].scenarios.map((s) => s.id)).toEqual(['version'])
   }, 60_000)
 
 })
@@ -466,9 +460,9 @@ describe('generateGuards — change detection', () => {
           const existing = prior.find((f) => f.milestones.some((m) => m.claimTitle === c.title))
           return {
             ...(existing ? { id: existing.id } : {}),
-            title: existing ? `re-worded ${c.anchor}` : c.anchor,
+            title: existing ? `re-worded ${flowTitleOf(c)}` : flowTitleOf(c),
             goal: `verify ${c.title}`,
-            milestones: [{ order: 1, doc: c.doc, anchor: c.anchor, claimTitle: c.title, sentences: [c.anchor] }],
+            milestones: [{ order: 1, claimId: c.id }],
           }
         }),
         noFlowClaims: [],
@@ -598,7 +592,7 @@ describe('generateGuards — change detection', () => {
 })
 
 describe('generateGuards — the committed scenario', () => {
-  it('writes valid YAML carrying the flow, the interface path, and every bound section', async () => {
+  it('writes valid YAML carrying the flow, the interface path, and every bound sentence', async () => {
     const r = repo()
     writeRecipe(r)
     writeCorpus(r, [{ ref: DOC, areaTags: ['tools/relkit'] }])
@@ -617,7 +611,7 @@ describe('generateGuards — the committed scenario', () => {
             yaml.dump(
               {
                 title: 'walks both',
-                binds: { doc: 'other.md', section: 'nope', fingerprint: 'sha256:wrong', sentences: ['nope'] },
+                binds: { doc: 'other.md', sentences: ['nope'] },
                 steps: [
                   { run: ['--version'], expect: { exit: 0 }, milestone: 1 },
                   { run: ['--version'], expect: { exit: 0 }, milestone: 2 },
@@ -653,11 +647,13 @@ describe('generateGuards — the committed scenario', () => {
     const written = scenarios[0]
     expect(written.id).toBe('a-user-checks-the-version-then-the-help')
 
-    // Plural binds — one per bound section, in milestone order, pinned to the LIVE
-    // index (the model's own binding is overwritten, never trusted).
-    expect(written.binds).toEqual([...bindsFor(r, DOC, 'help'), ...bindsFor(r, DOC, 'version')])
+    // One bind per document, holding every milestone's sentences (the model's own
+    // binding is overwritten, never trusted).
+    expect(written.binds).toEqual([
+      { doc: DOC, sentences: [...bindsFor(r, DOC, 'help')[0].sentences, ...bindsFor(r, DOC, 'version')[0].sentences].sort() },
+    ])
     // The artifact promises only its selected milestone claims.
-    expect(written.promise).toBe('help claim version claim')
+    expect(written.promise).toBe('version claim help claim')
     // The flow + interface references the runner reads for drift.
     expect(written.flow).toEqual({
       id: 'a-user-checks-the-version-then-the-help',
@@ -858,7 +854,8 @@ describe('generateGuards — birth validation', () => {
     // Its run result is recorded exactly as a finding was, now naming the test.
     expect(res.birthFindings).toHaveLength(1)
     const result = res.birthFindings[0]
-    expect(result.anchor).toBe('version')
+    expect(result.doc).toBe(DOC)
+    expect(result.claim).toBe('version claim')
     expect(result.flowId).toBe('version')
     expect(result.surface).toBe('cli')
     expect(result.title).toBe('always broken')
@@ -878,7 +875,7 @@ describe('generateGuards — birth validation', () => {
     expect(committed).toMatchObject([{ id: 'version', drivers: ['cli'], status: 'failing' }])
     expect(committed[0].diagnosis).toMatchObject({
       doc: DOC,
-      anchor: 'version',
+      claim: 'version claim',
       title: 'always broken',
       step: 1,
       file: res.written[0].file,
@@ -967,11 +964,11 @@ describe('generateGuards — birth validation', () => {
     expect(finding.failedMilestone).toBe(2)
     expect(finding.priorMilestonesPassed).toBe(true)
     expect(isCompositionFinding(finding)).toBe(true)
-    // It pivots on the milestone that broke — its section and its claim, so the
+    // It pivots on the milestone that broke — its document and its claim, so the
     // detail points at the sentence that disagrees rather than the flow's head.
-    // Sections are indexed in anchor order, so `version` is the second milestone.
-    expect(finding.anchor).toBe('version')
-    expect(finding.claim).toBe('version claim')
+    const flow = readFlowsFile(r)!.flows[0]
+    expect(finding.doc).toBe(DOC)
+    expect(finding.claim).toBe(flow.milestones[1].claimTitle)
   }, 60_000)
 
   it('a first-milestone failure is NOT a composition finding', async () => {
@@ -1060,10 +1057,10 @@ describe('generateGuards — dismissals (decisions.json)', () => {
     const finding = res.birthFindings.find((f) => f.title === 'bad')!
     expect(finding.claim).toBe('CLAIM_BAD')
     expect(finding.yaml).toContain('title: bad')
-    expect(finding.yaml).toContain('section: version')
+    expect(finding.yaml).toContain(`doc: ${DOC}`)
   }, 60_000)
 
-  it('dismissing a claim drops its milestone, records a gap, and re-synthesizes the flow', async () => {
+  it('dismissing a claim drops its milestone and re-synthesizes the flow', async () => {
     const r = seed()
     const runOnce = () =>
       runGenerate({
@@ -1082,9 +1079,9 @@ describe('generateGuards — dismissals (decisions.json)', () => {
     dismissGuardClaim(r, { claimId: claimIdOf(r, 'CLAIM_BAD'), dismissedAt: '2026-07-08T00:00:00.000Z' })
 
     const second = await runOnce()
-    const dismissedGap = second.coverageGaps.find((g) => g.kind === 'dismissed')!
-    expect(dismissedGap).toMatchObject({ doc: DOC, anchor: 'version' })
-    expect(dismissedGap.reason).toContain('CLAIM_BAD')
+    // A dismissed claim enters no flow; it is no gap of its own.
+    expect(readFlowsFile(r)!.flows.map((f) => f.milestones.map((m) => m.claimTitle))).toEqual([['CLAIM_GOOD']])
+    expect(second.coverageGaps.some((g) => g.kind === 'dismissed')).toBe(false)
     expect(second.orphanedDismissals).toEqual([]) // the dismissal matched a live claim
     // Dismissing a claim removes a MILESTONE, which moves the flow's composition —
     // so the flow re-authors instead of skipping. Dismissal has a price tag now.
@@ -1120,7 +1117,7 @@ describe('generateGuards — dismissals (decisions.json)', () => {
     expect(flowEntry(r, 'version')).toBeUndefined()
     expect(second.birthFindings).toEqual([])
     expect(second.orphanedDismissals).toEqual([])
-    expect(second.coverageGaps.find((g) => g.kind === 'dismissed')?.reason).toContain('version claim')
+    expect(readFlowsFile(r)!.flows).toEqual([])
   }, 90_000)
 
   it('a dismissal naming a claim the scan no longer reads surfaces as orphaned', async () => {
@@ -1284,7 +1281,7 @@ describe('generateGuards — worker robustness', () => {
 
     expect(res.status).toBe('ok')
     expect(res.written.map((w) => w.flowId)).toEqual(['help'])
-    expect(res.errors.map((e) => e.anchor)).toEqual(['version'])
+    expect(res.errors.map((e) => [e.doc, e.flowId])).toEqual([[TWO_CLI_DOC, 'version']])
     expect(flowEntry(r, 'version')?.generationInputsHash).toBeNull()
     expect(flowEntry(r, 'help')?.scenarios).toMatchObject([{ id: 'help', drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] }])
   }, 60_000)
@@ -1321,13 +1318,13 @@ describe('generateGuards — manifest + orphans', () => {
   it('carries an orphaned flow WITH tests forward untouched, and marks it', async () => {
     const r = seed()
 
-    // A prior flow whose sections no longer exist on disk.
+    // A prior flow whose document no longer exists on disk.
     writeManifest(r, {
       flows: [
         {
           flowId: 'a-removed-flow',
           flowFingerprint: 'sha256:old',
-          bindings: [{ doc: 'docs/gone.md', anchor: 'removed/section', fingerprint: 'sha256:old', sentences: ['removed/section'] }],
+          bindings: [{ doc: 'docs/gone.md', sentences: ['removed sentence'] }],
           scenarios: [{ id: 'orphan', drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] }],
           generationInputsHash: 'sha256:x',
           gaps: [],
@@ -1341,9 +1338,9 @@ describe('generateGuards — manifest + orphans', () => {
       flowWorkerSession: authorsEvery(),
     })
 
-    // Reported, never deleted: the next `guard run` surfaces those scenarios as
+    // Kept, never deleted: the next `guard run` surfaces those scenarios as
     // orphaned drift instead of coverage silently disappearing.
-    expect(res.orphaned).toEqual([{ doc: 'docs/gone.md', anchor: 'removed/section', scenarioIds: ['orphan'] }])
+    expect(res.status).toBe('ok')
     expect(() => GuardManifestSchema.parse(readManifest(r)!)).not.toThrow()
     expect(flowEntry(r, 'a-removed-flow')?.scenarios).toMatchObject([
       { id: 'orphan', drivers: ['cli'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'cli' }] },
@@ -1370,12 +1367,12 @@ describe('generateGuards — manifest + orphans', () => {
 
     // Now seed the two shapes a ghost arrives in: one carried by an OLD generate
     // (before the mark existed) and one already marked by a new one. Both bind a
-    // section that is gone, carry a gap explaining a test that will never be
+    // document that is gone, carry a gap explaining a test that will never be
     // written, and realize nothing at all.
     const ghost = (flowId: string, extra: object) => ({
       flowId,
       flowFingerprint: 'sha256:old',
-      bindings: [{ doc: 'docs/gone.md', anchor: `${flowId}/section`, fingerprint: 'sha256:old', sentences: [`${flowId}/section`] }],
+      bindings: [{ doc: 'docs/gone.md', sentences: [`${flowId} sentence`] }],
       scenarios: [],
       generationInputsHash: 'sha256:x',
       gaps: [{ surface: 'cli' as const, kind: 'no-interface' as const, reason: 'no cli interface does this' }],
@@ -1392,7 +1389,7 @@ describe('generateGuards — manifest + orphans', () => {
     // The gaps went with the entries — a gap explaining a missing test for a flow
     // that no longer exists is the bare row the dogfood store surfaced.
     expect(readManifest(r)!.flows.flatMap((f) => f.gaps)).toEqual([])
-    expect(manifestSections(r).map((s) => s.doc)).not.toContain('docs/gone.md')
+    expect(readManifest(r)!.flows.flatMap((f) => f.bindings.map((b) => b.doc))).not.toContain('docs/gone.md')
     // A prune rewrites a stored file, so the run is not a no-op…
     expect(res.noChanges).toBe(false)
     // …and the orphan count, which means "orphans whose coverage was kept", never
@@ -1415,16 +1412,12 @@ describe('generateGuards — manifest + orphans', () => {
     const rep = {
       generatedAt: '2026-01-02T03:04:05.000Z',
       status: 'ok' as const,
-      sectionsTotal: 0,
-      sectionsChanged: 0,
-      skippedUnchanged: 0,
       noChanges: false,
       written: [],
       coverageGaps: [],
       birthFindings: [],
       errors: [],
       extractionFailures: [],
-      orphaned: [],
     }
     expect(() => GuardGenerateReportSchema.parse(rep)).not.toThrow()
   })
@@ -1541,7 +1534,7 @@ describe('generateGuards — universe + recipe discovery', () => {
   })
 })
 
-// A birth candidate whose scenario binds to the live `version` section and runs
+// A birth candidate whose scenario binds the live `version` sentence and runs
 // `steps`; the flow/surface fields are carried back through the runner.
 function candidate(repoRoot: string, id: string, steps: GuardScenario['steps']): BirthCandidate {
   const binds = bindsFor(repoRoot, DOC, 'version')
@@ -1550,8 +1543,8 @@ function candidate(repoRoot: string, id: string, steps: GuardScenario['steps']):
     title: 'version',
     goal: 'the version prints',
     fingerprint: 'sha256:flow',
-    milestones: [{ order: 1, doc: DOC, anchor: 'version', claimTitle: 'c', sentences: ['version'] }],
-    bindings: [{ doc: DOC, anchor: 'version', fingerprint: binds[0].fingerprint, sentences: ['version'] }],
+    milestones: [{ order: 1, doc: DOC, claimId: claimId(DOC, binds[0].sentences), claimTitle: 'c', sentences: binds[0].sentences }],
+    bindings: binds,
     composedOf: [],
     synthesisInputsHash: 'sha256:inputs',
   }
@@ -1568,19 +1561,7 @@ function candidate(repoRoot: string, id: string, steps: GuardScenario['steps']):
   return {
     flow,
     surface: 'cli',
-    section: {
-      doc: DOC,
-      anchor: 'version',
-      fingerprint: binds[0].fingerprint,
-      headingText: 'version',
-      level: 2,
-      ownText: '',
-      fullText: '',
-      areaTags: [],
-      suppressionFingerprint: '',
-      endpointSchemaFingerprint: '',
-      securityFingerprint: '',
-    },
+    primary: { doc: DOC },
     scenario,
     ref: id,
   }
@@ -1727,7 +1708,8 @@ describe('generateGuards — grounded authoring', () => {
       }),
     })
 
-    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
+    // The flow is titled by its claim's text.
+    expect(res.written).toHaveLength(1)
     // The claim named `--version`; relkit prints 2.4.1 at exit 0 in the empty sandbox.
     expect(briefing).toContain('--version')
     expect(briefing).toContain('2.4.1')
@@ -1804,7 +1786,7 @@ describe('generateGuards — grounded authoring', () => {
       onGroundProgress: (captured, planned) => ground.push([captured, planned]),
     })
 
-    expect(res.written.map((w) => w.flowId)).toEqual(['version'])
+    expect(res.written).toHaveLength(1)
     // Phase 1 is the `--help` surface alone (0/1, 1/1); the exact `--version`
     // fragment runs in phase 2 (1/2, 2/2). No expansion probes (the fixture's
     // help surface names no subcommand the claim also mentions).
@@ -1984,8 +1966,10 @@ describe('generateGuards — the per-flow pipeline', () => {
     expect(first.flows.reopened).toEqual({ flows: 0, byInput: {}, unrecorded: 0 })
     const stored = readManifest(r)!.flows.find((f) => f.flowId === 'version')!
     expect(Object.keys(stored.generationInputs ?? {})).toEqual(
-      expect.arrayContaining(['flow', 'sections', 'recipe.slice', 'roster', 'preparation.run']),
+      expect.arrayContaining(['flow', 'recipe.slice', 'roster', 'preparation.run']),
     )
+    // The flow fingerprint folds each claim's id, so the document text has no key of its own.
+    expect(Object.keys(stored.generationInputs ?? {})).not.toContain('sections')
     // It holds its scenario, so a task moving is no input of it.
     expect(Object.keys(stored.generationInputs ?? {})).not.toContain('interfaces')
 
@@ -2000,13 +1984,13 @@ describe('generateGuards — the per-flow pipeline', () => {
     writeManifest(r, {
       flows: readManifest(r)!.flows.map((f) => ({
         ...f,
-        generationInputs: { ...f.generationInputs, sections: 'f'.repeat(16) },
+        generationInputs: { ...f.generationInputs, flow: 'f'.repeat(16) },
       })),
     })
     const facts: string[] = []
     const third = await runGenerate({ ...opts, onFact: (_step, line) => facts.push(line) })
-    expect(third.flows.reopened).toEqual({ flows: 1, byInput: { sections: 1 }, unrecorded: 0 })
-    expect(facts).toContain('1 flow re-opened: 1 sections, 0 interfaces')
+    expect(third.flows.reopened).toEqual({ flows: 1, byInput: { flow: 1 }, unrecorded: 0 })
+    expect(facts.find((l) => l.startsWith('1 flow re-opened:'))).toMatch(/^1 flow re-opened: 1 flow, 0 interfaces/)
 
     // An entry stored before the inputs were named can only say it moved.
     writeManifest(r, {
@@ -2077,7 +2061,7 @@ describe('generateGuards: the step facts', () => {
     const fresh: string[] = []
     await runGenerate({ ...opts, onFact: (step, line) => fresh.push(`${step} | ${line}`) })
 
-    expect(fresh).toContain('index | docs/cli.md#version: changed')
+    expect(fresh).toContain('index | docs/cli.md: changed')
     expect(fresh).toContain('extract | docs/cli.md: 1 testable claim from the scan')
     expect(fresh).toContain('interfaces | cli/relkit: cli')
     expect(fresh).toContain('flows | doc:docs/cli.md: 1 flow, synthesized')
@@ -2092,7 +2076,7 @@ describe('generateGuards: the step facts', () => {
     const cached: string[] = []
     await runGenerate({ ...opts, onFact: (step, line) => cached.push(`${step} | ${line}`) })
 
-    expect(cached).toContain('index | 2 sections unchanged')
+    expect(cached).toContain('index | 1 document unchanged')
     expect(cached).toContain('match | version x cli: matched, 1 interface, from cache')
     expect(cached).toContain('validate | version: unchanged, 1 committed scenario stands')
     expect(cached.some((line) => line.startsWith('author |'))).toBe(false)

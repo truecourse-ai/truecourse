@@ -42,7 +42,7 @@ function row(id: string, over: Partial<GuardScenarioResult> = {}): GuardScenario
   return {
     id,
     title: `${id} title`,
-    binds: { doc: 'docs/x.md', section: `${id}/sec`, fingerprint: 'sha256:x', sentences: [`${id}/sec`] },
+    binds: { doc: 'docs/x.md', sentences: [`${id}/sec`] },
     outcome: 'fail',
     durationMs: 1,
     failure: { step: 2, expected: 'exit 0', actual: 'exit 2 — unknown flag' },
@@ -69,7 +69,6 @@ function latest(runId: string, rows: GuardScenarioResult[]): GuardLatest {
       blocked: 0,
     },
     scenarios: rows,
-    sections: [],
   }
 }
 

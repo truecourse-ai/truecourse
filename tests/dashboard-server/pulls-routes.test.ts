@@ -60,7 +60,7 @@ const report = (over: Partial<PullRequestCheckReport> = {}): PullRequestCheckRep
   base: { mergeBase: 'b', commit: 'b', nearestWithBase: null },
   fork: false,
   conflictsCreated: [],
-  sectionsMoved: [],
+  docsMoved: [],
   repositoriesAffected: [],
   run: {
     runId: 'run-1',
@@ -103,7 +103,7 @@ describe('GET /api/repos/:id/pulls', () => {
       status: 'settled',
       conclusion: 'failure',
       reason: 'new-failures',
-      report: report({ sectionsMoved: [{ doc: 'd', anchor: 'a', flows: [] }] }),
+      report: report({ docsMoved: [{ doc: 'd', flows: [] }] }),
       settledAt: '2026-09-21T11:00:00.000Z',
     });
 
@@ -117,7 +117,7 @@ describe('GET /api/repos/:id/pulls', () => {
       reason: 'new-failures',
       createdAt: latest.createdAt,
       settledAt: '2026-09-21T11:00:00.000Z',
-      counts: { conflictsCreated: 0, sectionsMoved: 1, newFailures: 1, preExisting: 2, fixed: 3 },
+      counts: { conflictsCreated: 0, docsMoved: 1, newFailures: 1, preExisting: 2, fixed: 3 },
     });
     expect(res.body.pullRequests[1].check).toBeNull();
 
@@ -183,7 +183,7 @@ describe('GET /api/context/pull-requests', () => {
       reason: 'conflict',
       settledAt: '2026-09-21T11:00:00.000Z',
       conflictsCreated: created,
-      sectionsMoved: [],
+      docsMoved: [],
     });
   });
 });

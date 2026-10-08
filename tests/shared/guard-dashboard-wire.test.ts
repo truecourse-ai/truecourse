@@ -29,7 +29,7 @@ import {
 
 /**
  * The guard dashboard WIRE contract: the coverage-status precedence every rollup
- * (surface → flow → section) shares, and the Manual pseudo-flow identity the flow
+ * (surface → flow → claim) shares, and the Manual pseudo-flow identity the flow
  * drill-down uses to stay total over hand-written scenarios.
  */
 
@@ -50,8 +50,8 @@ describe('coverage status precedence', () => {
   });
 
   it('ranks worst-first by the five words, not by where a status came from', () => {
-    // A BLOCKER outranks a sibling that passed: a section with a green scenario and
-    // a blocked claim reads Blocked, and its detail keeps both.
+    // A BLOCKER outranks a sibling that passed: a flow with a green scenario and
+    // a blocked surface reads Blocked, and its detail keeps both.
     expect(worstCoverageStatus(['pass', 'no-interface'])).toBe('no-interface');
     expect(worstCoverageStatus(['pass', 'never-run'])).toBe('never-run');
     expect(worstCoverageStatus(['fail', 'pass', 'tui'])).toBe('fail');
@@ -78,7 +78,7 @@ describe('coverage status precedence', () => {
 });
 
 /**
- * THE SIX WORDS. Every user-facing coverage status — a doc section, a flow, an
+ * THE SIX WORDS. Every user-facing coverage status — a claim, a flow, an
  * overview counter, a filter, a chip — is one of Succeeded / Partially
  * succeeded / Failed / Blocked / Not testable / Never run, on the CLI and in
  * the dashboard alike. Partially succeeded is a flow's alone.
@@ -174,8 +174,8 @@ describe('the coverage vocabulary', () => {
 });
 
 /**
- * A no-flow claim's reason is the ONLY record a section whose claims all landed
- * there has, so the kind it states is what that section's status derives from.
+ * A no-flow claim's reason is the ONLY record a claim placed in no flow has, so
+ * the kind it states is what that claim's status derives from.
  */
 describe('no-flow claim reasons → their gap kind', () => {
   const word = (reason: string): string =>
@@ -295,7 +295,7 @@ describe('the result RUN IDENTITY on a merged board', () => {
     const base = {
       id: 'flow.cli.1',
       title: 'X',
-      binds: { doc: 'docs/x.md', section: 'x', fingerprint: 'sha256:x', sentences: ['x'] },
+      binds: { doc: 'docs/x.md', sentences: ['x'] },
       outcome: 'pass',
       durationMs: 4,
     };

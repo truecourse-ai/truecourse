@@ -6,8 +6,8 @@
  * old conversation must still name the same bug after a re-render, so the
  * first-seen registry is persisted in the report itself and only ever grows.
  * And the DOC QUOTE IS HONEST: it is resolved live from the scenario's bind, so
- * a section edited since the scenario bound it says so instead of quoting text
- * the verdict never read.
+ * a bound sentence edited since the scenario bound it says so instead of quoting
+ * text the verdict never read.
  *
  * The report is regenerated WHOLE on every render; its sibling
  * `guard/adjudicate.findings.md` is the opposite — an append-only per-run
@@ -20,16 +20,19 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
-  buildDocSectionIndex,
   guardAdjudicateFindingsPath,
   guardFindingsReportPath,
   writeGuardLatest,
 } from '@truecourse/guard-runner'
-import type {
-  GuardAdjudicationClass,
-  GuardLatest,
-  GuardScenarioAdjudication,
-  GuardScenarioResult,
+import {
+  parseDocTree,
+  sectionSentences,
+  sentenceKey,
+  type GuardAdjudicationClass,
+  type GuardBinds,
+  type GuardLatest,
+  type GuardScenarioAdjudication,
+  type GuardScenarioResult,
 } from '@truecourse/shared'
 import {
   parseFindingNumbering,
@@ -50,16 +53,16 @@ const DOC_CONTENT = [
   '',
   '## verbose',
   '',
-  '`relkit --verbose` prints the resolved config and exits 0.',
+  '`relkit --verbose` prints the resolved config. It exits 0.',
   '',
 ].join('\n')
 
-/** The live anchor + fingerprint of the doc's `verbose` section. */
-function bind(content = DOC_CONTENT): { doc: string; section: string; fingerprint: string } {
-  const index = buildDocSectionIndex(DOC, content)
-  const section = index.sections.find((s) => s.headingText === 'verbose')
+/** A bind to the sentences of the doc's `verbose` section, as the fixture doc words them. */
+function bind(): GuardBinds {
+  const tree = parseDocTree(DOC, DOC_CONTENT)
+  const section = tree.sections.find((s) => s.headingText === 'verbose')
   if (!section) throw new Error('fixture doc has no `verbose` section')
-  return { doc: DOC, section: section.anchor, fingerprint: section.fingerprint, sentences: [section.anchor] }
+  return { doc: DOC, sentences: sectionSentences(tree, section).map((s) => sentenceKey(s.text, s.repeat)) }
 }
 
 function writeDoc(content: string): void {
@@ -117,7 +120,6 @@ function board(rows: GuardScenarioResult[]): GuardLatest {
     },
     summary: { total: scenarios.length, pass: 0, fail: scenarios.length, stale: 0, orphaned: 0, error: 0, blocked: 0 },
     scenarios,
-    sections: [],
   }
 }
 
@@ -198,25 +200,25 @@ describe('what reaches the report', () => {
 })
 
 describe('the doc quote, resolved live from the bind', () => {
-  it('quotes the bound section when its live text still matches the fingerprint', () => {
+  it('quotes the section the bound sentences sit in while every one of them is still there', () => {
     const rendered = render(board([row('scn-bug', verdict('bug'))]), null)!
-    expect(rendered.content).toContain('> `relkit --verbose` prints the resolved config and exits 0.')
+    expect(rendered.content).toContain('> `relkit --verbose` prints the resolved config. It exits 0.')
     expect(rendered.content).not.toContain('**doc quote**')
   })
 
-  it('says the section has been edited since the scenario bound it, and still quotes it', () => {
+  it('says a bound sentence has been edited since the scenario bound it, and still quotes the section', () => {
     const stale = row('scn-bug', verdict('bug'))
     writeDoc(DOC_CONTENT.replace('exits 0', 'exits 3'))
     const rendered = render(board([stale]), null)!
-    expect(rendered.content).toContain('- **doc quote**: _the section text has been edited since the scenario bound it_')
-    expect(rendered.content).toContain('> `relkit --verbose` prints the resolved config and exits 3.')
+    expect(rendered.content).toContain('- **doc quote**: _a bound sentence has been edited since the scenario bound it_')
+    expect(rendered.content).toContain('> `relkit --verbose` prints the resolved config. It exits 3.')
   })
 
-  it('says the section is gone, with nothing to quote', () => {
+  it('says none of the bound sentences is left, with nothing to quote', () => {
     const stale = row('scn-bug', verdict('bug'))
     writeDoc('# CLI\n\nThe relkit command line.\n')
     const rendered = render(board([stale]), null)!
-    expect(rendered.content).toContain('- **doc quote**: _the bound section no longer exists in the document_')
+    expect(rendered.content).toContain('- **doc quote**: _none of the bound sentences is in the document any more_')
     expect(rendered.content).not.toContain('> `relkit --verbose`')
   })
 

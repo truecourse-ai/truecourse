@@ -1,8 +1,8 @@
 /**
  * THE GUARD-GENERATE SESSIONS' READ TOOLS — every one
  * read-only and bounded. A generate session reads the run's doc universe (the
- * `GuardDoc`s the deterministic plan collected — full text plus the live
- * section index); it writes nothing. Every write happens in the run's fold,
+ * `GuardDoc`s the deterministic plan collected — full text plus its sections,
+ * the outline a session reads by); it writes nothing. Every write happens in the run's fold,
  * after the outcomes, so a session that dies mid-budget strands no half-read
  * state.
  *
@@ -40,7 +40,7 @@ export function docOutlineLines(doc: GuardDoc): string[] {
 }
 
 /**
- * Resolve a heading reference against a doc's live section index. Forgiving on
+ * Resolve a heading reference against a doc's sections. Forgiving on
  * purpose (the model quotes what the briefing showed): exact anchor first, then
  * case-insensitive heading text, then case-insensitive anchor leaf — each only
  * when UNIQUE, so a loose reference is never bound to the wrong section.

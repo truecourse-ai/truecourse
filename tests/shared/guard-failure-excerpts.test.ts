@@ -32,7 +32,7 @@ describe('GuardFailureDetailSchema — program-output excerpts', () => {
     const parsed = GuardScenarioResultSchema.parse({
       id: 's1',
       title: 't',
-      binds: { doc: 'd.md', section: 'a', fingerprint: 'sha256:x', sentences: ['a'] },
+      binds: { doc: 'd.md', sentences: ['a'] },
       outcome: 'fail',
       durationMs: 5,
       failure: { step: 2, expected: 'exit 0', actual: 'exit 7', stderr: 'boom\n' },
@@ -46,7 +46,6 @@ describe('GuardBirthFindingSchema — program-output excerpts', () => {
   it('parses a birth finding carrying excerpts', () => {
     const parsed = GuardBirthFindingSchema.parse({
       doc: 'docs/cli.md',
-      anchor: 'add',
       title: 'add records an expense',
       step: 1,
       expected: 'exit 3',
@@ -61,7 +60,6 @@ describe('GuardBirthFindingSchema — program-output excerpts', () => {
   it('parses a fidelity finding with no excerpts (no program run)', () => {
     const parsed = GuardBirthFindingSchema.parse({
       doc: 'docs/cli.md',
-      anchor: 'add',
       kind: 'fidelity',
       title: 'add records an expense',
       step: 1,

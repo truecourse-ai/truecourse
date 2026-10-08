@@ -1,7 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { buildDocSectionIndex } from '@truecourse/guard-runner'
 import {
   synthesizeFlows,
   buildFlowAreas,
@@ -9,7 +8,6 @@ import {
   flowAreaKey,
   checkEpicSet,
   checkFlowSet,
-  flowSectionKey,
   isFlowSetClean,
   isFlowSynthesisWipeout,
   flowsPath,
@@ -23,7 +21,7 @@ import {
   type FlowClaimInput,
   type FlowSynthesisResult,
 } from '@truecourse/guard-generator'
-import { GuardFlowsFileSchema, parseDocTree, sectionSentences, sentenceKey, type DocTree, type GuardFlow, type GuardNoFlowClaim } from '@truecourse/shared'
+import { GuardFlowsFileSchema, claimId, parseDocTree, sectionSentences, sentenceKey, type DocTree, type GuardFlow, type GuardNoFlowClaim } from '@truecourse/shared'
 import { makeTempRepo, rmrf, sessionSummary, FLOWS_KIND } from './helpers.js'
 
 const repos: string[] = []
@@ -74,26 +72,16 @@ interface DocFixture {
   doc: string
   tree: DocTree
   outline: { anchor: string; headingText: string; level: number }[]
-  anchors: Record<string, string>
-  fingerprints: Map<string, string>
 }
 
-/** Index a document exactly the way the runner does — real anchors, real
- *  fingerprints, so bindings in these tests are the ones a run would write. */
+/** Parse a document exactly the way a run does — real sentences, so the
+ *  claims and bindings in these tests are the ones a run would write. */
 function indexDoc(doc: string, content: string): DocFixture {
-  const index = buildDocSectionIndex(doc, content)
-  const anchors: Record<string, string> = {}
-  const fingerprints = new Map<string, string>()
-  for (const s of index.sections) {
-    anchors[s.headingText] = s.anchor
-    fingerprints.set(flowSectionKey(doc, s.anchor), s.fingerprint)
-  }
+  const tree = parseDocTree(doc, content)
   return {
     doc,
-    tree: parseDocTree(doc, content),
-    outline: index.sections.map((s) => ({ anchor: s.anchor, headingText: s.headingText, level: s.level })),
-    anchors,
-    fingerprints,
+    tree,
+    outline: tree.sections.map((s) => ({ anchor: s.anchor, headingText: s.headingText, level: s.level })),
   }
 }
 
@@ -109,6 +97,10 @@ function sentencesFor(fixture: DocFixture, heading: string, title: string): stri
   return [quoted ? sentenceKey(quoted.text, quoted.repeat) : sentenceKey(title)]
 }
 
+/** Every title read from the same sentences, in first-seen order — the
+ *  ordinal a claim id carries when one sentence yields several claims. */
+const titlesBySentences = new Map<string, string[]>()
+
 const TASKS = indexDoc(TASKS_DOC, TASKS_CONTENT)
 const AUTH = indexDoc(AUTH_DOC, AUTH_CONTENT)
 
@@ -120,8 +112,14 @@ const LIST_DONE = '`relkit list --done` prints only the completed tasks'
 const SIGN_IN = '`POST /session` with valid credentials answers 200 and sets a session cookie'
 const SIGN_OUT = '`DELETE /session` answers 204 and clears the session cookie'
 
+/** The claim a title states under a fixture heading; the same title always gives the same id. */
 function claim(fixture: DocFixture, heading: string, title: string): FlowClaimInput {
-  return { id: `claim::${fixture.doc}::${heading}::${title}`, doc: fixture.doc, anchor: fixture.anchors[heading], title, sentences: sentencesFor(fixture, heading, title) }
+  const sentences = sentencesFor(fixture, heading, title)
+  const key = `${fixture.doc}\0${sentences.join('\0')}`
+  const titles = titlesBySentences.get(key) ?? []
+  if (!titles.includes(title)) titles.push(title)
+  titlesBySentences.set(key, titles)
+  return { id: claimId(fixture.doc, sentences, titles.indexOf(title)), doc: fixture.doc, title, sentences }
 }
 
 const TASK_CLAIMS: FlowClaimInput[] = [
@@ -133,8 +131,8 @@ const TASK_CLAIMS: FlowClaimInput[] = [
 ]
 
 const AUTH_CLAIMS: FlowClaimInput[] = [
-  claim(AUTH, 'Signing in', SIGN_IN, 'api'),
-  claim(AUTH, 'Signing out', SIGN_OUT, 'api'),
+  claim(AUTH, 'Signing in', SIGN_IN),
+  claim(AUTH, 'Signing out', SIGN_OUT),
 ]
 
 const tasksArea: FlowSynthesisArea = {
@@ -148,11 +146,14 @@ const authArea: FlowSynthesisArea = {
   docs: [{ doc: AUTH.doc, outline: AUTH.outline }],
 }
 
-const FINGERPRINTS = new Map([...TASKS.fingerprints, ...AUTH.fingerprints])
-
-/** A milestone reference as the model returns it. */
+/** A milestone reference as the model returns it: the claim's id. */
 function ms(fixture: DocFixture, heading: string, claimTitle: string, order?: number) {
-  return { doc: fixture.doc, anchor: fixture.anchors[heading], claimTitle, ...(order ? { order } : {}) }
+  return { claimId: claim(fixture, heading, claimTitle).id, ...(order ? { order } : {}) }
+}
+
+/** A no-flow entry as the model returns it. */
+function noFlow(fixture: DocFixture, heading: string, claimTitle: string, reason: string) {
+  return { claimId: claim(fixture, heading, claimTitle).id, reason }
 }
 
 /**
@@ -246,14 +247,13 @@ async function synth(
     areas,
     areaSession,
     epicSession: noEpics,
-    sectionFingerprints: FINGERPRINTS,
     now: () => new Date('2026-07-24T00:00:00.000Z'),
     ...extra,
   })
 }
 
 describe('synthesizeFlows — composition', () => {
-  it('composes a composite and an atomic flow, binds their sections, and writes flows.json', async () => {
+  it('composes a composite and an atomic flow, binds their sentences, and writes flows.json', async () => {
     const r = repo()
     const runner = areaSessions({ tasks: TASK_LIFECYCLE })
     const res = await synth(r, [tasksArea], runner)
@@ -268,15 +268,12 @@ describe('synthesizeFlows — composition', () => {
     const lifecycle = res.flows[0]
     expect(lifecycle.milestones.map((m) => m.order)).toEqual([1, 2, 3, 4])
     expect(lifecycle.milestones.map((m) => m.claimTitle)).toEqual([ADD, LIST, DONE, LIST_DONE])
-    // One binding per distinct section, carrying the LIVE section fingerprint.
-    expect(lifecycle.bindings.map((b) => b.anchor)).toEqual([
-      TASKS.anchors['Creating tasks'],
-      TASKS.anchors['Listing tasks'],
-      TASKS.anchors['Completing tasks'],
-    ])
-    for (const b of lifecycle.bindings) {
-      expect(b.fingerprint).toBe(TASKS.fingerprints.get(flowSectionKey(TASKS.doc, b.anchor)))
-    }
+    // Each milestone is its claim, resolved by id: the claim's doc, text and sentences.
+    const claims = [ADD, LIST, DONE, LIST_DONE].map((t) => TASK_CLAIMS.find((c) => c.title === t)!)
+    expect(lifecycle.milestones.map((m) => m.claimId)).toEqual(claims.map((c) => c.id))
+    expect(lifecycle.milestones.map((m) => m.sentences)).toEqual(claims.map((c) => c.sentences))
+    // One binding per document, holding every sentence its milestones are read from.
+    expect(lifecycle.bindings).toEqual([{ doc: TASKS_DOC, sentences: [...new Set(claims.flatMap((c) => c.sentences))].sort() }])
     expect(lifecycle.fingerprint).toMatch(/^sha256:[0-9a-f]{64}$/)
     expect(lifecycle.composedOf).toEqual([])
 
@@ -303,51 +300,9 @@ describe('synthesizeFlows — composition', () => {
     expect(area.claims.map((c) => c.title)).toEqual([ADD, ADD_EMPTY, LIST, DONE, LIST_DONE])
     expect(area.docs.map((d) => d.doc)).toEqual([TASKS_DOC])
   })
-
-  it('records a claim whose section is not in the live index as a no-flow claim', async () => {
-    const r = repo()
-    const area: FlowSynthesisArea = {
-      ...tasksArea,
-      claims: [...TASK_CLAIMS, { id: 'claim::stale', doc: TASKS_DOC, anchor: 'tasks/deleted-section', title: 'stale claim', sentences: ['sentence:stale'] }],
-    }
-    const res = await synth(r, [area], areaSessions({ tasks: TASK_LIFECYCLE }))
-    expect(res.noFlowClaims.map((c) => c.claimTitle)).toContain('stale claim')
-    expect(res.flows.flatMap((f) => f.milestones).some((m) => m.claimTitle === 'stale claim')).toBe(false)
-  })
 })
 
-describe('synthesizeFlows — milestone snapping and validation', () => {
-  it('snaps a paraphrased milestone onto its claim without a re-ask', async () => {
-    const r = repo()
-    const runner = areaSessions({
-      tasks: {
-        flows: [
-          {
-            title: 'Create and list a task',
-            goal: 'A user adds a task and sees it.',
-            milestones: [
-              // Whitespace + case + a trailing period the model added.
-              { doc: TASKS_DOC, anchor: TASKS.anchors['Creating tasks'], claimTitle: `  ${ADD.toUpperCase()}.  ` },
-              // Truncated by the model — a unique containment match in its section.
-              { doc: TASKS_DOC, anchor: TASKS.anchors['Listing tasks'], claimTitle: '`relkit list` prints one line per open task' },
-            ],
-          },
-        ],
-        noFlowClaims: [
-          { doc: TASKS_DOC, anchor: TASKS.anchors['Creating tasks'], claimTitle: ADD_EMPTY, reason: 'an error path no user flow walks' },
-          { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: DONE, reason: 'covered by the completion flow later' },
-          { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter, not a flow step' },
-        ],
-      },
-    })
-    const res = await synth(r, [tasksArea], runner)
-
-    expect(res.calls).toBe(1)
-    expect(res.unsettled).toEqual([])
-    // Snapped back to the inventory's canonical text, not the model's paraphrase.
-    expect(res.flows[0].milestones.map((m) => m.claimTitle)).toEqual([ADD, LIST])
-  })
-
+describe('synthesizeFlows — milestone resolution and validation', () => {
   // The corrective RE-ASK is retired: the session's own
   // `check_flows` tool is where a milestone gets corrected, in-turn, and the
   // fold NEVER trusts the transcript — a value that still fails validation
@@ -360,9 +315,7 @@ describe('synthesizeFlows — milestone snapping and validation', () => {
           {
             title: 'Invented flow',
             goal: 'Asserts something extraction never produced.',
-            milestones: [
-              { doc: TASKS_DOC, anchor: TASKS.anchors['Creating tasks'], claimTitle: '`relkit archive` hides a task from every list' },
-            ],
+            milestones: [ms(TASKS, 'Creating tasks', '`relkit archive` hides a task from every list')],
           },
         ],
         noFlowClaims: [],
@@ -375,7 +328,7 @@ describe('synthesizeFlows — milestone snapping and validation', () => {
     expect(res.flows).toEqual([])
     expect(res.unsettled).toHaveLength(1)
     expect(res.unsettled[0].reason).toContain('flow synthesis refused')
-    expect(res.unsettled[0].reason).toContain('relkit archive')
+    expect(res.unsettled[0].reason).toContain(claim(TASKS, 'Creating tasks', '`relkit archive` hides a task from every list').id)
   })
 
   it('reports a failed session as the area unsettled, with the seam’s reason', async () => {
@@ -425,28 +378,14 @@ describe('synthesizeFlows — coverage honesty rule', () => {
       areaSessions({
         tasks: {
           flows: [TASK_LIFECYCLE.flows[0]],
-          noFlowClaims: [
-            {
-              doc: TASKS_DOC,
-              anchor: TASKS.anchors['Creating tasks'],
-              claimTitle: ADD_EMPTY,
-              reason: 'a validation error no user flow walks through',
-            },
-          ],
+          noFlowClaims: [noFlow(TASKS, 'Creating tasks', ADD_EMPTY, 'a validation error no user flow walks through')],
         },
       }),
     )
 
     expect(res.calls).toBe(1)
     expect(res.unsettled).toEqual([])
-    expect(res.noFlowClaims).toEqual([
-      {
-        doc: TASKS_DOC,
-        anchor: TASKS.anchors['Creating tasks'],
-        claimTitle: ADD_EMPTY,
-        reason: 'a validation error no user flow walks through',
-      },
-    ])
+    expect(res.noFlowClaims).toEqual([noFlow(TASKS, 'Creating tasks', ADD_EMPTY, 'a validation error no user flow walks through')])
     expect(readFlowsFile(r)!.noFlowClaims).toHaveLength(1)
   })
 
@@ -556,7 +495,7 @@ describe('synthesizeFlows — epic pass', () => {
     expect(epics.seen).toHaveLength(1)
     expect(res.unsettled.map((u) => u.areaId)).toEqual(['(epic)'])
     expect(res.unsettled[0].reason).toContain('epic pass refused')
-    expect(res.unsettled[0].reason).toContain('relkit sync')
+    expect(res.unsettled[0].reason).toContain(claim(TASKS, 'Creating tasks', '`relkit sync` uploads every task').id)
     expect(res.flows).toHaveLength(3)
     expect(res.flows.every((f) => f.composedOf.length === 0)).toBe(true)
   })
@@ -651,7 +590,7 @@ describe('synthesizeFlows — subsumption post-pass', () => {
     expect(res.flows).toHaveLength(3)
   })
 
-  it('keeps exactly one of two identical flows, and every section stays bound', async () => {
+  it('keeps exactly one of two identical flows, and every claim stays in a flow', async () => {
     const r = repo()
     const duplicate = {
       title: 'Reject an empty title',
@@ -665,15 +604,13 @@ describe('synthesizeFlows — subsumption post-pass', () => {
     )
 
     // The empty-title claim keeps exactly one flow — mutual subsumption never
-    // drops both — and the coverage gate leaves every section bound.
+    // drops both — and the coverage gate leaves every claim in a flow.
     const emptyTitleFlows = res.flows.filter((f) => f.milestones.some((m) => m.claimTitle === ADD_EMPTY))
     expect(emptyTitleFlows).toHaveLength(1)
     expect(emptyTitleFlows[0].title).toBe('Adding a task without a title is rejected')
     expect(res.subsumed).toEqual([{ title: 'Reject an empty title', supersededBy: 'Adding a task without a title is rejected' }])
-    const boundSections = new Set(res.flows.flatMap((f) => f.bindings.map((b) => b.anchor)))
-    expect([...boundSections].sort()).toEqual(
-      [TASKS.anchors['Creating tasks'], TASKS.anchors['Listing tasks'], TASKS.anchors['Completing tasks']].sort(),
-    )
+    const inFlows = new Set(res.flows.flatMap((f) => f.milestones.map((m) => m.claimId)))
+    expect([...inFlows].sort()).toEqual(TASK_CLAIMS.map((c) => c.id).sort())
   })
 
   it('never lets an epic subsume the flows it composes', async () => {
@@ -805,7 +742,7 @@ describe('synthesizeFlows — identity across re-synthesis', () => {
         TASK_LIFECYCLE.flows[1],
       ],
       noFlowClaims: [
-        { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter, not a flow step' },
+        noFlow(TASKS, 'Completing tasks', LIST_DONE, 'a filter, not a flow step'),
       ],
       retiredFlows: [{ id: previous[0].id, reason: 'the completed filter is no longer part of the lifecycle' }],
     }
@@ -814,7 +751,7 @@ describe('synthesizeFlows — identity across re-synthesis', () => {
     expect(res.flows[0].id).not.toBe(previous[0].id)
     expect(res.flows[0].fingerprint).not.toBe(previous[0].fingerprint)
     expect(res.retired).toEqual([{ flow: previous[0], reason: 'the completed filter is no longer part of the lifecycle' }])
-    expect(res.noFlowClaims.map((c) => c.claimTitle)).toEqual([LIST_DONE])
+    expect(res.noFlowClaims.map((c) => c.claimId)).toEqual([claim(TASKS, 'Completing tasks', LIST_DONE).id])
   })
 
   it('RETIRES a prior flow nothing claims, and gives the newcomer a fresh id', async () => {
@@ -834,9 +771,9 @@ describe('synthesizeFlows — identity across re-synthesis', () => {
         },
       ],
       noFlowClaims: [
-        { doc: TASKS_DOC, anchor: TASKS.anchors['Creating tasks'], claimTitle: ADD, reason: 'covered as a precondition elsewhere' },
-        { doc: TASKS_DOC, anchor: TASKS.anchors['Listing tasks'], claimTitle: LIST, reason: 'covered as a precondition elsewhere' },
-        { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: DONE, reason: 'covered as a precondition elsewhere' },
+        noFlow(TASKS, 'Creating tasks', ADD, 'covered as a precondition elsewhere'),
+        noFlow(TASKS, 'Listing tasks', LIST, 'covered as a precondition elsewhere'),
+        noFlow(TASKS, 'Completing tasks', DONE, 'covered as a precondition elsewhere'),
       ],
       retiredFlows: [{ id: 'create-list-and-complete-a-task', reason: 'the lifecycle is no longer one path' }],
     }
@@ -922,7 +859,7 @@ describe('synthesizeFlows — reconciliation against the committed corpus', () =
         },
         { ...TASK_LIFECYCLE.flows[1], id: EDGE_ID },
       ],
-      noFlowClaims: [{ doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter, not a flow step' }],
+      noFlowClaims: [noFlow(TASKS, 'Completing tasks', LIST_DONE, 'a filter, not a flow step')],
     }
     const res = await synth(r, [tasksArea], areaSessions({ tasks: amended }), { previous })
 
@@ -956,7 +893,7 @@ describe('synthesizeFlows — reconciliation against the committed corpus', () =
         },
         TASK_LIFECYCLE.flows[1],
       ],
-      noFlowClaims: [{ doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter' }],
+      noFlowClaims: [noFlow(TASKS, 'Completing tasks', LIST_DONE, 'a filter')],
     }
     const report = checkFlowSet(reinvented, { area: tasksArea, prior: previous })
     expect(isFlowSetClean(report)).toBe(false)
@@ -1012,7 +949,7 @@ describe('synthesizeFlows — reconciliation against the committed corpus', () =
     const prior = [previous[1]]
     const retiresGone: FlowSet = {
       flows: [{ ...TASK_LIFECYCLE.flows[1], id: EDGE_ID }],
-      noFlowClaims: [{ doc: TASKS_DOC, anchor: TASKS.anchors['Creating tasks'], claimTitle: ADD, reason: 'gone' }, { doc: TASKS_DOC, anchor: TASKS.anchors['Listing tasks'], claimTitle: LIST, reason: 'gone' }, { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: DONE, reason: 'gone' }, { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'gone' }],
+      noFlowClaims: [noFlow(TASKS, 'Creating tasks', ADD, 'gone'), noFlow(TASKS, 'Listing tasks', LIST, 'gone'), noFlow(TASKS, 'Completing tasks', DONE, 'gone'), noFlow(TASKS, 'Completing tasks', LIST_DONE, 'gone')],
       retiredFlows: [{ id: LIFECYCLE_ID, reason: 'the docs dropped it' }],
     }
     // A live session is told; the fold is not stopped by it.
@@ -1069,7 +1006,7 @@ describe('synthesizeFlows — reconciliation against the committed corpus', () =
 
   it('a prior no-flow decision keeps its reason verbatim when re-emitted, is accounted by a milestone, and is refused when dropped', async () => {
     const previous = await baseline()
-    const decision = { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter, not a flow step' }
+    const decision = noFlow(TASKS, 'Completing tasks', LIST_DONE, 'a filter, not a flow step')
     // The lifecycle without the filter milestone; the filter re-emitted no-flow with a reworded reason.
     const reworded: FlowSet = {
       flows: [
@@ -1090,7 +1027,7 @@ describe('synthesizeFlows — reconciliation against the committed corpus', () =
     // Dropped in silence: refused by the checker…
     const dropped: FlowSet = { ...reworded, noFlowClaims: [] }
     const report = checkFlowSet(dropped, { area: tasksArea, prior: previous, priorNoFlow: [decision] })
-    expect(report.unaccountedNoFlow).toEqual([expect.stringContaining(`existing no-flow decision on ${TASKS_DOC}#${TASKS.anchors['Completing tasks']}`)])
+    expect(report.unaccountedNoFlow).toEqual([expect.stringContaining(`existing no-flow decision on claim ${decision.claimId}`)])
     expect(isFlowSetClean(report)).toBe(false)
     // …and carried by the fold, where a replayed value cannot be re-asked.
     const carried = await synth(repo(), [tasksArea], areaSessions({ tasks: dropped }), { previous, previousNoFlowClaims: [decision] })
@@ -1100,7 +1037,7 @@ describe('synthesizeFlows — reconciliation against the committed corpus', () =
 
   it('a prior no-flow decision whose claim left the inventory is dropped before any session, never briefed', async () => {
     const previous = await baseline()
-    const gone = { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: 'a claim the corpus no longer states', reason: 'stale' }
+    const gone = { claimId: claimId(TASKS_DOC, [sentenceKey('A claim the corpus no longer states.')]), reason: 'stale' }
     const briefed: (readonly GuardNoFlowClaim[])[] = []
     const seam: FlowsAreaSessionSeam = async ({ areas, priorNoFlow, onArea }) => {
       const byArea = new Map<string, FlowsAreaSessionResult>()
@@ -1140,8 +1077,8 @@ describe('synthesizeFlows — reconciliation against the committed corpus', () =
         { ...TASK_LIFECYCLE.flows[1], id: EDGE_ID },
       ],
       noFlowClaims: [
-        { doc: TASKS_DOC, anchor: TASKS.anchors['Listing tasks'], claimTitle: LIST, reason: 'listing is a precondition elsewhere' },
-        { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter' },
+        noFlow(TASKS, 'Listing tasks', LIST, 'listing is a precondition elsewhere'),
+        noFlow(TASKS, 'Completing tasks', LIST_DONE, 'a filter'),
       ],
       retiredFlows: [{ id: LIFECYCLE_ID, reason: 'listing left the lifecycle' }],
     }
@@ -1225,7 +1162,7 @@ describe('synthesizeFlows — reconciliation against the committed corpus', () =
     it('the epic checker refuses an existing epic left unaccounted', async () => {
       const { previous } = await withEpic()
       const epic = previous.find((f) => f.composedOf.length > 0)!
-      const digests = previous.filter((f) => f.composedOf.length === 0).map((f, i) => ({ ref: `F${i + 1}`, areaId: 'x', title: f.title, goal: f.goal, milestones: f.milestones.map((m) => ({ doc: m.doc, anchor: m.anchor, claimTitle: m.claimTitle })) }))
+      const digests = previous.filter((f) => f.composedOf.length === 0).map((f, i) => ({ ref: `F${i + 1}`, areaId: 'x', title: f.title, goal: f.goal, milestones: f.milestones.map((m) => ({ doc: m.doc, claimId: m.claimId, claimTitle: m.claimTitle, sentences: m.sentences })) }))
       const { unknownReferences } = checkEpicSet({ epics: [] }, digests, [...AUTH_CLAIMS, ...TASK_CLAIMS], [epic])
       expect(unknownReferences).toEqual([expect.stringContaining(`existing flow "${epic.id}" is neither continued`)])
     })
@@ -1382,15 +1319,15 @@ describe('synthesizeFlows — a sharded area folds per chunk', () => {
           },
         ],
         noFlowClaims: [
-          { doc: TASKS_DOC, anchor: TASKS.anchors['Creating tasks'], claimTitle: ADD_EMPTY, reason: 'an error path' },
-          { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: DONE, reason: 'not in this chunk' },
-          { doc: TASKS_DOC, anchor: TASKS.anchors['Completing tasks'], claimTitle: LIST_DONE, reason: 'a filter' },
+          noFlow(TASKS, 'Creating tasks', ADD_EMPTY, 'an error path'),
+          noFlow(TASKS, 'Completing tasks', DONE, 'not in this chunk'),
+          noFlow(TASKS, 'Completing tasks', LIST_DONE, 'a filter'),
         ],
       },
       'split#1': {
         flows: [{ title: 'Sign in', goal: 'a session starts', milestones: [ms(AUTH, 'Signing in', SIGN_IN)] }],
         noFlowClaims: [
-          { doc: AUTH.doc, anchor: AUTH.anchors['Signing out'], claimTitle: SIGN_OUT, reason: 'the teardown half' },
+          noFlow(AUTH, 'Signing out', SIGN_OUT, 'the teardown half'),
         ],
       },
     })
@@ -1478,7 +1415,7 @@ describe('source case selection', () => {
     { id: 'save', claim: 'Save the edit and observe it after reload', method: 'behavior', requires: ['process'], conditions: [] },
   ] } }
   const area = { ...tasksArea, claims: [source] }
-  const ref = (caseIds?: string[]) => ({ doc: source.doc, anchor: source.anchor, claimTitle: source.title, ...(caseIds !== undefined ? { caseIds } : {}) })
+  const ref = (caseIds?: string[]) => ({ claimId: source.id, ...(caseIds !== undefined ? { caseIds } : {}) })
   const draft = (selections: string[][]) => ({ flows: selections.map(ids => ({ title: ids.join(' and '), goal: ids.join(' and '), milestones: [ref(ids)] })), noFlowClaims: [] })
   it('preserves each source case when independent details/cancel/save flows share one claim', async () => {
     const res = await synth(repo(), [area], areaSessions({ tasks: draft([['details'], ['cancel'], ['save']]) }))

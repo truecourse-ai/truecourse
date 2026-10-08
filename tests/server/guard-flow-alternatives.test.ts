@@ -1,26 +1,26 @@
 import { describe, expect, it } from 'vitest'
 import { composeClaimCoverage, type GuardCoverageSources } from '../../packages/core/src/commands/guard-read.js'
-import { claimContentHash } from '../../packages/shared/src/guard/claims.js'
 import {
+  claimId,
   GuardManifestSchema, GuardFlowsFileSchema, GuardGenerateReportSchema, GuardScenarioSchema, GuardLatestSchema,
   coversFlowMilestones, scenarioMilestoneProof, flowFingerprint,
   type GuardFlowMilestone,
 } from '@truecourse/shared'
 
 const doc = 'docs/spec.md'
+// Two claims read from the one sentence, told apart by their order.
 const milestones: GuardFlowMilestone[] = [1, 2].map((order) => ({
-  order, doc, anchor: 'expenses', claimTitle: `Expense milestone ${order}`, sentences: ['sentence:expenses'], proofDrivers: ['web', 'api'],
+  order, doc, claimId: claimId(doc, ['sentence:expenses'], order - 1), claimTitle: `Expense milestone ${order}`, sentences: ['sentence:expenses'], proofDrivers: ['web', 'api'],
 }))
 function sources(ms = milestones): GuardCoverageSources {
   const fingerprint = flowFingerprint(ms)
-  const bindings = [{ doc, anchor: 'expenses', fingerprint: 'sha256:section', sentences: ['sentence:expenses'] }]
-  const claims = ms.map((m) => {
-    const body = { doc, anchor: m.anchor, title: m.claimTitle, claim: `${m.claimTitle}.` }
-    return { id: `claim-${m.order}`, ...body, contentHash: claimContentHash(body) }
-  })
+  const bindings = [{ doc, sentences: ['sentence:expenses'] }]
+  const claims = ms.map((m) => ({
+    id: m.claimId, doc, sentences: m.sentences, subject: 'expenses', statement: m.claimTitle, areas: [], testable: true as const,
+  }))
   return {
     latest: null, result: null,
-    claims: { version: 1, generatedAt: '2026-09-08T00:00:00Z', claims, untestable: [] },
+    claims: { version: 1, generatedAt: '2026-09-08T00:00:00Z', claims },
     flows: GuardFlowsFileSchema.parse({ version: 1, generatedAt: '2026-09-08T00:00:00Z', flows: [{
       id: 'expenses', title: 'Expenses', goal: 'Manage expenses', fingerprint, milestones: ms, bindings, composedOf: [], synthesisInputsHash: 'sha256:inputs',
     }], noFlowClaims: [] }),
@@ -118,8 +118,8 @@ describe('coverage across alternative flow proofs', () => {
     const s = sources()
     s.latest = GuardLatestSchema.parse({
       run: { runId: 'run', ranAt: '2026-09-08T00:00:00Z', branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:recipe' },
-      summary: { total: 1, pass: 0, fail: 0, error: 0, stale: 0, orphaned: 0 }, sections: [],
-      scenarios: [{ id: 'expenses.web', title: 'Expenses', outcome, durationMs: 1, flowId: 'expenses', binds: { doc, section: 'expenses', fingerprint: 'sha256:section', sentences: ['sentence:expenses'] } }],
+      summary: { total: 1, pass: 0, fail: 0, error: 0, stale: 0, orphaned: 0 },
+      scenarios: [{ id: 'expenses.web', title: 'Expenses', outcome, durationMs: 1, flowId: 'expenses', binds: { doc, sentences: ['sentence:expenses'] } }],
     })
     expect(read(s).flow.status).toBe(outcome)
     expect(read(s).flow.surfaces.find((r) => r.gap)?.coveredByAlternative).toBe(outcome === 'pass' ? true : undefined)
@@ -130,17 +130,17 @@ describe('coverage across alternative flow proofs', () => {
     const flow = s.flows!.flows[0]
     s.scenarios = [GuardScenarioSchema.parse({
       id: 'expenses.web', title: 'Manage expenses', flow: { id: flow.id, fingerprint: flow.fingerprint },
-      binds: [{ doc, section: 'expenses', fingerprint: 'sha256:section', sentences: ['sentence:expenses'] }],
+      binds: [{ doc, sentences: ['sentence:expenses'] }],
       steps: milestones.map((m) => ({ driver: 'web', navigate: '/expenses', milestone: m.order, expect: { visible: { role: 'heading', name: 'Expenses' } } })),
     })]
     s.result = GuardGenerateReportSchema.parse({
-      generatedAt: '2026-09-08T00:00:00Z', status: 'ok', sectionsTotal: 1, sectionsChanged: 1, skippedUnchanged: 0, noChanges: false,
-      written: [{ id: 'expenses.web', title: 'Expenses', doc, anchor: 'expenses', file: '.truecourse/scenarios/expenses.web.yaml', status: 'passing' }], coverageGaps: [{ doc, anchor: 'expenses', flowId: 'expenses', surface: 'api', kind: 'no-interface', reason: 'No API mapping' }],
-      birthFindings: [], errors: [], extractionFailures: [], orphaned: [],
+      generatedAt: '2026-09-08T00:00:00Z', status: 'ok', noChanges: false,
+      written: [{ id: 'expenses.web', title: 'Expenses', doc, file: '.truecourse/scenarios/expenses.web.yaml', status: 'passing' }], coverageGaps: [{ flowId: 'expenses', surface: 'api', kind: 'no-interface', reason: 'No API mapping' }],
+      birthFindings: [], errors: [], extractionFailures: [],
     })
     s.manifest = null
     expect(read(s).flow.status).toBe('guarded')
-    s.scenarios[0].binds[0].sentences = ['sentence:old-section']
+    s.scenarios[0].binds[0].sentences = ['sentence:older-text']
     expect(read(s).flow.status).toBe('no-interface')
     s.scenarios[0].binds[0].sentences = ['sentence:expenses']
     const written = s.result.written
@@ -148,7 +148,7 @@ describe('coverage across alternative flow proofs', () => {
     expect(read(s).flow.status).toBe('no-interface')
     expect(read(s).flow.surfaces[0].status).toBe('never-run')
     s.result.written = written
-    s.result.errors.push({ flowId: 'expenses', surface: 'cli', doc, anchor: 'expenses', kind: 'authoring', message: 'Could not author another required attempt' })
+    s.result.errors.push({ flowId: 'expenses', surface: 'cli', doc, kind: 'authoring', message: 'Could not author another required attempt' })
     expect(read(s).flow.status).toBe('authoring-error')
   })
 
@@ -174,7 +174,7 @@ it('never promotes two independently reviewed partial case tests through their u
   const s = sources(ms)
   const fingerprint = s.flows!.flows[0].fingerprint
   s.scenarios = ['created','reload'].map(id => GuardScenarioSchema.parse({ id, title: id,
-    binds: [{ doc, section: 'expenses', fingerprint: 'sha256:section', sentences: ['sentence:expenses'] }], flow: { id: 'expenses', fingerprint },
+    binds: [{ doc, sentences: ['sentence:expenses'] }], flow: { id: 'expenses', fingerprint },
     steps: [{ driver: 'web', navigate: '/', milestone: 1, checks: [id], expect: { text: { contains: id } } }],
   }))
   s.manifest!.flows[0].scenarios = s.scenarios.map(scenario => ({ id: scenario.id, drivers: ['web'], status: 'passing', reviewed: true,

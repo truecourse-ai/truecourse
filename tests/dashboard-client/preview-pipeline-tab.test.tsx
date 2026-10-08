@@ -91,12 +91,9 @@ const SETUP_REPORT = {
 const GENERATE_REPORT = {
   generatedAt: '2026-09-02T09:30:00.000Z',
   status: 'ok',
-  sectionsTotal: 4,
-  sectionsChanged: 2,
-  skippedUnchanged: 2,
   noChanges: false,
   written: [{ id: 'a.cli.1' }, { id: 'b.cli.1' }],
-  coverageGaps: [{ doc: 'docs/cli.md', anchor: 'purge', kind: 'no-interface', reason: 'no command purges' }],
+  coverageGaps: [{ flowId: 'purge', kind: 'no-interface', reason: 'no command purges' }],
   birthFindings: [],
   errors: [],
   extractionFailures: [],

@@ -3,13 +3,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
 import { readManifest } from '@truecourse/guard-runner'
-import { GuardScenarioSchema, guardManifestSections, guardScenarioDrivers } from '@truecourse/shared'
+import { GuardScenarioSchema, guardScenarioDrivers } from '@truecourse/shared'
 import {
   makeTempRepo,
   rmrf,
   writeApiRecipe,
   writeDoc,
   writeCorpus,
+  bindsFor,
   claimsBy,
   submitWorkerSessions,
   runGenerate,
@@ -43,11 +44,9 @@ const DOC_CONTENT = [
   '`relkit --version` prints the version and exits 0.',
 ].join('\n')
 
-/** The api claim on `list`; `version` states nothing a driver can assert. */
-const listExtract = claimsBy({
-  list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status + body' }],
-  version: { untestable: 'covered elsewhere' },
-})
+/** The default claim on `list` (`list claim`, so its flow is `list`); `version`
+ *  states nothing a driver can assert. */
+const listExtract = claimsBy({ version: { untestable: 'covered elsewhere' } })
 
 describe('generateGuards — api surface authoring + birth', () => {
   it('authors, births, and persists an api scenario end to end', async () => {
@@ -67,24 +66,22 @@ describe('generateGuards — api surface authoring + birth', () => {
     expect(res.errors).toEqual([])
     expect(res.birthFindings).toEqual([])
     expect(res.written).toHaveLength(1)
-    expect(res.written[0]).toMatchObject({ anchor: 'list', flowId: 'list', surface: 'api', id: 'list' })
+    expect(res.written[0]).toMatchObject({ doc: DOC, flowId: 'list', surface: 'api', id: 'list' })
 
-    // The committed YAML is a valid api scenario, bound to the flow's section — and
+    // The committed YAML is a valid api scenario, bound to the flow's sentences — and
     // it declares NO scenario-level driver: the surface is read off its steps.
     const file = path.join(r, res.written[0].file)
     const committed = yaml.load(fs.readFileSync(file, 'utf-8')) as {
       steps: unknown[]
       flow: { id: string }
-      binds: { doc: string; section: string }[]
+      binds: { doc: string; sentences: string[] }[]
     }
     expect('driver' in committed).toBe(false)
     expect(guardScenarioDrivers(GuardScenarioSchema.parse(committed))).toEqual(['api'])
     expect(committed.steps).toHaveLength(1)
     expect(committed.flow.id).toBe('list')
-    expect(committed.binds).toEqual([expect.objectContaining({ doc: DOC, section: 'list' })])
+    expect(committed.binds).toEqual(bindsFor(r, DOC, 'list'))
 
-    const section = guardManifestSections(readManifest(r)).find((s) => s.anchor === 'list')!
-    expect(section.scenarioIds).toEqual(['list'])
     expect(readManifest(r)!.flows.find((f) => f.flowId === 'list')!.scenarios).toMatchObject([
       { id: 'list', drivers: ['api'], status: 'passing', milestoneCoverage: [{ milestone: 1, driver: 'api' }] },
     ])
@@ -151,10 +148,7 @@ describe('generateGuards — api surface authoring + birth', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, apiInterface('GET', '/boom')),
-      claims: claimsBy({
-        list: [{ driver: 'api', claim: 'GET /boom answers 200', reason: 'HTTP status' }],
-        version: { untestable: 'covered elsewhere' },
-      }),
+      claims: listExtract,
       // The worker authors the claim's (correct) assertion; the fixture answers
       // 500, so it DECLARES the red and the disagreement commits as a failing test.
       flowWorkerSession: submitWorkerSessions(() => ({ red: rawApi('GET /boom answers 200', FAILING_API_STEPS) })),
@@ -164,7 +158,7 @@ describe('generateGuards — api surface authoring + birth', () => {
     expect(res.written).toMatchObject([{ id: 'list', surface: 'api', status: 'failing' }])
     expect(res.birthFindings).toHaveLength(1)
     expect(res.birthFindings[0]).toMatchObject({
-      anchor: 'list',
+      doc: DOC,
       flowId: 'list',
       surface: 'api',
       scenarioId: 'list',
@@ -197,7 +191,7 @@ describe('generateGuards — api surface authoring + birth', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['relkit']), apiInterface('GET', '/todos')),
-      claims: claimsBy({ list: [{ driver: 'api', alternativeDrivers: ['cli'], claim: 'The todo list can be retrieved' }], version: { untestable: 'covered elsewhere' } }),
+      claims: listExtract,
       flowWorkerSession: submitWorkerSessions(
         (task) =>
           task.surface === 'api'

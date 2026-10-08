@@ -123,7 +123,7 @@ describe('the MCP tools are adapters over the shared logic', () => {
     "import { eeServerFeatures } from '@truecourse/ee-server';",
     "import { dismissGuardFlow } from '@truecourse/core/commands/guard-read';",
     "import * as guard from '@truecourse/core/commands/guard-read';",
-    "import { buildDocSectionIndex } from '@truecourse/guard-runner';",
+    "import { readRepoDocTrees } from '@truecourse/guard-runner';",
     "const m = await import('../routes/guard.js');",
   ])('refuses: %s', (src) => {
     const violations = importsOf('x.ts', src).map(mcpImportViolation).filter(Boolean);

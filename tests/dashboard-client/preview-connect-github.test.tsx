@@ -148,7 +148,7 @@ function serve(backend: Backend = {}) {
     const method = (init?.method ?? 'GET').toUpperCase();
     if (pathname === '/api/repos' && method === 'GET') return json(backend.registry ?? []);
     if (/^\/api\/repos\/[^/]+\/guard\/status$/.test(pathname)) {
-      return json({ coverage: null, sections: null, lastRun: null, lastGenerate: null });
+      return json({ flows: null, claims: null, lastRun: null, lastGenerate: null });
     }
     if (pathname === '/api/context/sources' && method === 'GET') {
       return json({ sources: backend.sources ?? [], changedAt: null });

@@ -1,6 +1,6 @@
 /**
  * Context › Documents and Conflicts: the rows an open pull request's check
- * adds. A document the check moved a section of is listed again under the
+ * adds. A document the check moved is listed again under the
  * pull request's number; a conflict the head would create is a row of its
  * own, with no page to open. Both narrow by `?pr=<owner/repo>#<n>`.
  */
@@ -52,7 +52,7 @@ const doc = (ref: string, title: string): ContextDocumentRow => ({
 
 const DOCUMENTS = [doc(REFUNDS_REF, 'Refunds'), doc(PAYOUTS_REF, 'Payouts')];
 
-/** #7 moved a section of Refunds and would put Refunds in conflict with Payouts. */
+/** #7 moved Refunds and would put Refunds in conflict with Payouts. */
 const PULL: WorkspacePullRequestRow = {
   repoFullName: REPO.name,
   number: 7,
@@ -74,7 +74,7 @@ const PULL: WorkspacePullRequestRow = {
     conclusion: 'failure',
     reason: 'conflict',
     settledAt: '2026-09-02T01:00:00.000Z',
-    sectionsMoved: [{ doc: REFUNDS_REF, anchor: 'window', flows: [] }],
+    docsMoved: [{ doc: REFUNDS_REF, flows: [] }],
     conflictsCreated: [
       {
         docs: [REFUNDS_REF, PAYOUTS_REF],

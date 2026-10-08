@@ -725,14 +725,12 @@ describe('guard-generator prompts', () => {
     // on it bumps its stage version by hand instead.
     const inputs = {
       flowFingerprint: 'sha256:flow',
-      sectionKeys: ['sha256:section'],
       interfaceFingerprints: ['sha256:interface'],
       recipeFingerprint: 'sha256:recipe',
     }
     expect(legacyFlowGenerationInputsHash(inputs)).toBe(legacyFlowGenerationInputsHash(inputs))
     const components = flowGenerationInputComponents({
       flowFingerprint: 'sha256:flow',
-      sectionKeys: ['sha256:section'],
       assignmentFingerprints: [],
       interfaceFingerprints: ['sha256:interface'],
       hasScenario: true,

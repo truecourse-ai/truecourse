@@ -61,11 +61,6 @@ export interface WorkspaceSpecVersion extends StoredVersion {
   sourceCommit: string | null;
 }
 
-/** One section of a document, as the guard manifest binds it. */
-export interface VersionSectionRef {
-  doc: string;
-  anchor: string;
-}
 
 /**
  * What changed between two versions of a scenario set. A flow is LIVE in a
@@ -83,7 +78,8 @@ export interface ScenarioSetDiff {
   };
   scenarios: { added: string[]; removed: string[] };
   /** A section is covered when a live flow with at least one scenario binds it. */
-  sections: { gained: VersionSectionRef[]; lost: VersionSectionRef[] };
+  /** The claims (by id) a live flow with a scenario proves on one side only. */
+  claims: { gained: string[]; lost: string[] };
 }
 
 /** What changed between two versions of a workspace corpus. */

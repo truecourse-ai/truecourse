@@ -1,12 +1,12 @@
 /**
  * The diff between two versions of a scenario set, read off their manifests:
  * which flows were added, retired and amended, which scenarios came and went,
- * and which sections gained or lost coverage. Pure — the store hands it two
+ * and which claims gained or lost a test. Pure — the store hands it two
  * manifests and the answer is what a version view shows.
  */
 
 import { movedNamedInputs, type GuardManifest, type GuardManifestFlow } from './manifest.js'
-import type { ScenarioSetDiff, VersionSectionRef } from '../types/versions.js'
+import type { ScenarioSetDiff } from '../types/versions.js'
 
 /** The flows a version still derives from the specs, by id. */
 function liveFlows(manifest: GuardManifest | null): Map<string, GuardManifestFlow> {
@@ -26,19 +26,17 @@ function scenarioIds(manifest: GuardManifest | null): Set<string> {
   return ids
 }
 
-/** The sections a version COVERS: bound by a live flow that has a scenario. */
-function coveredSections(live: Map<string, GuardManifestFlow>): Map<string, VersionSectionRef> {
-  const sections = new Map<string, VersionSectionRef>()
+/** The claims a version PROVES: a milestone of a live flow that has a scenario. */
+function coveredClaims(live: Map<string, GuardManifestFlow>): Set<string> {
+  const claims = new Set<string>()
   for (const flow of live.values()) {
     if (flow.scenarios.length === 0) continue
-    for (const binding of flow.bindings) {
-      sections.set(`${binding.doc}\0${binding.anchor}`, { doc: binding.doc, anchor: binding.anchor })
-    }
+    for (const m of flow.milestones ?? []) claims.add(m.claimId)
   }
-  return sections
+  return claims
 }
 
-function onlyIn<T>(a: Map<string, T>, b: Map<string, T>): string[] {
+function onlyIn(a: ReadonlySet<string> | ReadonlyMap<string, unknown>, b: ReadonlySet<string> | ReadonlyMap<string, unknown>): string[] {
   return [...a.keys()].filter((key) => !b.has(key)).sort()
 }
 
@@ -74,8 +72,8 @@ export function diffScenarioSets(
 
   const scenariosBefore = scenarioIds(prior)
   const scenariosAfter = scenarioIds(next)
-  const sectionsBefore = coveredSections(before)
-  const sectionsAfter = coveredSections(after)
+  const claimsBefore = coveredClaims(before)
+  const claimsAfter = coveredClaims(after)
 
   return {
     flows: {
@@ -88,9 +86,9 @@ export function diffScenarioSets(
       added: [...scenariosAfter].filter((id) => !scenariosBefore.has(id)).sort(),
       removed: [...scenariosBefore].filter((id) => !scenariosAfter.has(id)).sort(),
     },
-    sections: {
-      gained: onlyIn(sectionsAfter, sectionsBefore).map((key) => sectionsAfter.get(key)!),
-      lost: onlyIn(sectionsBefore, sectionsAfter).map((key) => sectionsBefore.get(key)!),
+    claims: {
+      gained: onlyIn(claimsAfter, claimsBefore),
+      lost: onlyIn(claimsBefore, claimsAfter),
     },
   }
 }

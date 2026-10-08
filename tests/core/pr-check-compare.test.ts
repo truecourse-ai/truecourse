@@ -1,7 +1,7 @@
 /**
  * The pure comparison behind a pull request check: one delta per flow from the
  * base's and the head's flow summaries, the conflicts a head creates beyond
- * the workspace's own, and the sections a head moved with the flows bound to
+ * the workspace's own, and the documents a head moved under the flows bound to
  * them.
  */
 import { describe, it, expect } from 'vitest';
@@ -9,10 +9,9 @@ import type { GuardManifest } from '@truecourse/shared';
 import {
   compareFlows,
   conflictsCreated,
-  sectionsMoved,
+  docsMoved,
 } from '../../packages/core/src/services/pr-check/compare';
 import { buildCorpusConflicts, sentenceKey } from '../../packages/shared/src/spec/conflict-resolution';
-import { sentenceKey } from '../../packages/shared/src/spec/conflict-resolution.js';
 
 describe('compareFlows', () => {
   it.each([
@@ -127,38 +126,41 @@ describe('conflictsCreated', () => {
   });
 });
 
-describe('sectionsMoved', () => {
-  const manifest = (flows: Array<{ id: string; bindings: Array<[string, string, string]> }>): GuardManifest =>
-    ({
-      flows: flows.map((f) => ({
-        flowId: f.id,
-        flowFingerprint: 'fp',
-        bindings: f.bindings.map(([doc, anchor, fingerprint]) => ({ doc, anchor, fingerprint })),
-        scenarios: [],
-        interfaces: [],
-        generationInputsHash: null,
-      })),
-    }) as unknown as GuardManifest;
+describe('docsMoved', () => {
+  /** A manifest whose flows bind `[doc, ...sentence texts]` per binding. */
+  const manifest = (flows: Array<{ id: string; bindings: Array<[string, ...string[]]> }>): GuardManifest => ({
+    flows: flows.map((f) => ({
+      flowId: f.id,
+      flowFingerprint: 'fp',
+      bindings: f.bindings.map(([doc, ...texts]) => ({ doc, sentences: texts.map((t) => sentenceKey(t)) })),
+      scenarios: [],
+      interfaces: [],
+      generationInputsHash: null,
+      gaps: [],
+      retiredScenarios: [],
+    })),
+  });
 
-  it('names the sections whose fingerprint moved, with every flow bound to each', () => {
+  it('names the documents where a head flow binds sentences the base never bound there, with every such flow', () => {
     const base = manifest([
-      { id: 'f1', bindings: [['docs/a.md', 'login', 'sha:1'], ['docs/a.md', 'logout', 'sha:2']] },
-      // A base flow that still binds the section at an older fingerprint: the
-      // head's is one the base held, so nothing moved by the order flows come in.
-      { id: 'f0', bindings: [['docs/a.md', 'logout', 'sha:9']] },
-      { id: 'f2', bindings: [['docs/a.md', 'login', 'sha:1']] },
+      { id: 'f1', bindings: [['docs/a.md', 'Log in with a password.'], ['docs/c.md', 'Log out anywhere.']] },
+      // A base flow that binds the document at other sentences: the head's set
+      // is one the base held, so nothing moved by the order flows come in.
+      { id: 'f0', bindings: [['docs/c.md', 'Sessions last a day.']] },
+      { id: 'f2', bindings: [['docs/a.md', 'Log in with a password.']] },
     ]);
     const head = manifest([
-      { id: 'f1', bindings: [['docs/a.md', 'login', 'sha:9'], ['docs/a.md', 'logout', 'sha:2']] },
-      { id: 'f2', bindings: [['docs/a.md', 'login', 'sha:9']] },
-      // A section the base never bound is new, not moved.
-      { id: 'f3', bindings: [['docs/b.md', 'intro', 'sha:5']] },
+      { id: 'f1', bindings: [['docs/a.md', 'Log in with a passkey.'], ['docs/c.md', 'Log out anywhere.']] },
+      { id: 'f2', bindings: [['docs/a.md', 'Log in with a passkey.']] },
+      { id: 'f4', bindings: [['docs/c.md', 'Sessions last a day.']] },
+      // A document the base never bound is new, not moved.
+      { id: 'f3', bindings: [['docs/b.md', 'Welcome.']] },
     ]);
-    expect(sectionsMoved(base, head)).toEqual([{ doc: 'docs/a.md', anchor: 'login', flowIds: ['f1', 'f2'] }]);
+    expect(docsMoved(base, head)).toEqual([{ doc: 'docs/a.md', flowIds: ['f1', 'f2'] }]);
   });
 
   it('answers nothing without both manifests', () => {
-    expect(sectionsMoved(null, manifest([{ id: 'f', bindings: [['d', 'a', 'x']] }]))).toEqual([]);
-    expect(sectionsMoved(manifest([{ id: 'f', bindings: [['d', 'a', 'x']] }]), null)).toEqual([]);
+    expect(docsMoved(null, manifest([{ id: 'f', bindings: [['d', 'x']] }]))).toEqual([]);
+    expect(docsMoved(manifest([{ id: 'f', bindings: [['d', 'x']] }]), null)).toEqual([]);
   });
 });

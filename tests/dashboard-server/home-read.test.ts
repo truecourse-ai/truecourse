@@ -4,7 +4,7 @@
  * Everything here is a fold of stored things, so what is pinned is the folding:
  * today's FLOWS across every repository, the flow trend across the baseline
  * runs (and what a repository that had not run yet contributes, which is
- * nothing), the SECTIONS the areas are composed of and their order, the five
+ * nothing), the CLAIMS the areas are composed of and their order, the five
  * kinds of attention row, the changes a run made and the period the whole page
  * is read through.
  */
@@ -26,7 +26,7 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
 import fs from 'node:fs';
 import path from 'node:path';
 import { guardFlowsPath, manifestPath, writeGuardClaims, writeGuardLatest } from '@truecourse/guard-runner';
-import { claimContentHash } from '@truecourse/shared';
+import { claimId } from '@truecourse/shared';
 import type { HomeResponse } from '@truecourse/shared';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
 import { createTestApp, stubJobs, TEST_ORG } from '../helpers/test-app';
@@ -93,9 +93,9 @@ const corpus = (withConflict = false): CuratedCorpus =>
     skippedDocs: [],
   }) as unknown as CuratedCorpus;
 
-/** The claim refs the stored run's summaries are keyed by. */
-const REFUNDS_CLAIM = `claim::${REFUNDS}::refunds`;
-const SHIPPING_CLAIM = `claim::${SHIPPING}::shipping`;
+/** The claim ids the stored run's summaries are keyed by. */
+const REFUNDS_CLAIM = claimId(REFUNDS, ['refunds']);
+const SHIPPING_CLAIM = claimId(SHIPPING, ['shipping']);
 
 /**
  * A stored run in one repository: the Refunds claim failed, the Shipping claim
@@ -104,16 +104,13 @@ const SHIPPING_CLAIM = `claim::${SHIPPING}::shipping`;
 /** The claim corpus: one claim per document. Alone, nothing carries them, so each reads blocked. */
 function storedClaims(repoPath: string): void {
   fs.mkdirSync(path.dirname(manifestPath(repoPath)), { recursive: true });
-  const refunds = { doc: REFUNDS, anchor: 'refunds', title: 'a refund settles', claim: 'A refund settles within two business days.' };
-  const shipping = { doc: SHIPPING, anchor: 'shipping', title: 'a parcel ships', claim: 'A parcel ships the next day.' };
   writeGuardClaims(repoPath, {
     version: 1,
     generatedAt: '2026-01-01T00:00:00.000Z',
     claims: [
-      { id: REFUNDS_CLAIM, ...refunds, contentHash: claimContentHash(refunds) },
-      { id: SHIPPING_CLAIM, ...shipping, contentHash: claimContentHash(shipping) },
+      { id: REFUNDS_CLAIM, doc: REFUNDS, sentences: ['refunds'], subject: 'refund', statement: 'A refund settles within two business days.', areas: [], testable: true },
+      { id: SHIPPING_CLAIM, doc: SHIPPING, sentences: ['shipping'], subject: 'parcel', statement: 'A parcel ships the next day.', areas: [], testable: true },
     ],
-    untestable: [],
   });
 }
 
@@ -127,14 +124,14 @@ function storedRun(repoPath: string): void {
       flows: [
         {
           id: 'f1', title: 'a refund settles', goal: 'settle a refund', fingerprint: 'sha256:f1',
-          milestones: [{ order: 1, doc: REFUNDS, anchor: 'refunds', claimTitle: 'a refund settles', sentences: ['refunds'] }],
-          bindings: [{ doc: REFUNDS, anchor: 'refunds', fingerprint: 'sha256:a', sentences: ['refunds'] }],
+          milestones: [{ order: 1, doc: REFUNDS, claimId: REFUNDS_CLAIM, claimTitle: 'a refund settles', sentences: ['refunds'] }],
+          bindings: [{ doc: REFUNDS, sentences: ['refunds'] }],
           composedOf: [], synthesisInputsHash: 'sha256:i',
         },
         {
           id: 'f2', title: 'a parcel ships', goal: 'ship a parcel', fingerprint: 'sha256:f2',
-          milestones: [{ order: 1, doc: SHIPPING, anchor: 'shipping', claimTitle: 'a parcel ships', sentences: ['shipping'] }],
-          bindings: [{ doc: SHIPPING, anchor: 'shipping', fingerprint: 'sha256:b', sentences: ['shipping'] }],
+          milestones: [{ order: 1, doc: SHIPPING, claimId: SHIPPING_CLAIM, claimTitle: 'a parcel ships', sentences: ['shipping'] }],
+          bindings: [{ doc: SHIPPING, sentences: ['shipping'] }],
           composedOf: [], synthesisInputsHash: 'sha256:i',
         },
       ],
@@ -148,7 +145,7 @@ function storedRun(repoPath: string): void {
         {
           flowId: 'f1',
           flowFingerprint: 'sha256:f1',
-          bindings: [{ doc: REFUNDS, anchor: 'refunds', fingerprint: 'sha256:a', sentences: ['refunds'] }],
+          bindings: [{ doc: REFUNDS, sentences: ['refunds'] }],
           scenarios: [{ id: 's1', drivers: ['cli'] }],
           interfaces: [],
           generationInputsHash: null,
@@ -158,7 +155,7 @@ function storedRun(repoPath: string): void {
         {
           flowId: 'f2',
           flowFingerprint: 'sha256:f2',
-          bindings: [{ doc: SHIPPING, anchor: 'shipping', fingerprint: 'sha256:b', sentences: ['shipping'] }],
+          bindings: [{ doc: SHIPPING, sentences: ['shipping'] }],
           scenarios: [{ id: 's2', drivers: ['cli'] }],
           interfaces: [],
           generationInputsHash: null,
@@ -181,19 +178,18 @@ function storedRun(repoPath: string): void {
       {
         id: 's1',
         title: 'a refund settles',
-        binds: { doc: REFUNDS, section: 'refunds', fingerprint: 'sha256:a', sentences: ['refunds'] },
+        binds: { doc: REFUNDS, sentences: ['refunds'] },
         outcome: 'fail',
         durationMs: 1,
       },
       {
         id: 's2',
         title: 'a parcel ships',
-        binds: { doc: SHIPPING, section: 'shipping', fingerprint: 'sha256:b', sentences: ['shipping'] },
+        binds: { doc: SHIPPING, sentences: ['shipping'] },
         outcome: 'pass',
         durationMs: 1,
       },
     ],
-    sections: [],
   });
 }
 

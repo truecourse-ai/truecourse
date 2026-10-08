@@ -1,15 +1,15 @@
 /**
- * The deterministic, LLM-free front of the generator: derive the doc universe,
- * its sections, and which sections are WORK (need classifying / generating) vs
- * unchanged (skipped entirely). Reuses guard-runner's section index and recipe
- * fingerprint so the anchors/fingerprints it plans against are byte-identical to
- * what a `guard run` binds against.
+ * The deterministic, LLM-free front of the generator: derive the doc universe
+ * and, for the LLM stages that read documents, each document's sections — the
+ * outline a session orients by and the text under one heading it reads. The
+ * sections are a reading aid derived from the shared document tree, never
+ * something a flow or a scenario binds to: bindings go by sentence.
  *
  * Doc universe = the corpus-kept docs (`.truecourse/specs/corpus.json`, read
  * tolerantly) — the corpus is the single authority on which docs are spec.
  * A repo without a corpus has nothing to generate against: the Document scan
  * curates one first.
- * (The RUNNER additionally indexes scenario-bound docs, which it must for
+ * (The RUNNER additionally reads scenario-bound docs, which it must for
  * stale/orphan detection; generation deliberately does not.)
  */
 
@@ -17,27 +17,26 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
-import {
-  indexRepoDocs,
-  extractSectionTexts,
-  nodeRefContext,
-  computeRecipeFingerprint,
-  recipePath,
-  readManifest,
-} from '@truecourse/guard-runner'
+import { computeRecipeFingerprint, recipePath, readManifest } from '@truecourse/guard-runner'
 import {
   GUARD_REVIEW_POLICY_VERSION,
-  guardManifestSections,
   movedSchemeInputs,
-  type GuardManifestSectionView,
+  parseDocTree,
+  sectionOwnText,
+  sectionText,
+  slugifyHeading,
+  type DocTree,
 } from '@truecourse/shared'
 import {
+  deriveOpenApiSections,
   parseOpenApiSpec,
   isOpenApiDoc,
   hasOpenApiExtension,
   openApiServerBasePath,
   type OpenApiDoc,
+  type RefResolutionContext,
 } from '@truecourse/shared/openapi'
+import { nodeRefContext } from '@truecourse/shared/openapi-node'
 import {
   LEGACY_MATCH_PROMPT_FINGERPRINT,
   LEGACY_GENERATE_PROMPT_FINGERPRINT,
@@ -48,59 +47,43 @@ import {
   LEGACY_RETIRED_FLOWS_PROMPT_FINGERPRINT,
   LEGACY_RETIRED_FLOWS_EPIC_PROMPT_FINGERPRINT,
 } from './legacy-prompt-fingerprints.js'
-import { buildOperationIndex, matchedSchemaFingerprint } from './openapi-enrich.js'
 import { securityFingerprintForSection } from './openapi-security.js'
 import { corpusFilePath } from '@truecourse/shared/work-tree'
 
-/** One section fed to the LLM stages — its identity, its text, and area context. */
+/**
+ * One section of a document as the LLM stages read it: the text under one
+ * heading, with the heading chain slugified as the handle a session's read
+ * tool addresses it by. For an OpenAPI document the sections are its OPERATIONS,
+ * each a canonical serialization of the resolved operation.
+ */
 export interface SectionInput {
   /** Repo-relative doc path. */
   doc: string
-  /** Slugified heading path (the binding anchor). */
+  /** Slugified heading path — the handle a read tool addresses the section by. */
   anchor: string
-  /** `sha256:…` over the full (descendant-inclusive) section text. */
-  fingerprint: string
   /** Raw heading text, for display. */
   headingText: string
-  /** Heading level (0 for a whole-doc, non-markdown section). */
+  /** Heading level (0 for the lead and a whole-doc, non-markdown section). */
   level: number
-  /** Heading + preamble before the first subsection — the binding-rule unit. */
+  /** 1-based first line of the section. */
+  startLine: number
+  /** 1-based last line of the section's own text, before its first subsection. */
+  ownEndLine: number
+  /** Heading + preamble before the first subsection. */
   ownText: string
   /** Heading + everything up to the next same-or-higher heading. */
   fullText: string
   /** Canonical area ids the doc covers, from the corpus (empty when no corpus). */
   areaTags: string[]
-  /**
-   * Content key over the OpenAPI write-op request schemas this (markdown) section's
-   * prose references. Folded into {@link sectionInputsKey} and the authoring cache
-   * key ONLY when non-empty, so a section that references no OpenAPI write op is
-   * byte-identical to before enrichment; a section that references one re-plans and
-   * re-authors when that operation's schema changes. Empty (`''`) for an OpenAPI
-   * operation section itself and for any section with no write-op match.
-   */
-  endpointSchemaFingerprint: string
-  /**
-   * Content key over an OpenAPI operation section's security inputs that live OUTSIDE
-   * its `canonicalText`: the effective OR-of-AND scheme groups (folding the doc-level
-   * `security` fallback) and the resolved `components.securitySchemes` definitions
-   * they reference. Folded into {@link sectionInputsKey} and the authoring cache key
-   * ONLY when non-empty, so a PUBLIC / markdown / cli section keys off its text alone;
-   * a SECURED section re-plans once on rollout and again whenever a referenced scheme
-   * definition changes (a change the section fingerprint cannot see). Empty (`''`) for
-   * a public or non-operation section.
-   */
-  securityFingerprint: string
 }
 
 export interface GuardWorkPlan {
   /** False when no corpus has been scanned yet. */
   hasUniverse: boolean
-  /** Every section across the doc universe, in doc + document order. */
-  sections: SectionInput[]
-  /** Sections whose text moved since the last generate, plus sections no flow binds. */
-  work: SectionInput[]
-  /** Manifest entries whose section no longer exists — reported, never deleted. */
-  orphaned: GuardManifestSectionView[]
+  /** Every document of the universe, with its text and its sections, in doc order. */
+  docs: GuardDoc[]
+  /** The documents whose text changed since the last generate recorded them, or that it never recorded. */
+  changedDocs: Set<string>
   /** `sha256:…` over the recipe's discovery-input files. */
   recipeFingerprint: string
   /** True when `recipe.json` is absent (discovery will run). */
@@ -109,6 +92,54 @@ export interface GuardWorkPlan {
    *  matching. Absent/`''` for base-path-less specs. The generator reuses this map
    *  so its own operation index matches identically to the plan's. */
   basePaths: Map<string, string>
+}
+
+/** One document of the universe: its full text plus ALL its sections. */
+export interface GuardDoc {
+  /** Repo-relative doc path. */
+  doc: string
+  /** The document's full text. */
+  content: string
+  /** The document's tree, whose sentences claims and bindings resolve through. */
+  tree: DocTree
+  /** Canonical area ids the doc covers, from the corpus (empty when no corpus). */
+  areaTags: string[]
+  /** Every section of the doc, in document order — the outline + the read tool's handles. */
+  sections: SectionInput[]
+}
+
+/**
+ * Derive the sections of a document for the LLM stages. An OpenAPI document is
+ * the one doc the tree does not cut: its sections are its operations, one per
+ * (method, path), under a synthetic `paths/<method>-<slug>` handle. A doc
+ * detected as OpenAPI but declaring no operations falls through to the tree's
+ * whole-doc section.
+ */
+export function deriveDocSections(doc: string, content: string, tree: DocTree, areaTags: string[], ctx?: RefResolutionContext): SectionInput[] {
+  const openApiSections = isOpenApiDoc(doc, content) ? deriveOpenApiSections(content, ctx) : []
+  if (openApiSections.length > 0) {
+    const total = tree.sections[0]!.endLine
+    const used = new Set<string>()
+    return openApiSections.map((op) => {
+      const slug = slugifyHeading(`${op.method}-${op.slugSource}`) || 'operation'
+      const base = `paths/${slug}`
+      let anchor = base
+      for (let n = 2; used.has(anchor); n++) anchor = `${base}-${n}`
+      used.add(anchor)
+      return { doc, anchor, headingText: op.headingText, level: 1, startLine: 1, ownEndLine: total, ownText: op.canonicalText, fullText: op.canonicalText, areaTags }
+    })
+  }
+  return tree.sections.map((s) => ({
+    doc,
+    anchor: s.anchor,
+    headingText: s.headingText,
+    level: s.level,
+    startLine: s.startLine,
+    ownEndLine: s.ownEndLine,
+    ownText: sectionOwnText(tree, s),
+    fullText: sectionText(tree, s),
+    areaTags,
+  }))
 }
 
 // A tolerant local view of the corpus — just the kept docs' refs + area tags. We
@@ -159,29 +190,12 @@ export function corpusOpenApiDocs(repoRoot: string): { doc: string; content: str
 }
 
 /**
- * ONE section's content key, as the flow hash folds it: the section-text
- * fingerprint plus the two inputs a scenario depends on that the text itself
- * cannot see — the OpenAPI write-op request schema its prose references, and a
- * secured operation's resolved security context. Each is appended ONLY when
- * non-empty, so an unaffected section's key is exactly its fingerprint.
- */
-export function sectionInputsKey(section: {
-  fingerprint: string
-  endpointSchemaFingerprint?: string
-  securityFingerprint?: string
-}): string {
-  const parts = [section.fingerprint]
-  if (section.endpointSchemaFingerprint) parts.push(section.endpointSchemaFingerprint)
-  if (section.securityFingerprint) parts.push(section.securityFingerprint)
-  return parts.join('|')
-}
-
-/**
  * THE LEGACY FLOW SETTLE HASH — what every manifest row written before named
- * components was stamped with: the flow fingerprint, its bound sections, the
- * interfaces it grounds on, the whole recipe fingerprint and the five live
- * prompt fingerprints, which are frozen as literals here so a prompt edited
- * since cannot make an old row miss.
+ * components was stamped with: the flow fingerprint, the interfaces it grounds
+ * on, the whole recipe fingerprint and the live prompt fingerprints, which are
+ * frozen as literals here so a prompt edited since cannot make an old row miss.
+ * The bound sections' text keys it also folded are gone, so every such row
+ * misses once and re-authors.
  *
  * It has exactly one job left. A stored row with a hash and NO components is
  * checked against it ONCE: a match settles the flow and writes its components,
@@ -192,15 +206,12 @@ export function sectionInputsKey(section: {
  */
 export function legacyFlowGenerationInputsHash(input: {
   flowFingerprint: string
-  /** Every bound section's {@link sectionInputsKey}, in any order (sorted here). */
-  sectionKeys: readonly string[]
   /** Fingerprints of the planned interfaces and any browser setup catalog offered. */
   interfaceFingerprints: readonly string[]
   recipeFingerprint: string
 }): string {
   const parts = [
     input.flowFingerprint,
-    [...input.sectionKeys].sort().join(''),
     [...input.interfaceFingerprints].sort().join(''),
     input.recipeFingerprint,
     LEGACY_RETIRED_EXTRACT_PROMPT_FINGERPRINT,
@@ -224,7 +235,6 @@ export function legacyFlowGenerationInputsHash(input: {
  */
 export interface FlowGenerationInputParts {
   flowFingerprint: string
-  sectionKeys: readonly string[]
   /** Each plan's realization-assignment fingerprint. */
   assignmentFingerprints: readonly string[]
   /** The planned interfaces' fingerprints. */
@@ -287,8 +297,10 @@ export function flowGenerationInputComponents(parts: FlowGenerationInputParts): 
   const digest = (values: readonly string[]): string =>
     createHash('sha256').update([...values].sort().join('\0')).digest('hex').slice(0, 16)
   const components: Record<string, string> = {
+    // The flow fingerprint folds each milestone's claim id, and a claim's id is
+    // the hash of its sentences: a reworded sentence is a new claim, a new
+    // fingerprint and a re-opened flow, with no text key of its own.
     flow: digest([parts.flowFingerprint]),
-    sections: digest(parts.sectionKeys),
     // A NEW name, because the retired `prerequisites` folded resolved state: a
     // stored value under that name would compare unequal for every flow that
     // has one, and re-open all of them at once. Under its own name the stored
@@ -364,8 +376,10 @@ export function hasGuardUniverse(repoRoot: string): boolean {
 }
 
 /**
- * Plan the deterministic work for a generate run. `recipeFingerprint` defaults to
- * the current recipe-input fingerprint; the driver passes the fingerprint of a
+ * Plan the deterministic work for a generate run: the doc universe with each
+ * document's tree and sections, and which documents changed since the last
+ * generate recorded them. `recipeFingerprint` defaults to the current
+ * recipe-input fingerprint; the driver passes the fingerprint of a
  * just-discovered recipe when it differs.
  */
 export function planGuardWork(repoRoot: string, recipeFingerprint?: string): GuardWorkPlan {
@@ -373,119 +387,34 @@ export function planGuardWork(repoRoot: string, recipeFingerprint?: string): Gua
   const recipeMissing = !fs.existsSync(recipePath(repoRoot))
 
   const hasUniverse = hasGuardUniverse(repoRoot)
-  const { indexes } = indexRepoDocs(repoRoot, [])
   const areaTags = readCorpusAreaTags(repoRoot)
 
-  const sections: SectionInput[] = []
-  // The parsed OpenAPI doc per doc (null for markdown), reused to stamp each operation
-  // section's securityFingerprint below. `basePaths` carries each OpenAPI doc's
-  // `servers` base path for base-path-aware prose→op matching.
-  const parsedDocs = new Map<string, OpenApiDoc | null>()
+  const docs: GuardDoc[] = []
+  // Each OpenAPI doc's `servers` base path, for base-path-aware prose→op matching.
   const basePaths = new Map<string, string>()
-  for (const [doc, index] of indexes) {
-    const content = fs.readFileSync(path.resolve(repoRoot, doc), 'utf-8')
-    const isOpenApi = isOpenApiDoc(doc, content)
-    parsedDocs.set(doc, isOpenApi ? parseOpenApiSpec(content) : null)
-    if (isOpenApi) {
+  for (const doc of [...areaTags.keys()].sort()) {
+    const abs = path.resolve(repoRoot, doc)
+    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) continue
+    const content = fs.readFileSync(abs, 'utf-8')
+    if (isOpenApiDoc(doc, content)) {
       const base = openApiServerBasePath(content)
       if (base) basePaths.set(doc, base)
     }
-    const texts = extractSectionTexts(doc, content, nodeRefContext(repoRoot, doc))
-    for (const s of index.sections) {
-      const t = texts.get(s.anchor)
-      const fullText = t?.fullText ?? ''
-      sections.push({
-        doc,
-        anchor: s.anchor,
-        fingerprint: s.fingerprint,
-        headingText: s.headingText,
-        level: s.level,
-        ownText: t?.ownText ?? '',
-        fullText,
-        areaTags: areaTags.get(doc) ?? [],
-        // Both fingerprints are stamped below (endpoint one needs the cross-doc index).
-        endpointSchemaFingerprint: '',
-        securityFingerprint: '',
-      })
-    }
-  }
-  // Index every OpenAPI operation across the universe, then stamp each section with a
-  // content key over the write-op schemas its prose references. Empty for any section
-  // that references none (byte-identical to before enrichment).
-  const opIndex = buildOperationIndex(sections, basePaths)
-  for (const s of sections) {
-    s.endpointSchemaFingerprint = matchedSchemaFingerprint(s, opIndex)
-    // A secured OpenAPI operation section keys on its security groups + referenced
-    // scheme defs (empty for public/markdown — their key stays the text fingerprint).
-    s.securityFingerprint = securityFingerprintForSection(s, parsedDocs.get(s.doc) ?? null)
-  }
-  sections.sort((a, b) => a.doc.localeCompare(b.doc) || a.anchor.localeCompare(b.anchor))
-
-  // Section CHANGE detection, projected off the flow-keyed manifest: a section
-  // is changed when its live text fingerprint differs from what the flows
-  // binding it recorded — or, when no flow binds it, from what the persisted
-  // gap record judged (a completed generate saw the section and left it
-  // uncovered on purpose). A section in neither is genuinely new work. The
-  // incremental GATE is per flow — everything global (recipe, prompts, format,
-  // the interfaces a flow grounds on) rides `flowGenerationInputsHash`, so this
-  // stays a pure spec-side question.
-  const manifest = readManifest(repoRoot)
-  const manifestSections = guardManifestSections(manifest)
-  const byKey = new Map(manifestSections.map((e) => [`${e.doc}\0${e.anchor}`, e]))
-  const gapByKey = new Map((manifest?.gapSections ?? []).map((g) => [`${g.doc}\0${g.anchor}`, g]))
-  const seen = new Set<string>()
-
-  const work: SectionInput[] = []
-  for (const s of sections) {
-    const key = `${s.doc}\0${s.anchor}`
-    seen.add(key)
-    const prior = byKey.get(key)
-    if (prior) {
-      if (prior.fingerprint !== s.fingerprint) work.push(s)
-      continue
-    }
-    const gap = gapByKey.get(key)
-    if (!gap || gap.fingerprint !== s.fingerprint) work.push(s)
+    const tree = parseDocTree(doc, content)
+    const tags = areaTags.get(doc) ?? []
+    docs.push({ doc, content, tree, areaTags: tags, sections: deriveDocSections(doc, content, tree, tags, nodeRefContext(repoRoot, abs)) })
   }
 
-  const orphaned = manifestSections.filter((e) => !seen.has(`${e.doc}\0${e.anchor}`))
+  // A document is changed when its text differs from what the last generate
+  // recorded, or when no generate recorded it. The incremental GATE is per flow —
+  // everything global rides each flow's settle inputs — so this is reporting.
+  const recorded = new Map((readManifest(repoRoot)?.docs ?? []).map((d) => [d.doc, d.contentHash]))
+  const changedDocs = new Set(docs.filter((d) => recorded.get(d.doc) !== docContentHash(d.content)).map((d) => d.doc))
 
-  return { hasUniverse, sections, work, orphaned, recipeFingerprint: recipeFp, recipeMissing, basePaths }
+  return { hasUniverse, docs, changedDocs, recipeFingerprint: recipeFp, recipeMissing, basePaths }
 }
 
-/** One document of the universe: its full text plus ALL its sections. */
-export interface GuardDoc {
-  /** Repo-relative doc path. */
-  doc: string
-  /** The document's full text. */
-  content: string
-  /** Every section of the doc, in document order — the outline + snapping set. */
-  sections: SectionInput[]
-}
-
-/**
- * The documents that contain at least one WORK (changed/new) section. Each
- * carries its full text and ALL its sections (the outline the flows sessions
- * read), even the unchanged ones. Sections come straight from the plan, so
- * their anchors/fingerprints match what a run binds against.
- */
 /** `sha256` hex over a document's text, the key the manifest remembers a document by. */
 export function docContentHash(content: string): string {
   return createHash('sha256').update(content).digest('hex')
-}
-
-export function collectWorkDocs(repoRoot: string, plan: GuardWorkPlan): GuardDoc[] {
-  const workDocs = new Set(plan.work.map((s) => s.doc))
-  const byDoc = new Map<string, SectionInput[]>()
-  for (const s of plan.sections) {
-    if (!workDocs.has(s.doc)) continue
-    const list = byDoc.get(s.doc)
-    if (list) list.push(s)
-    else byDoc.set(s.doc, [s])
-  }
-  return [...byDoc].map(([doc, sections]) => ({
-    doc,
-    content: fs.readFileSync(path.resolve(repoRoot, doc), 'utf-8'),
-    sections,
-  }))
 }

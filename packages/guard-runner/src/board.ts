@@ -18,7 +18,6 @@ import {
   type GuardOutcome,
   type GuardScenarioAdjudication,
   type GuardScenarioResult,
-  type GuardSectionRollup,
   type GuardSummary,
 } from '@truecourse/shared'
 
@@ -50,7 +49,7 @@ export function summarizeResults(results: readonly GuardScenarioResult[]): Guard
  *   board stays self-describing (see `runId`/`ranAt` on the result schema).
  * - A scenario absent from `corpusIds` drops out: it is no longer committed, and a
  *   deleted test's last verdict is not current state.
- * - `summary` and `sections` are recomputed over the MERGED set, so a scoped run can
+ * - `summary` is recomputed over the MERGED set, so a scoped run can
  *   never make the board's tallies describe its subset.
  * - No prior board (a first run, or a deleted LATEST) bootstraps one holding exactly
  *   what ran — the run's own record, unchanged.
@@ -84,13 +83,11 @@ export function mergeGuardBoard(
     }))
 
   const scenarios = [...run.scenarios, ...carried].sort((a, b) => a.id.localeCompare(b.id))
-  const outcomeById = new Map(scenarios.map((s) => [s.id, s.outcome]))
 
   return {
     run: run.run,
     summary: summarizeResults(scenarios),
     scenarios,
-    sections: mergeSections(prior.sections, run.sections, outcomeById, new Set(carried.map((s) => s.id))),
   }
 }
 
@@ -113,7 +110,7 @@ function withoutAdjudication(row: GuardScenarioResult): GuardScenarioResult {
  * no row matched (absent scenario, or the run-identity guard held) — the
  * caller then simply does not write.
  *
- * `summary` / `sections` are untouched: an adjudication is an annotation,
+ * `summary` is untouched: an adjudication is an annotation,
  * never an outcome, so nothing it says can move a tally.
  */
 export function withScenarioAdjudication(
@@ -132,43 +129,4 @@ export function withScenarioAdjudication(
     return { ...row, adjudication }
   })
   return patched ? { ...board, scenarios } : null
-}
-
-/**
- * Recompute the per-section rollup over the merged set. Prior entries contribute only
- * their CARRIED scenarios — a scenario this run settled re-enters through the run's own
- * rollup, so a binding that moved between runs follows its scenario instead of
- * lingering under the old section. A section left with no scenario disappears.
- */
-function mergeSections(
-  prior: readonly GuardSectionRollup[],
-  run: readonly GuardSectionRollup[],
-  outcomeById: ReadonlyMap<string, GuardOutcome>,
-  carriedIds: ReadonlySet<string>,
-): GuardSectionRollup[] {
-  const byKey = new Map<string, { doc: string; section: string; ids: Set<string> }>()
-  const add = (rollup: GuardSectionRollup, ids: readonly string[]): void => {
-    if (ids.length === 0) return
-    const key = `${rollup.doc}\x00${rollup.section}`
-    let entry = byKey.get(key)
-    if (!entry) {
-      entry = { doc: rollup.doc, section: rollup.section, ids: new Set() }
-      byKey.set(key, entry)
-    }
-    for (const id of ids) entry.ids.add(id)
-  }
-  for (const rollup of prior) add(rollup, rollup.scenarioIds.filter((id) => carriedIds.has(id)))
-  for (const rollup of run) add(rollup, rollup.scenarioIds.filter((id) => outcomeById.has(id)))
-
-  return [...byKey.values()]
-    .map((e) => {
-      const ids = [...e.ids].sort()
-      return {
-        doc: e.doc,
-        section: e.section,
-        status: worstOutcome(ids.map((id) => outcomeById.get(id)!)),
-        scenarioIds: ids,
-      }
-    })
-    .sort((a, b) => a.doc.localeCompare(b.doc) || a.section.localeCompare(b.section))
 }

@@ -127,7 +127,7 @@ describe('checks', () => {
       base: { mergeBase: 'b', commit: 'b', nearestWithBase: null },
       fork: false,
       conflictsCreated: [],
-      sectionsMoved: [],
+      docsMoved: [],
       repositoriesAffected: [],
       run: null,
       specHalf: 'not-a-source' as const,

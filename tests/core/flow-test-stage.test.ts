@@ -56,8 +56,8 @@ function flow(id: string, fingerprint = `sha256:${id}`): GuardFlow {
     title: `Flow ${id}`,
     goal: `A person does ${id}.`,
     fingerprint,
-    milestones: [{ order: 1, doc: 'docs/billing.md', anchor: id, claimTitle: claimOf(id), sentences: [id] }],
-    bindings: [{ doc: 'docs/billing.md', anchor: id, fingerprint: `sha256:section-${id}`, sentences: [id] }],
+    milestones: [{ order: 1, doc: 'docs/billing.md', claimId: `claim::${id}`, claimTitle: claimOf(id), sentences: [id] }],
+    bindings: [{ doc: 'docs/billing.md', sentences: [id] }],
     composedOf: [],
     synthesisInputsHash: `inputs-${id}`,
   }

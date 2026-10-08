@@ -89,7 +89,7 @@ function serve(registry: typeof REPO[] = []) {
     if (pathname.endsWith('/guard/interfaces')) return json({ interfaces: [] });
     if (pathname.endsWith('/guard/dependencies')) return json({ dependencies: [] });
     if (pathname.endsWith('/guard/status')) {
-      return json({ sections: null, coverage: null, lastRun: null, lastGenerate: null });
+      return json({ flows: null, claims: null, lastRun: null, lastGenerate: null });
     }
     if (pathname.endsWith('/context/bindings')) return json({ sourceIds: [] });
     return json({ error: 'not found' }, 404);

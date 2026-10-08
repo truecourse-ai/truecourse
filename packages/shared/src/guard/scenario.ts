@@ -476,11 +476,7 @@ export const GuardBindsSchema = z
   .object({
     /** Repo-relative path of the spec document. */
     doc: z.string().min(1),
-    /** Slugified heading path (the section anchor). */
-    section: z.string().min(1),
-    /** `sha256:…` over the normalized section text. */
-    fingerprint: z.string().min(1),
-    /** The keys of the sentences the scenario's milestones in this section are read from: what the runner resolves. */
+    /** The keys of the sentences the scenario's milestones in this document are read from: what the runner resolves. */
     sentences: z.array(z.string().min(1)).min(1),
   })
   .strict()

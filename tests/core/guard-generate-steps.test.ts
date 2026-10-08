@@ -36,8 +36,8 @@ vi.mock('../../packages/core/src/services/llm/session-driver.js', () => ({
   },
 }))
 
+import { claimId, sentenceKey } from '@truecourse/shared'
 import {
-  collectWorkDocs,
   generateGuards,
   planGuardWork,
   readFlowsFile,
@@ -113,7 +113,7 @@ function docRepo(): string {
   return r
 }
 
-const docsOf = (r: string): GuardDoc[] => collectWorkDocs(r, planGuardWork(r))
+const docsOf = (r: string): GuardDoc[] => planGuardWork(r).docs
 const manifestFile = (r: string): string => path.join(r, '.truecourse', 'scenarios', 'manifest.json')
 const flowsFile = (r: string): string => path.join(r, '.truecourse', 'scenarios', 'flows.json')
 
@@ -180,21 +180,6 @@ describe('only: worker', () => {
 // the seams: prior steps replay from cache, and a miss fails loud
 // ---------------------------------------------------------------------------
 
-const EXTRACT_DRAFT = {
-  claims: [
-    {
-      claim: '`relkit --version` prints the version',
-      driver: 'cli' as const,
-      sectionAnchor: 'version',
-      reason: 'stdout carries the version',
-      verification: { scope: 'configuration', method: 'behavior', observable: 'Version on stdout', cases: [{ id: 'version-text', claim: 'Prints the version', method: 'behavior', requires: ['process'], conditions: [] }] },
-      needs: [],
-    },
-  ],
-  untestable: [],
-}
-
-
 /** Call a session tool the way a driver does. */
 async function callTool(call: StubCall, name: string, args: unknown): Promise<void> {
   const tool = call.def.tools.find((t) => t.name === name)!
@@ -206,6 +191,8 @@ async function callTool(call: StubCall, name: string, args: unknown): Promise<vo
   await call.emit({ type: 'tool-result', toolName: name, content: result.content, isError: result.isError })
 }
 
+const VERSION_SENTENCE = sentenceKey('`relkit --version` prints the version and exits 0.')
+
 /** The one area a `flows` session is handed for the fixture doc. */
 function areaOf(docs: GuardDoc[]): FlowSynthesisArea {
   return {
@@ -213,14 +200,13 @@ function areaOf(docs: GuardDoc[]): FlowSynthesisArea {
     docs: docs.map((d) => ({
       doc: d.doc,
       outline: d.sections.map((s) => ({ anchor: s.anchor, headingText: s.headingText, level: s.level })),
-      untestable: [],
     })),
     claims: [
       {
+        id: claimId(DOC, [VERSION_SENTENCE]),
         doc: DOC,
-        anchor: 'version',
         title: '`relkit --version` prints the version',
-        driver: 'cli',
+        sentences: [VERSION_SENTENCE],
       },
     ],
   }

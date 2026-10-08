@@ -21,7 +21,7 @@
  *      capture + normalizer additions) that flips its row to `runnable: true`;
  *   3. a RECIPE KIND for its preparation layer (cli = build + entrypoint; api =
  *      environment compose + datastore boot; …).
- * Nothing else moves — stores, section anchoring, the manifest, the dashboard
+ * Nothing else moves — stores, sentence binding, the manifest, the dashboard
  * status model, and the generate pipeline are all driver-agnostic and derive from
  * the arrays below. This comment is the map; the code stays speculative-free.
  */

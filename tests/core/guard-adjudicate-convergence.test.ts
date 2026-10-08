@@ -47,7 +47,7 @@ function row(id: string, outcome: GuardScenarioResult['outcome'], over: Partial<
   return {
     id,
     title: `${id} title`,
-    binds: { doc: 'docs/x.md', section: `${id}/sec`, fingerprint: 'sha256:x', sentences: [`${id}/sec`] },
+    binds: { doc: 'docs/x.md', sentences: [`${id}/sec`] },
     outcome,
     durationMs: 1,
     ...(outcome === 'fail' || outcome === 'error'
@@ -74,7 +74,6 @@ function latest(runId: string, rows: GuardScenarioResult[]): GuardLatest {
     },
     summary: summarize(rows),
     scenarios: rows,
-    sections: [],
   }
 }
 

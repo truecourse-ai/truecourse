@@ -1,5 +1,5 @@
 /**
- * The WORKSPACE's tools: its repositories, its documents and their sections,
+ * The WORKSPACE's tools: its repositories, its documents,
  * the conflicts between them, its documentation sources, and the decisions a
  * person makes about all of those.
  *
@@ -173,15 +173,15 @@ export function registerWorkspaceTools(server: McpServer, caller: McpCaller): vo
     {
       title: 'Read a document',
       description:
-        "One document's text, by its `ref` from list_documents. Without `section`, the whole document plus its section outline (each section's `anchor`, heading and lines). With `section` (an anchor from that outline, or from a flow milestone), only that section's text — a section runs from its heading to the next heading of the same or higher level.",
+        "One document's text, by its `ref` from list_documents. Without `lines`, the whole document plus its outline (each heading with its level and the lines under it). With `lines` (first and last, 1-based, inclusive — an outline entry's), only those lines.",
       inputSchema: {
         ref: z.string().describe('The document ref, `context/<source>/<path>`.'),
-        section: z.string().optional().describe('A section anchor, to read that section alone.'),
+        lines: z.tuple([z.number().int().positive(), z.number().int().positive()]).optional().describe('First and last line to read, 1-based and inclusive.'),
       },
       annotations: READ,
     },
     (args) =>
-      run('read_document', () => readWorkspaceDocument(org, args.ref, args.section)),
+      run('read_document', () => readWorkspaceDocument(org, args.ref, args.lines)),
   );
 
   server.registerTool(

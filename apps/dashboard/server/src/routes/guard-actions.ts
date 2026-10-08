@@ -59,7 +59,7 @@ import { registerRepoDependency } from '../services/guard-dependencies.service.j
 import { refusalStatus } from '../services/refusals.service.js';
 import { estimateStepPhase } from '@truecourse/core/progress';
 import { runFailureMessage } from '@truecourse/guard-runner';
-import { claimIdentityKey, claimsByIdentity, openConflicts, type GuardClaimsFile, type GuardDecisions } from '@truecourse/shared';
+import { claimsById, openConflicts, type ClaimsFile, type GuardDecisions } from '@truecourse/shared';
 import { requireJobs } from '../jobs/current.js';
 import { refusedWithoutCredits } from './credits.js';
 import {
@@ -139,20 +139,17 @@ async function regenerateIfLastFindingDismissed(repoPath: string): Promise<void>
 
 // The "this write left zero active findings" gate the regen hook applies: true
 // when the report exists, has findings, and every finding's claim is dismissed —
-// i.e. the dismissal that just landed was the last active one. A finding with no
-// extracted claim can never be dismissed, so it keeps the result false.
+// i.e. the dismissal that just landed was the last active one. A finding naming
+// no claim of the corpus can never be dismissed, so it keeps the result false.
 function allFindingsDismissed(
   report: Awaited<ReturnType<typeof readGuardResultForView>>,
-  claims: GuardClaimsFile | null,
+  claims: ClaimsFile | null,
   decisions: GuardDecisions,
 ): boolean {
   if (!report || report.birthFindings.length === 0) return false;
-  const byIdentity = claimsByIdentity(claims?.claims ?? []);
+  const byId = claimsById(claims?.claims ?? []);
   const dismissed = new Set(decisions.dismissedClaims.map((d) => d.claimId));
-  return report.birthFindings.every((f) => {
-    const claim = f.claim != null ? byIdentity.get(claimIdentityKey(f.doc, f.anchor, f.claim)) : undefined;
-    return claim !== undefined && dismissed.has(claim.id);
-  });
+  return report.birthFindings.every((f) => f.claimId !== undefined && byId.has(f.claimId) && dismissed.has(f.claimId));
 }
 
 

@@ -74,8 +74,8 @@ export const FLOWS_SESSION_SYSTEM_PROMPT = `Keep all case prerequisites, includi
 You compose FLOWS out of a specification area's already-extracted CLAIMS. A flow is one user-goal path: a title, a goal, and an ordered list of MILESTONES, where every milestone IS one of the claims you were given.
 
 # Your input, and the only thing you may do with it
-The briefing carries the claims of ONE area — each with the document and section anchor it was extracted from — plus each document's heading outline, and GROUNDING (the app's own interfaces, and its dependency catalog). You ORDER and GROUP the claims into paths. That is the entire job.
-- Never invent or rewrite a claim. For a claim with explicit verification cases, select a nonempty caseIds list of exact existing IDs; otherwise the claim is indivisible. Each milestone COPIES one given claim's \`doc\`, \`anchor\`, and claim text VERBATIM, character for character. A milestone the engine cannot match back to a given claim is discarded.
+The briefing carries the claims of ONE area — each with its id and the document it is read from — plus each document's heading outline, and GROUNDING (the app's own interfaces, and its dependency catalog). You ORDER and GROUP the claims into paths. That is the entire job.
+- Never invent or rewrite a claim. For a claim with explicit verification cases, select a nonempty caseIds list of exact existing IDs; otherwise the claim is indivisible. Each milestone names one given claim by its \`claimId\`, copied VERBATIM, character for character. A milestone naming a claim you were not given is discarded.
 - A flow states WHAT the product should do for a user, never HOW a test would drive it. Do not name a command, endpoint, URL, selector, file, or function that does not already appear in the text you were given.
 - GROUNDING is orientation, not vocabulary: the interface digests show which paths the app can actually walk (favor compositions a surface can realize; a claim no interface serves still gets accounted for), and the dependency catalog shows which starting-state classes exist (a path whose claims' needs are all catalogued is realizable sooner). Milestones still come ONLY from the claims.
 
@@ -124,8 +124,8 @@ Legitimate \`noFlowClaims\` reasons: no test could cause the claim's condition, 
 
 # The outcome
 One object with BOTH arrays, either possibly empty, plus \`retiredFlows\` when an existing flow is retired:
-  { "flows": [ { "id"?, "title", "goal", "notes"?, "startingState"?, "milestones": [ { "order", "doc", "anchor", "claimTitle", "caseIds"?, "note"? } ] } ],
-    "noFlowClaims": [ { "doc", "anchor", "claimTitle", "caseIds"?, "reason" } ],
+  { "flows": [ { "id"?, "title", "goal", "notes"?, "startingState"?, "milestones": [ { "order", "claimId", "caseIds"?, "note"? } ] } ],
+    "noFlowClaims": [ { "claimId", "caseIds"?, "reason" } ],
     "retiredFlows": [ { "id", "reason" } ] }`
 
 /** Exported for the step-20 estimate rework (probe the REAL keys). */
@@ -141,7 +141,7 @@ When the briefing lists EXISTING EPICS, every one of them comes back as KEPT (it
 
 # Rules for an epic you do emit
 - \`composedOf\`: the refs (\`F1\`, \`F2\`, …) of the flows it chains — at least TWO, from DIFFERENT areas. Copy the refs exactly as listed.
-- \`milestones\`: the path, in the order the user walks it. EVERY milestone must be a milestone of one of the flows in \`composedOf\`, copied VERBATIM (\`doc\`, \`anchor\`, \`claimTitle\`, \`caseIds\`). Select only cases already present in the composed flows. You may drop a composed flow's milestones the interface doesn't need; you may never introduce one from elsewhere or write new text.
+- \`milestones\`: the path, in the order the user walks it. EVERY milestone must be a milestone of one of the flows in \`composedOf\`, copied VERBATIM (\`claimId\`, \`caseIds\`). Select only cases already present in the composed flows. You may drop a composed flow's milestones the interface doesn't need; you may never introduce one from elsewhere or write new text.
 - Preserve one source-promised dependent transition. Do not recreate an umbrella combining save, cancel, live conversion, missing credentials and controlled failures. Shared setup is not dependence; describe the source reason in notes. Never split based on milestone count.
 - \`title\`: the interface in user terms. \`goal\`: one sentence for what the user achieves.
 - Never emit an epic that is just one flow restated, and never two epics with the same chain.
@@ -150,7 +150,7 @@ When the briefing lists EXISTING EPICS, every one of them comes back as KEPT (it
 - \`check_flows\` — REQUIRED before you finish: call it with your complete draft (even { "epics": [] }). It verifies every ref and milestone against the composed flows, so a wrong reference costs one turn here instead of a refused outcome at the fold.
 
 # The outcome
-One object: { "epics": [ { "id"?, "title", "goal", "notes"?, "startingState"?, "composedOf": ["F1","F4"], "milestones": [ { "order", "doc", "anchor", "claimTitle", "caseIds"? } ] } ], "retiredEpics"?: [ { "id", "reason" } ] } — or { "epics": [] } when nothing chains.`
+One object: { "epics": [ { "id"?, "title", "goal", "notes"?, "startingState"?, "composedOf": ["F1","F4"], "milestones": [ { "order", "claimId", "caseIds"? } ] } ], "retiredEpics"?: [ { "id", "reason" } ] } — or { "epics": [] } when nothing chains.`
 
 export const FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT = promptFingerprint(FLOWS_EPIC_SESSION_SYSTEM_PROMPT)
 
@@ -223,10 +223,7 @@ function renderFlowSetReport(report: FlowSetCheckReport): { content: string; isE
     ...report.unaccountedFlows.map((f) => `${f} — continue it by id (kept or amended) or list it in retiredFlows with a reason`),
     ...report.unaccountedNoFlow.map((n) => `${n} — re-emit it with its reason, or put the claim in a flow`),
   ]
-  const notes = [
-    ...report.subsumed.map((s) => `near-duplicate: "${s.title}" is contained in "${s.supersededBy}" — the engine will drop it; emit the longest path once`),
-    ...report.unbindable.map((u) => `unbindable milestone (its section is not in the live index): ${u}`),
-  ]
+  const notes = report.subsumed.map((s) => `near-duplicate: "${s.title}" is contained in "${s.supersededBy}" — the engine will drop it; emit the longest path once`)
   if (refusals.length > 0) {
     const lines = [`${refusals.length} problem(s) that would refuse the outcome:`, ...refusals.map((r) => `- ${r}`)]
     if (notes.length > 0) lines.push('', 'Also noted:', ...notes.map((n) => `- ${n}`))
@@ -235,12 +232,6 @@ function renderFlowSetReport(report: FlowSetCheckReport): { content: string; isE
   const head = 'The draft is valid — produce it as the outcome.'
   if (notes.length === 0) return { content: head }
   return { content: [head, '', 'Notes (no fix required, but a better draft would address them):', ...notes.map((n) => `- ${n}`)].join('\n') }
-}
-
-/** The live universe the area checker binds against. */
-export interface FlowsCheckerContext {
-  /** Live {@link flowSectionKey}s (doc\0anchor) across the run's sections. */
-  sectionKeys: ReadonlySet<string>
 }
 
 const CHECK_FLOWS = defineToolSpec({
@@ -255,18 +246,12 @@ const CHECK_FLOWS = defineToolSpec({
 
 function checkFlowsTool(
   area: FlowSynthesisArea,
-  checker: FlowsCheckerContext,
   prior: readonly GuardFlow[],
   priorNoFlow: readonly GuardNoFlowClaim[] = [],
 ): SessionTool {
   return CHECK_FLOWS.bind({
     async execute(args) {
-      const report = checkFlowSet(args, {
-        area,
-        sectionKeys: checker.sectionKeys,
-        prior,
-        priorNoFlow,
-      })
+      const report = checkFlowSet(args, { area, prior, priorNoFlow })
       return renderFlowSetReport(report)
     },
   })
@@ -307,7 +292,6 @@ function checkEpicsTool(digests: readonly FlowDigest[], claims: readonly FlowCla
 export interface FlowsSessionInput {
   area: FlowSynthesisArea
   universe: GuardDocUniverse
-  checker: FlowsCheckerContext
   /** The unit's EXISTING flows the session reconciles against. */
   prior?: readonly GuardFlow[]
   /** The unit's EXISTING no-flow decisions the session reconciles against. */
@@ -324,7 +308,7 @@ export function flowsSessionDef(input: FlowsSessionInput): SessionDef<FlowSet> {
     ...FLOWS_SESSION,
     display: { title: 'Flow synthesis' },
     systemPrompt: FLOWS_SESSION_SYSTEM_PROMPT,
-    tools: [readUniverseSectionTool(input.universe), checkFlowsTool(input.area, input.checker, input.prior ?? [], input.priorNoFlow ?? [])],
+    tools: [readUniverseSectionTool(input.universe), checkFlowsTool(input.area, input.prior ?? [], input.priorNoFlow ?? [])],
     budget: FLOWS_SESSION_BUDGET,
     outcomePrecondition: {
       tool: 'check_flows',
@@ -400,7 +384,7 @@ function existingFlowLines(flow: GuardFlow): string[] {
   if (flow.composedOf.length > 0) lines.push(`composedOf: ${flow.composedOf.join(', ')}`)
   lines.push('milestones:')
   for (const m of [...flow.milestones].sort((a, b) => a.order - b.order)) {
-    lines.push(`  ${m.order}. ${m.doc}#${m.anchor} — ${m.claimTitle}${m.caseIds ? ` [caseIds: ${m.caseIds.join(', ')}]` : ''}`)
+    lines.push(`  ${m.order}. ${m.claimId} — ${m.claimTitle}${m.caseIds ? ` [caseIds: ${m.caseIds.join(', ')}]` : ''}`)
   }
   return lines
 }
@@ -424,20 +408,19 @@ export function flowsSessionBriefing(
     for (const d of area.docs) {
       lines.push(d.doc)
       for (const e of d.outline) lines.push(`  ${e.anchor} — ${e.headingText}`)
-      for (const u of d.untestable ?? []) lines.push(`  (no testable behavior: ${u.anchor} — ${u.reason})`)
     }
   }
   lines.push(
     '',
-    'CLAIMS IN THIS AREA — the closed set your milestones are drawn from. Copy `doc`,',
-    '`anchor`, and the claim text VERBATIM into every milestone you emit:',
+    'CLAIMS IN THIS AREA — the closed set your milestones are drawn from. Copy the',
+    '`claimId` VERBATIM into every milestone you emit:',
   )
   for (const c of area.claims) {
     lines.push(
       '',
       `--- claim`,
+      `claimId: ${c.id}`,
       `doc: ${c.doc}`,
-      `anchor: ${c.anchor}`,
       `claim: ${c.title}`,
       ...(c.verification ? [`verification: ${JSON.stringify(c.verification)}`] : []),
     )
@@ -460,7 +443,7 @@ export function flowsSessionBriefing(
       'Each comes back in `noFlowClaims` with its reason verbatim, unless you now place it in a flow:',
     )
     for (const c of priorNoFlow) {
-      lines.push(`  ${c.doc}#${c.anchor} — ${c.claimTitle}${c.caseIds ? ` [caseIds: ${c.caseIds.join(', ')}]` : ''} — ${c.reason}`)
+      lines.push(`  ${c.claimId}${c.caseIds ? ` [caseIds: ${c.caseIds.join(', ')}]` : ''} — ${c.reason}`)
     }
   }
   lines.push('', 'Check the draft with `check_flows`, then produce the outcome.')
@@ -475,7 +458,7 @@ export function flowsEpicSessionBriefing(digests: readonly FlowDigest[], prior: 
   ]
   for (const d of digests) {
     lines.push('', `--- ${d.ref}  (area: ${d.areaId})`, `title: ${d.title}`, `goal: ${d.goal}`, 'milestones:')
-    d.milestones.forEach((m, i) => lines.push(`  ${i + 1}. ${m.doc}#${m.anchor} — ${m.claimTitle}${m.caseIds ? ` [caseIds: ${m.caseIds.join(", ")}]` : ""}`))
+    d.milestones.forEach((m, i) => lines.push(`  ${i + 1}. ${m.claimId} — ${m.claimTitle}${m.caseIds ? ` [caseIds: ${m.caseIds.join(", ")}]` : ""}`))
   }
   if (prior.length > 0) {
     lines.push(

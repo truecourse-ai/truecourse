@@ -1,5 +1,5 @@
 /**
- * Collect the section indexes for a run's documents. The set is the docs the
+ * Read the document trees for a run's documents. The set is the docs the
  * scenarios bind to, unioned with the corpus-kept docs when
  * `.truecourse/specs/corpus.json` exists — guard works with or without a corpus,
  * and a repo may have scenarios bound to a doc the corpus never mentions.
@@ -12,19 +12,12 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
-import { nodeRefContext } from '@truecourse/shared/openapi-node'
-import { buildDocSectionIndex, type DocSectionIndex } from './section-index.js'
+import { parseDocTree, type DocTree } from '@truecourse/shared'
 import { corpusFilePath } from '@truecourse/shared/work-tree'
 
-// The single node-side RefResolutionContext factory (symlink-safe, pre-cap guarded)
-// lives in @truecourse/shared/openapi-node so guard-runner and spec-consolidator
-// share ONE implementation. Re-exported so the guard-runner public surface (which
-// section-plan / run import from) is unchanged.
-export { nodeRefContext } from '@truecourse/shared/openapi-node'
-
-export interface RepoDocIndexes {
-  /** Doc path → its section index, for docs that exist on disk. */
-  indexes: Map<string, DocSectionIndex>
+export interface RepoDocTrees {
+  /** Doc path → its tree, for docs that exist on disk. */
+  trees: Map<string, DocTree>
   /** Docs that were referenced but do not exist on disk. */
   missing: Set<string>
 }
@@ -46,15 +39,15 @@ export function corpusKeptDocs(repoRoot: string): string[] {
 }
 
 /**
- * Index the union of the corpus-kept docs and `boundDocs`. Each doc is read from
+ * Parse the union of the corpus-kept docs and `boundDocs`. Each doc is read from
  * disk once; a referenced doc that is absent lands in `missing` (its scenarios
  * resolve as orphaned).
  */
-export function indexRepoDocs(repoRoot: string, boundDocs: Iterable<string>): RepoDocIndexes {
+export function readRepoDocTrees(repoRoot: string, boundDocs: Iterable<string>): RepoDocTrees {
   const wanted = new Set<string>(boundDocs)
   for (const ref of corpusKeptDocs(repoRoot)) wanted.add(ref)
 
-  const indexes = new Map<string, DocSectionIndex>()
+  const trees = new Map<string, DocTree>()
   const missing = new Set<string>()
   for (const doc of wanted) {
     const abs = path.resolve(repoRoot, doc)
@@ -62,7 +55,7 @@ export function indexRepoDocs(repoRoot: string, boundDocs: Iterable<string>): Re
       missing.add(doc)
       continue
     }
-    indexes.set(doc, buildDocSectionIndex(doc, fs.readFileSync(abs, 'utf-8'), nodeRefContext(repoRoot, abs)))
+    trees.set(doc, parseDocTree(doc, fs.readFileSync(abs, 'utf-8')))
   }
-  return { indexes, missing }
+  return { trees, missing }
 }

@@ -16,7 +16,6 @@ import {
   type GuardPrerequisite,
   type GuardPrerequisiteTarget,
   type GuardScenario,
-  type ClaimNeed,
   type GuardVerification,
   guardProviderTargets,
 } from '@truecourse/shared'

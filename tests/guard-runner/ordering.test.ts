@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { orderReadBeforeWrite } from '@truecourse/guard-runner'
 import type { GuardScenario } from '@truecourse/shared'
 
-const binds = [{ doc: 'd.md', section: 's', fingerprint: 'sha256:x', sentences: ['s'] }]
+const binds = [{ doc: 'd.md', sentences: ['s'] }]
 
 function cli(id: string): GuardScenario {
   return { id, title: id, binds, steps: [{ run: ['x'], expect: { exit: 0 } }], normalize: [] }

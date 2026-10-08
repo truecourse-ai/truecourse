@@ -34,7 +34,6 @@ function run(env: Partial<GuardRunEnvelope> & Pick<GuardRunEnvelope, 'runId' | '
     run: { branch: 'main', recipeFingerprint: 'sha256:r', ...env },
     summary,
     scenarios: [],
-    sections: [],
   };
 }
 

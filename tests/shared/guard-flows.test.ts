@@ -10,7 +10,7 @@ import {
   FLOW_IDENTITY_OVERLAP_THRESHOLD,
   flowFingerprint,
   flowMilestoneKey,
-  guardManifestSections,
+  claimId,
   resolveFlowIdentity,
   type GuardFlow,
   type GuardFlowMilestone,
@@ -18,8 +18,10 @@ import {
 
 const DOC = 'docs/specs/tasks.md'
 
-function milestone(order: number, anchor: string, claimTitle: string): GuardFlowMilestone {
-  return { order, doc: DOC, anchor, claimTitle, sentences: [anchor] }
+/** A milestone proving the claim read from one sentence (keyed by its text). */
+function milestone(order: number, claimTitle: string, doc = DOC): GuardFlowMilestone {
+  const sentences = [`sentence:${claimTitle}`]
+  return { order, doc, claimId: claimId(doc, sentences), claimTitle, sentences }
 }
 
 function flow(id: string, milestones: GuardFlowMilestone[], title = id): GuardFlow {
@@ -29,21 +31,19 @@ function flow(id: string, milestones: GuardFlowMilestone[], title = id): GuardFl
     goal: `goal of ${id}`,
     fingerprint: flowFingerprint(milestones),
     milestones,
-    bindings: [...new Set(milestones.map((m) => m.anchor))].map((anchor) => ({
-      doc: DOC,
-      anchor,
-      fingerprint: `sha256:${anchor}`,
-      sentences: [anchor],
+    bindings: [...new Set(milestones.map((m) => m.doc))].map((doc) => ({
+      doc,
+      sentences: milestones.filter((m) => m.doc === doc).flatMap((m) => m.sentences),
     })),
     composedOf: [],
     synthesisInputsHash: 'sha256:inputs',
   }
 }
 
-const CREATE = milestone(1, 'tasks/creating-tasks', 'Creating a task returns it with an id')
-const LIST = milestone(2, 'tasks/listing-tasks', 'The list shows tasks newest-first')
-const COMPLETE = milestone(3, 'tasks/completing-tasks', 'A task can be marked done')
-const FILTER = milestone(4, 'tasks/completing-tasks', 'Done tasks appear under the done filter')
+const CREATE = milestone(1, 'Creating a task returns it with an id')
+const LIST = milestone(2, 'The list shows tasks newest-first')
+const COMPLETE = milestone(3, 'A task can be marked done')
+const FILTER = milestone(4, 'Done tasks appear under the done filter')
 
 describe('guard flow schemas', () => {
   it('round-trips a flows file through JSON', () => {
@@ -52,7 +52,7 @@ describe('guard flow schemas', () => {
       generatedAt: '2026-07-24T12:00:00.000Z',
       flows: [flow('task-lifecycle', [CREATE, LIST, COMPLETE, FILTER])],
       noFlowClaims: [
-        { doc: DOC, anchor: 'tasks/rate-limits', claimTitle: 'writes are rate-limited', reason: 'needs a clock' },
+        { claimId: claimId(DOC, ['sentence:writes are rate-limited']), reason: 'needs a clock' },
       ],
     }
     expect(GuardFlowsFileSchema.parse(JSON.parse(JSON.stringify(file)))).toEqual(file)
@@ -96,19 +96,17 @@ describe('flowFingerprint', () => {
     expect(flowFingerprint(swapped)).not.toBe(flowFingerprint([CREATE, LIST]))
   })
 
-  it('normalizes whitespace — a re-wrapped claim never moves it', () => {
-    const rewrapped = { ...CREATE, claimTitle: '  Creating a task\n  returns it with an id ' }
-    expect(flowFingerprint([rewrapped])).toBe(flowFingerprint([CREATE]))
+  it('a reworded claim title never moves it — the claim id is the identity', () => {
+    expect(flowFingerprint([{ ...CREATE, claimTitle: 'Creating a task\n  returns it' }])).toBe(flowFingerprint([CREATE]))
   })
 
-  it('moves when a claim or an anchor changes', () => {
-    expect(flowFingerprint([{ ...CREATE, claimTitle: 'something else' }])).not.toBe(flowFingerprint([CREATE]))
-    expect(flowFingerprint([{ ...CREATE, anchor: 'tasks/other' }])).not.toBe(flowFingerprint([CREATE]))
+  it('moves when a milestone proves another claim', () => {
+    expect(flowFingerprint([{ ...CREATE, claimId: LIST.claimId }])).not.toBe(flowFingerprint([CREATE]))
   })
 
-  it('the milestone key is the anchor + the claim text, normalized', () => {
-    expect(flowMilestoneKey(CREATE)).toBe(`${DOC}\0${CREATE.anchor}\0${CREATE.claimTitle}\0`)
-    expect(flowMilestoneKey({ anchor: ' a  b ', claimTitle: 'x\ny' })).toBe('\0a b\0x y\0')
+  it('the milestone key is the claim id + its selected cases, sorted', () => {
+    expect(flowMilestoneKey(CREATE)).toBe(`${CREATE.claimId}\0`)
+    expect(flowMilestoneKey({ claimId: 'c', caseIds: ['b', 'a'] })).toBe('c\0a\0b')
   })
 
   it('a note never moves the fingerprint', () => {
@@ -206,7 +204,7 @@ describe('resolveFlowIdentity', () => {
 
   it('never resolves by title', () => {
     const prev = [flow('task-lifecycle', [CREATE, LIST], 'Task lifecycle')]
-    const next = [flow('task-lifecycle', [milestone(1, 'billing/plans', 'Plans are listed')], 'Task lifecycle')]
+    const next = [flow('task-lifecycle', [milestone(1, 'Plans are listed')], 'Task lifecycle')]
     const { verdicts, orphaned } = resolveFlowIdentity(prev, next)
     expect(verdicts).toEqual([{ kind: 'new', id: 'task-lifecycle' }])
     expect(orphaned.map((f) => f.id)).toEqual(['task-lifecycle'])
@@ -236,10 +234,7 @@ describe('guard manifest v2 (flow-keyed)', () => {
       {
         flowId: 'task-lifecycle',
         flowFingerprint: flowFingerprint([CREATE, LIST]),
-        bindings: [
-          { doc: DOC, anchor: 'tasks/creating-tasks', fingerprint: 'sha256:c', sentences: ['tasks/creating-tasks'] },
-          { doc: DOC, anchor: 'tasks/listing-tasks', fingerprint: 'sha256:l', sentences: ['tasks/listing-tasks'] },
-        ],
+        bindings: [{ doc: DOC, sentences: [...CREATE.sentences, ...LIST.sentences] }],
         scenarios: [
           { id: 'task-lifecycle.cli.1', drivers: ['cli'] as const, status: 'passing' as const },
           { id: 'task-lifecycle.api.1', drivers: ['api'] as const, status: 'passing' as const },
@@ -308,36 +303,6 @@ describe('guard manifest v2 (flow-keyed)', () => {
       flows: [{ ...manifest.flows[0], gaps: [{ surface: 'cli', kind: 'untestable', reason: 'r' }] }],
     }
     expect(() => GuardManifestSchema.parse(untestable)).not.toThrow()
-  })
-
-  it('projects onto sections at read time — one row per bound section', () => {
-    const sections = guardManifestSections(manifest)
-    expect(sections.map((s) => s.anchor)).toEqual(['tasks/creating-tasks', 'tasks/listing-tasks'])
-    expect(sections[0]).toEqual({
-      doc: DOC,
-      anchor: 'tasks/creating-tasks',
-      fingerprint: 'sha256:c',
-      flowIds: ['task-lifecycle'],
-      scenarioIds: ['task-lifecycle.api.1', 'task-lifecycle.cli.1'],
-      generationInputsHash: 'sha256:gen',
-    })
-  })
-
-  it('unions the flows binding one section, and nulls a disagreeing inputs hash', () => {
-    const twoFlows = {
-      flows: [
-        { ...manifest.flows[0], flowId: 'one', generationInputsHash: 'sha256:a' },
-        { ...manifest.flows[0], flowId: 'two', generationInputsHash: 'sha256:b', scenarios: [{ id: 'two.cli.1', drivers: ['cli'] as const, status: 'passing' as const }] },
-      ],
-    }
-    const [first] = guardManifestSections(twoFlows)
-    expect(first.flowIds).toEqual(['one', 'two'])
-    expect(first.scenarioIds).toEqual(['task-lifecycle.api.1', 'task-lifecycle.cli.1', 'two.cli.1'])
-    expect(first.generationInputsHash).toBeNull()
-  })
-
-  it('a null manifest projects to no sections', () => {
-    expect(guardManifestSections(null)).toEqual([])
   })
 })
 
@@ -468,6 +433,6 @@ describe('scoped flow identities', () => {
     expect(resolveFlowIdentity([flow('parent', [CREATE, LIST, COMPLETE])], [flow('first', [CREATE, LIST]), flow('second', [COMPLETE])]).verdicts.every(v => v.kind === 'new')).toBe(true)
   })
   it('does not merge equivalent-looking claims from different source documents', () => {
-    expect(flowFingerprint([CREATE])).not.toBe(flowFingerprint([{ ...CREATE, doc: 'another.md' }]))
+    expect(flowFingerprint([CREATE])).not.toBe(flowFingerprint([milestone(1, CREATE.claimTitle, 'another.md')]))
   })
 })

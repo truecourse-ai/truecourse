@@ -97,13 +97,14 @@ describe('legacyFlowGenerationInputsHash — the frozen retirement salt', () => 
   // Policy v5 deliberately revalidates committed coverage under typed web evidence.
   // Provider control changes the authoring contract and includes the web prompt
   // in this hash. The retired extract/flows/epic salts remain unchanged.
-  const GOLDEN = 'sha256:eb1546f70ef7a02e259ba2d7a26c109ed2ded15caf0bd2b9c854fd48690fd89a'
+  // Bindings go by sentence, so the hash no longer folds bound section text
+  // keys: a row stamped under the section-keyed hash misses once and re-authors.
+  const GOLDEN = 'sha256:b9e29e9bfe1a14851fe724f638bf2b4d7ef42e3567036fc087b3096eea31723a'
 
   it('retains the retirement salt with the current matching doctrine', () => {
     expect(
       legacyFlowGenerationInputsHash({
         flowFingerprint: 'f',
-        sectionKeys: ['s'],
         interfaceFingerprints: ['i'],
         recipeFingerprint: 'r',
       }),
@@ -111,26 +112,24 @@ describe('legacyFlowGenerationInputsHash — the frozen retirement salt', () => 
   })
 
   it('still moves with every input it is supposed to track', () => {
-    const base = { flowFingerprint: 'f', sectionKeys: ['s'], interfaceFingerprints: ['i'], recipeFingerprint: 'r' }
+    const base = { flowFingerprint: 'f', interfaceFingerprints: ['i'], recipeFingerprint: 'r' }
     for (const moved of [
       { ...base, flowFingerprint: 'f2' },
-      { ...base, sectionKeys: ['s2'] },
       { ...base, interfaceFingerprints: ['i2'] },
       { ...base, recipeFingerprint: 'r2' },
     ]) {
       expect(legacyFlowGenerationInputsHash(moved)).not.toBe(legacyFlowGenerationInputsHash(base))
     }
-    // Order-insensitive on both sorted lists.
+    // Order-insensitive on the sorted list.
     expect(
-      legacyFlowGenerationInputsHash({ ...base, sectionKeys: ['b', 'a'], interfaceFingerprints: ['y', 'x'] }),
-    ).toBe(legacyFlowGenerationInputsHash({ ...base, sectionKeys: ['a', 'b'], interfaceFingerprints: ['x', 'y'] }))
+      legacyFlowGenerationInputsHash({ ...base, interfaceFingerprints: ['y', 'x'] }),
+    ).toBe(legacyFlowGenerationInputsHash({ ...base, interfaceFingerprints: ['x', 'y'] }))
   })
 })
 
 describe('flowGenerationInputComponents — the hash, by name', () => {
   const parts: FlowGenerationInputParts = {
     flowFingerprint: 'f',
-    sectionKeys: ['s1', 's2'],
     assignmentFingerprints: ['a'],
     interfaceFingerprints: ['i1', 'i2'],
     webCatalogFingerprint: 'w',
@@ -149,8 +148,6 @@ describe('flowGenerationInputComponents — the hash, by name', () => {
       movedNamedInputs(base, flowGenerationInputComponents({ ...parts, ...over }))!
     expect(moved({})).toEqual([])
     expect(moved({ flowFingerprint: 'f2' })).toEqual(['flow'])
-    expect(moved({ sectionKeys: ['s1', 's3'] })).toEqual(['sections'])
-    expect(moved({ sectionKeys: ['s2', 's1'] })).toEqual([])
     expect(moved({ assignmentFingerprints: ['a2'] })).toEqual(['assignment'])
     expect(moved({ interfaceFingerprints: ['i1'] })).toEqual(['interfaces'])
     // The whole catalog rides the LEGACY bag alone; what the flow's session
@@ -193,7 +190,6 @@ describe('flowGenerationInputComponents — the hash, by name', () => {
 describe('flowSettleVerdict — the three compare rules and the one legacy check', () => {
   const components = flowGenerationInputComponents({
     flowFingerprint: 'f',
-    sectionKeys: ['s1'],
     assignmentFingerprints: ['a'],
     interfaceFingerprints: ['i'],
     hasScenario: false,
@@ -206,18 +202,18 @@ describe('flowSettleVerdict — the three compare rules and the one legacy check
   const legacyHash = 'sha256:' + 'a'.repeat(64)
 
   it('settles a row whose stored names all still match, ignoring the ones it retired', () => {
-    // A row from the old scheme: it carries `prompts`, `recipe.*` and the
-    // state-folding `prerequisites`, none of which exist any more, and lacks
-    // the ones the scheme gained.
-    const stored = { flow: components.flow, sections: components.sections, prompts: 'deadbeefdeadbeef', 'recipe.manifests': 'cafecafecafecafe', prerequisites: 'f00df00df00df00d' }
+    // A row from the old scheme: it carries `sections`, `prompts`, `recipe.*`
+    // and the state-folding `prerequisites`, none of which exist any more, and
+    // lacks the ones the scheme gained.
+    const stored = { flow: components.flow, sections: 'ffffffffffffffff', prompts: 'deadbeefdeadbeef', 'recipe.manifests': 'cafecafecafecafe', prerequisites: 'f00df00df00df00d' }
     expect(flowSettleVerdict({ prior: { generationInputsHash: legacyHash, generationInputs: stored }, components, legacyHash: 'sha256:other' }))
       .toEqual({ settled: true, moved: [] })
   })
 
   it('re-opens on a name both records carry that differs, and names it', () => {
-    const stored = { ...components, sections: 'ffffffffffffffff' }
+    const stored = { ...components, roster: 'ffffffffffffffff' }
     expect(flowSettleVerdict({ prior: { generationInputsHash: legacyHash, generationInputs: stored }, components, legacyHash }))
-      .toEqual({ settled: false, moved: ['sections'] })
+      .toEqual({ settled: false, moved: ['roster'] })
   })
 
   it('checks a row with no names against the legacy hash, once, and names nothing', () => {

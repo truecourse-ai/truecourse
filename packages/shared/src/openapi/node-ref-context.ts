@@ -1,7 +1,7 @@
 /**
  * The node-side factory for a {@link RefResolutionContext} — the ONE place a guard
- * caller (guard-runner's doc-index / section-plan / run and spec-consolidator's
- * discovery) turns a repo root into a resolver context. It lives in its own
+ * caller (guard-generator's document plan, core's interface service and
+ * spec-consolidator's discovery) turns a repo root into a resolver context. It lives in its own
  * subpath (`@truecourse/shared/openapi-node`) so the sibling `./openapi` module
  * stays browser-safe: THIS file imports `node:fs`, that one never does.
  *

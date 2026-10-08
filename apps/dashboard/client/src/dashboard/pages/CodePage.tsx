@@ -88,9 +88,9 @@ export default function CodePage() {
       repos.map((repo) => {
         const loaded = summaries.get(repo.id);
         const summary = loaded?.status;
-        const claims = summary?.claims?.byStatus ?? summary?.coverage?.byStatus ?? zero();
-        const flows = summary?.coverage?.flows.byStatus ?? zero();
-        const claimTotal = summary?.claims?.total ?? summary?.coverage?.totalSections ?? 0;
+        const claims = summary?.claims?.byStatus ?? zero();
+        const flows = summary?.flows?.byStatus ?? zero();
+        const claimTotal = summary?.claims?.total ?? 0;
         const lastRun = summary?.lastRun ?? null;
         const lastCheck = lastRun ? checkForRun(lastRun) : repo.lastCheck;
         const requirementsEmpty = !loaded ? 'Loading…'

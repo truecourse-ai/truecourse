@@ -22,16 +22,12 @@ function report(overrides: Partial<GuardGenerateReport> = {}): GuardGenerateRepo
   return {
     generatedAt: '2026-07-30T12:00:00.000Z',
     status: 'ok',
-    sectionsTotal: 1,
-    sectionsChanged: 0,
-    skippedUnchanged: 1,
     noChanges: false,
     written: [],
     coverageGaps: [],
     birthFindings: [],
     errors: [],
     extractionFailures: [],
-    orphaned: [],
     ...overrides,
   };
 }
@@ -39,7 +35,6 @@ function report(overrides: Partial<GuardGenerateReport> = {}): GuardGenerateRepo
 function diagnosis(overrides: Partial<GuardScenarioDiagnosis> = {}): GuardScenarioDiagnosis {
   return {
     doc: 'README.md',
-    anchor: 'a/b',
     title: 'claim of the red test',
     step: 1,
     expected: 'status 200',
@@ -52,7 +47,6 @@ function diagnosis(overrides: Partial<GuardScenarioDiagnosis> = {}): GuardScenar
 function finding(scenarioId: string, overrides: Partial<GuardBirthFinding> = {}): GuardBirthFinding {
   return {
     doc: 'README.md',
-    anchor: 'a/b',
     scenarioId,
     title: `claim of ${scenarioId}`,
     step: 1,
@@ -74,7 +68,7 @@ function manifestWith(
       {
         flowId: 'f1',
         flowFingerprint: 'sha256:f1',
-        bindings: [{ doc: 'README.md', anchor: 'a/b', fingerprint: 'sha256:s1', sentences: ['a/b'] }],
+        bindings: [{ doc: 'README.md', sentences: ['a/b'] }],
         scenarios: scenarios.map((s) => ({ drivers: ['api'] as const, status: 'passing' as const, ...s })),
         interfaces: [],
         generationInputsHash: flow.generationInputsHash === undefined ? 'sha256:g1' : flow.generationInputsHash,
@@ -116,8 +110,7 @@ describe('carryForwardBirthFindings — the committed class rides the manifest',
           id: 'rewritten.api.1',
           title: 't',
           doc: 'README.md',
-          anchor: 'a/b',
-          file: '.truecourse/scenarios/a/rewritten.api.1.yaml',
+                file: '.truecourse/scenarios/a/rewritten.api.1.yaml',
           status: 'passing',
         },
       ],
@@ -184,8 +177,7 @@ describe('carryForwardBirthFindings — the withheld classes ride the prior repo
           id: 'other.api.1',
           title: 't',
           doc: 'README.md',
-          anchor: 'a/b',
-          file: '.truecourse/scenarios/a/other.api.1.yaml',
+                file: '.truecourse/scenarios/a/other.api.1.yaml',
           status: 'passing',
           flowId: 'f1',
           surface: 'api',

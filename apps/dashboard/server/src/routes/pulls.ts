@@ -68,7 +68,7 @@ function summarize(check: PullRequestCheckRecord): PullRequestCheckSummary {
     counts: report
       ? {
           conflictsCreated: report.conflictsCreated.length,
-          sectionsMoved: report.sectionsMoved.length,
+          docsMoved: report.docsMoved.length,
           newFailures: report.run?.counts.newFailures ?? 0,
           preExisting: report.run?.counts.preExisting ?? 0,
           fixed: report.run?.counts.fixed ?? 0,
@@ -140,7 +140,7 @@ export function createWorkspacePullsRouter(deps: Pick<PullsRouterDeps, 'pulls'>)
             reason: check.reason,
             settledAt: check.settledAt,
             conflictsCreated: check.report.conflictsCreated,
-            sectionsMoved: check.report.sectionsMoved,
+            docsMoved: check.report.docsMoved,
           },
         });
       }

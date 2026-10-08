@@ -4,7 +4,7 @@
  * A hosted run works in an ephemeral clone that carries no `.truecourse/`, but
  * everything downstream of the scan reads the curated corpus (and the
  * resolutions folded into it) as FILES: guard setup's doc universe, the
- * generator's section plan, the conflict gate. And since documentation stopped
+ * generator's document plan, the conflict gate. And since documentation stopped
  * belonging to a repository, what the corpus names is no longer in the clone
  * either — a `context/<sourceId>/<docPath>` ref is a workspace document, not a
  * file of this repository.

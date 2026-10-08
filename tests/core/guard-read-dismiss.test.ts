@@ -6,7 +6,6 @@ import {
   composeClaimCoverage,
   readGuardEvidenceAt,
 } from '../../packages/core/src/commands/guard-read';
-import { claimContentHash } from '../../packages/shared/src/guard/claims';
 import type { GuardGenerateReport } from '../../packages/shared/src/index';
 import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
 
@@ -30,23 +29,18 @@ function report(over: Partial<GuardGenerateReport>): GuardGenerateReport {
   return {
     generatedAt: '2026-07-08T00:00:00.000Z',
     status: 'ok',
-    sectionsTotal: 1,
-    sectionsChanged: 1,
-    skippedUnchanged: 0,
     noChanges: false,
     written: [],
     coverageGaps: [],
     birthFindings: [],
     errors: [],
     extractionFailures: [],
-    orphaned: [],
     ...over,
   };
 }
 
 describe('composeClaimCoverage — dismissed status', () => {
   it('paints a dismissed claim as "dismissed" with the note, and totals it under Not testable', () => {
-    const body = { doc: DOC, anchor: 'version', title: 'the --version flag prints the semver', claim: 'the --version flag prints the semver.' };
     const view = composeClaimCoverage({
       manifest: null,
       latest: null,
@@ -54,8 +48,17 @@ describe('composeClaimCoverage — dismissed status', () => {
       claims: {
         version: 1,
         generatedAt: '2026-07-08T00:00:00.000Z',
-        claims: [{ id: 'claim::version', ...body, contentHash: claimContentHash(body) }],
-        untestable: [],
+        claims: [
+          {
+            id: 'claim::version',
+            doc: DOC,
+            sentences: ['s1'],
+            subject: 'the --version flag',
+            statement: 'the --version flag prints the semver.',
+            areas: [],
+            testable: true,
+          },
+        ],
       },
       decisions: {
         version: 1,

@@ -79,7 +79,6 @@ const FLOWS = {
       composedOf: [],
       manual: false,
       milestoneCount: 2,
-      sectionCount: 1,
       docs: ['docs/cli.md'],
       surfaces: [{ surface: 'cli', scenarioId: 'write-then-read.cli.1', status: 'pass', outcome: 'pass' }],
       drivers: ['cli'],
@@ -113,14 +112,13 @@ const HEAD_RUN = {
     {
       id: 'write-then-read.cli.1',
       title: 'Writes a file and reads it back',
-      binds: { doc: 'docs/cli.md', section: 'round-trip', fingerprint: 'sha256:x', sentences: ['round-trip'] },
+      binds: { doc: 'docs/cli.md', sentences: ['round-trip'] },
       outcome: 'fail',
       durationMs: 12,
       flowId: 'write-then-read',
       failure: { step: 2, expected: 'exit 0', actual: 'exit 1' },
     },
   ],
-  sections: [],
   runFlows: [],
 };
 

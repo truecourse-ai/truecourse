@@ -19,43 +19,6 @@ import type {
   GuardGenerateReport,
 } from '@truecourse/shared';
 
-/** Changed sections split the way the generate report counts them. */
-export interface GuardSettledCounts {
-  /** Sections whose spec content changed since the last generate. */
-  changed: number;
-  /** Changed sections that recorded a scenario or gap (accounted for). */
-  settled: number;
-  /** Changed sections that re-attempt next run (a birth finding or authoring error). */
-  unsettled: number;
-  /** Sections skipped because their spec content was unchanged. */
-  unchanged: number;
-}
-
-/**
- * Settled / unsettled split, identical to `composeGuardStatus`.
- *
- * A COMMITTED failing test settles its section: guard commits every test it
- * authors, so the section has its measurement and the measurement is red, there
- * is nothing to re-attempt. Only work that left NOTHING behind is unsettled: a
- * fidelity rejection (judged an invalid measurement, never committed), an
- * authoring error, and, on reports written before failing tests were committed -
- * a birth failure that withheld its scenario (no `committed` flag).
- */
-export function settledCounts(report: GuardGenerateReport): GuardSettledCounts {
-  const unsettled = new Set<string>();
-  for (const f of report.birthFindings) {
-    if (f.committed) continue;
-    unsettled.add(`${f.doc}\0${f.anchor}`);
-  }
-  for (const e of report.errors) unsettled.add(`${e.doc}\0${e.anchor}`);
-  return {
-    changed: report.sectionsChanged,
-    settled: Math.max(0, report.sectionsChanged - unsettled.size),
-    unsettled: unsettled.size,
-    unchanged: report.skippedUnchanged,
-  };
-}
-
 /** Display order: blocked-on first, then the awaiting drivers (registry-derived),
  *  then the residual kinds (dismissed, a user choice, last). A new driver slots
  *  in without touching this list. */

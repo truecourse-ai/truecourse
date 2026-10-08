@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import request from 'supertest';
-import { claimContentHash } from '@truecourse/shared';
+import { claimId } from '@truecourse/shared';
 import { writeGuardClaims } from '@truecourse/guard-runner';
 import { type Express } from 'express';
 
@@ -78,8 +78,8 @@ describe('Guard action routes', () => {
   const writeJson = (rel: string, obj: unknown) => write(rel, JSON.stringify(obj, null, 2));
   const url = (suffix: string) => `/api/repos/${fixture.project.slug}/guard/${suffix}`;
 
-  // A corpus with one doc + the doc on disk, and NO scenarios manifest → every
-  // section is "changed", so the estimate carries stages (a non-trivial estimate).
+  // A corpus with one doc + the doc on disk, and NO scenarios manifest → the
+  // document is "changed", so the estimate carries stages (a non-trivial estimate).
   function seedCorpus(): void {
     writeJson('.truecourse/specs/corpus.json', {
       version: 3,
@@ -122,12 +122,12 @@ describe('Guard action routes', () => {
     expect(Array.isArray(res.body.estimate.stages)).toBe(true);
     expect(res.body.estimate.stages.length).toBeGreaterThan(0);
     expect(res.body.estimate.stages[0]).toMatchObject({ stage: expect.any(String), model: expect.any(String), calls: expect.any(Number) });
-    expect(res.body.estimate.subjectLabel).toMatch(/section/);
+    expect(res.body.estimate.subjectLabel).toMatch(/document/);
   });
 
   it('GET /guard/estimate has no stages when nothing changed (client skips the modal)', async () => {
     // A recipe already present (no discovery stage) + no corpus docs (no changed
-    // sections to extract/author) → every stage has zero calls → no stages.
+    // documents to extract/author) → every stage has zero calls → no stages.
     writeJson('.truecourse/scenarios/recipe.json', { build: 'echo build', entry: ['node', 'x.js'] });
     const res = await request(app).get(url('estimate')).expect(200);
     expect(res.body.estimate.stages ?? []).toEqual([]);
@@ -190,8 +190,8 @@ describe('Guard action routes', () => {
           title: 'Task lifecycle',
           goal: 'Create and complete a task',
           fingerprint: 'sha256:41ac',
-          milestones: [{ order: 1, doc: DOC, anchor: 'a', claimTitle: 'claim A', sentences: ['a'] }],
-          bindings: [{ doc: DOC, anchor: 'a', fingerprint: 'sha256:a', sentences: ['a'] }],
+          milestones: [{ order: 1, doc: DOC, claimId: claimId(DOC, ['a']), claimTitle: 'claim A', sentences: ['a'] }],
+          bindings: [{ doc: DOC, sentences: ['a'] }],
           composedOf: [],
           synthesisInputsHash: 'sha256:inputs',
         },
@@ -316,8 +316,8 @@ describe('Guard dismiss/undismiss routes (hosted store)', () => {
               title: 'Task lifecycle',
               goal: 'Create and complete a task',
               fingerprint: 'sha256:41ac',
-              milestones: [{ order: 1, doc: 'docs/cli.md', anchor: 'a', claimTitle: 'claim A', sentences: ['a'] }],
-              bindings: [{ doc: 'docs/cli.md', anchor: 'a', fingerprint: 'sha256:a', sentences: ['a'] }],
+              milestones: [{ order: 1, doc: 'docs/cli.md', claimId: claimId('docs/cli.md', ['a']), claimTitle: 'claim A', sentences: ['a'] }],
+              bindings: [{ doc: 'docs/cli.md', sentences: ['a'] }],
               composedOf: [],
               synthesisInputsHash: 'sha256:inputs',
             },
@@ -353,48 +353,47 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
 
   const url = (suffix: string) => `/api/repos/${fixture.project.slug}/guard/${suffix}`;
 
-  // Two birth findings, each carrying its dismissible claim; dismiss keys on the
-  // claim the corpus resolves it to (the same join the coverage view derives "active" from).
-  const findingA = { doc: 'docs/cli.md', anchor: 'a', title: 'A scenario', claim: 'claim A' };
-  const findingB = { doc: 'docs/cli.md', anchor: 'b', title: 'B scenario', claim: 'claim B' };
+  // Two birth findings, each naming its dismissible claim; dismiss keys on that
+  // claim's id (the same join the coverage view derives "active" from).
+  const findingA = { doc: 'docs/cli.md', sentence: 'a', title: 'A scenario', claim: 'claim A' };
+  const findingB = { doc: 'docs/cli.md', sentence: 'b', title: 'B scenario', claim: 'claim B' };
+  /** The corpus's id for a finding's claim: what a dismissal names. */
+  const claimIdOf = (f: { doc: string; sentence: string }) => claimId(f.doc, [f.sentence]);
 
-  const report = (findings: Array<{ doc: string; anchor: string; title: string; claim?: string }>): GuardGenerateReport => ({
+  const report = (findings: Array<{ doc: string; sentence: string; title: string; claim?: string }>): GuardGenerateReport => ({
     generatedAt: '2026-01-01T00:00:00Z',
     status: 'ok',
-    sectionsTotal: 2,
-    sectionsChanged: 2,
-    skippedUnchanged: 0,
     noChanges: false,
     written: [],
     coverageGaps: [],
     birthFindings: findings.map((f) => ({
       doc: f.doc,
-      anchor: f.anchor,
       title: f.title,
       step: 1,
       expected: 'x',
       actual: 'y',
-      ...(f.claim ? { claim: f.claim } : {}),
+      ...(f.claim ? { claimId: claimIdOf(f), claim: f.claim } : {}),
     })),
     errors: [],
     extractionFailures: [],
-    orphaned: [],
   });
 
-  /** The corpus's id for a finding's claim: what a dismissal names. */
-  const claimIdOf = (f: { doc: string; anchor: string }) => `claim::${f.doc}::${f.anchor}`;
   /** The claim corpus holding both findings' claims. */
   const CORPUS = {
     version: 1 as const,
     generatedAt: '2026-01-01T00:00:00Z',
-    claims: [findingA, findingB].map((f) => {
-      const body = { doc: f.doc, anchor: f.anchor, title: f.claim, claim: `${f.claim}.` };
-      return { id: claimIdOf(f), ...body, contentHash: claimContentHash(body) };
-    }),
-    untestable: [],
+    claims: [findingA, findingB].map((f) => ({
+      id: claimIdOf(f),
+      doc: f.doc,
+      sentences: [f.sentence],
+      subject: 'cli',
+      statement: f.claim,
+      areas: [],
+      testable: true as const,
+    })),
   };
   // Dismiss by the finding's CLAIM, as the corpus holds it.
-  const dismiss = (f: { doc: string; anchor: string; claim: string }) =>
+  const dismiss = (f: { doc: string; sentence: string }) =>
     request(app).post(url('dismiss')).send({ claimId: claimIdOf(f) });
 
   beforeEach(async () => {
@@ -427,7 +426,7 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
   });
 
   it('does not regenerate when a finding with no dismissible claim stays active', async () => {
-    // findingB has no `claim` → it can never be dismissed → always active.
+    // findingB names no claim → it can never be dismissed → always active.
     await writeGuardResult({ repoKey: root, commitSha: 'head' }, report([findingA, { ...findingB, claim: undefined }]));
     await dismiss(findingA).expect(200);
     expect(enqueue).not.toHaveBeenCalled();
@@ -435,7 +434,7 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
 
   it('does not regenerate when the report has no findings at all', async () => {
     await writeGuardResult({ repoKey: root, commitSha: 'head' }, report([]));
-    await request(app).post(url('dismiss')).send({ claimId: 'claim::docs/cli.md::z' }).expect(200);
+    await request(app).post(url('dismiss')).send({ claimId: claimId('docs/cli.md', ['z']) }).expect(200);
     expect(enqueue).not.toHaveBeenCalled();
   });
 

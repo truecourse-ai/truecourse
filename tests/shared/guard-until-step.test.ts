@@ -22,7 +22,7 @@ import {
   type GuardCliStep,
 } from '@truecourse/shared'
 
-const binds = [{ doc: 'docs/spec.md', section: 'a/b', fingerprint: 'sha256:x', sentences: ['a/b'] }]
+const binds = [{ doc: 'docs/spec.md', sentences: ['a/b'] }]
 
 function cliScenario(steps: unknown[]): unknown {
   return { id: 'f.cli.1', title: 't', binds, steps, normalize: [] }

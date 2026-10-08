@@ -25,8 +25,8 @@ import type { FlowTestStep } from '../../packages/core/dist/services/product-wor
 
 const FLOW = { id: 'see-invoices', title: 'See invoices', goal: 'A person sees their invoices.' } as GuardFlow
 const STEPS: FlowTestStep[] = [
-  { order: 1, claimTitle: 'The invoices page lists invoices', claim: 'Opening Invoices shows the list.', doc: 'docs/billing.md', anchor: 'invoices', sectionText: 'The Invoices page lists every invoice.' },
-  { order: 2, claimTitle: "The page offers an 'Export' button", doc: 'docs/billing.md', anchor: 'export' },
+  { order: 1, claimTitle: 'The invoices page lists invoices', claim: 'Opening Invoices shows the list.', doc: 'docs/billing.md', heading: 'Invoices', sectionText: 'The Invoices page lists every invoice.' },
+  { order: 2, claimTitle: "The page offers an 'Export' button", doc: 'docs/billing.md' },
 ]
 const PASSING: FlowTestOutcome = { status: 'passing', summary: 'The invoices page lists invoices.' }
 const FAILING: FlowTestOutcome = {

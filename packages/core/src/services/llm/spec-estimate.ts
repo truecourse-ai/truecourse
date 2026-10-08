@@ -153,9 +153,7 @@ import {
   recordedSchemaFiles,
   legacySeedStepFingerprint,
   authFingerprint,
-  collectWorkDocs,
   claimAreaInputs,
-  docTreesOf,
   placeClaims,
   readSpecClaims,
   readSuppressedClaims,
@@ -169,7 +167,6 @@ import {
   realizationAssignmentFingerprint,
   partitionPlanPreparations,
   readFlowsFile,
-  sectionInputsKey,
   legacyFlowGenerationInputsHash,
   flowGenerationInputComponents,
   flowSettleVerdict,
@@ -919,28 +916,24 @@ interface GuardSessionWorkPlan {
  * `guard/flows` session keys.
  */
 async function planGuardSessionStages(repoRoot: string, plan: GuardWorkPlan): Promise<GuardSessionWorkPlan> {
-  // A generate with no changed section returns before any stage runs, so zero
-  // sessions is exact — not an under-count.
-  if (plan.work.length === 0) {
+  // A generate over no documents runs no stage, so zero sessions is exact.
+  if (plan.docs.length === 0) {
     return { areaCalls: 0, epicCalls: 0, areaChars: 0, maxFlows: 0, exact: true };
   }
-  const areaTags = readCorpusAreaTags(repoRoot);
   // An area's synthesis reads ALL its claims, so the estimate needs every document
-  // of the universe — not only the ones with a changed section.
-  const docs = collectWorkDocs(repoRoot, { ...plan, work: plan.sections });
+  // of the universe.
+  const docs = plan.docs;
   const dismissals = new Map(
     readGuardDecisions(repoRoot).dismissedClaims.map((d) => [d.claimId, d] as const),
   );
-  const docSet = new Set(docs.map((d) => d.doc));
-  const treeOf = docTreesOf(repoRoot, docSet);
-  const placed = placeClaims(
-    (readSpecClaims(repoRoot)?.claims ?? []).filter((c) => docSet.has(c.doc)),
-    (doc) => (docSet.has(doc) ? treeOf(doc) : null),
-  ).placed;
+  const docByPath = new Map(docs.map((d) => [d.doc, d]));
+  const claims = placeClaims(
+    (readSpecClaims(repoRoot)?.claims ?? []).filter((c) => docByPath.has(c.doc)),
+    (doc) => docByPath.get(doc)?.tree ?? null,
+  ).live;
   const { inputs } = claimAreaInputs({
     docs,
-    placed,
-    areaTagsByDoc: areaTags,
+    claims,
     dismissals,
     suppressed: new Set(readSuppressedClaims(repoRoot).map((s) => `${s.doc}\0${s.sentence}`)),
   });
@@ -960,7 +953,7 @@ async function planGuardSessionStages(repoRoot: string, plan: GuardWorkPlan): Pr
   const areasWithClaims = areas.filter((a) => a.claims.length > 0).length;
   const chars = areas.map(
     (a) =>
-      a.claims.reduce((n, c) => n + c.doc.length + c.anchor.length + c.title.length + 40, 0) +
+      a.claims.reduce((n, c) => n + c.id.length + c.doc.length + c.title.length + 40, 0) +
       a.docs.reduce((n, d) => n + d.outline.reduce((m, e) => m + e.anchor.length + e.headingText.length + 6, 0), 0),
   );
   return {
@@ -1056,9 +1049,6 @@ async function planGuardRealizationStages(
   if (settled && catalogs) {
     const serverIndex = recipe ? buildServerRouteIndex(buildRouteManifest(repoRoot), recipe) : undefined;
     const flows: GuardFlow[] = committed.flows;
-    const sectionKeyOf = new Map(
-      plan.sections.map((s) => [`${s.doc} ${s.anchor}`, sectionInputsKey(s)]),
-    );
     const priorByFlow = new Map((readGuardManifest(repoRoot)?.flows ?? []).map((f) => [f.flowId, f]));
     const committedScenarios = new Map(loadScenarios(repoRoot).scenarios.map(s => [s.id, s]));
     // The run's own web authoring catalog, built the same way, so this prices
@@ -1137,7 +1127,6 @@ async function planGuardRealizationStages(
       // web, and the resolved state exactly once.
       interfaceFingerprints.push(...plannedPairs.flatMap(p => [p.assignment, ...p.interfaces, ...(p.webCatalog ? [p.webCatalog] : [])]));
       interfaceFingerprints.push(prerequisiteMaterial);
-      const sectionKeys = flow.bindings.map((b) => sectionKeyOf.get(`${b.doc} ${b.anchor}`) ?? b.fingerprint);
       const prior = priorByFlow.get(flow.id);
       const priorScenarios = (prior?.scenarios ?? []).flatMap((s) => committedScenarios.get(s.id) ?? []);
       const chosenSurface = plannedPairs[0]?.surface ?? 'cli';
@@ -1146,7 +1135,6 @@ async function planGuardRealizationStages(
         prior,
         components: flowGenerationInputComponents({
           flowFingerprint: flow.fingerprint,
-          sectionKeys,
           assignmentFingerprints: plannedPairs.map((p) => p.assignment),
           interfaceFingerprints: plannedPairs.flatMap((p) => p.interfaces),
           ...(plannedPairs[0]?.webCatalog
@@ -1164,7 +1152,6 @@ async function planGuardRealizationStages(
         }),
         legacyHash: legacyFlowGenerationInputsHash({
           flowFingerprint: flow.fingerprint,
-          sectionKeys,
           interfaceFingerprints,
           recipeFingerprint: plan.recipeFingerprint,
         }),
@@ -1193,7 +1180,6 @@ async function planGuardRealizationStages(
           `flow-worker-v${FLOW_WORKER_STAGE_VERSION}`,
           flow,
           pair.surface,
-          sectionKeys,
           pair.fingerprints,
           workerRecipeMaterial({
             recipeSlice: recipeSliceOf(pair.surface),
@@ -1211,7 +1197,6 @@ async function planGuardRealizationStages(
             flowWorkerPromptFingerprint(pair.surface),
             flow,
             pair.surface,
-            sectionKeys,
             pair.legacyFingerprints,
             plan.recipeFingerprint,
           ),
@@ -1241,7 +1226,7 @@ async function planGuardRealizationStages(
   const boundFlows =
     flowStage.maxFlows > 0
       ? flowStage.maxFlows
-      : Math.ceil(plan.sections.length * GUARD_CLI_CLAIMS_PER_SECTION_MAX);
+      : Math.ceil(plan.docs.reduce((n, d) => n + d.sections.length, 0) * GUARD_CLI_CLAIMS_PER_SECTION_MAX);
   const perFlow = Math.max(surfaces.length, 1);
   return {
     matchCalls: boundFlows * perFlow,
@@ -1623,10 +1608,10 @@ export async function estimateGuardTokens(
 ): Promise<LlmEstimate> {
   const model = sessionModel(opts.sessionModel);
   const plan = planGuardWork(repoRoot);
-  const work = plan.work;
+  const sections = plan.docs.flatMap((d) => d.sections);
 
-  const avgSectionChars = plan.sections.length
-    ? Math.round(plan.sections.reduce((n, s) => n + (s.fullText || s.ownText).length, 0) / plan.sections.length)
+  const avgSectionChars = sections.length
+    ? Math.round(sections.reduce((n, s) => n + (s.fullText || s.ownText).length, 0) / sections.length)
     : 0;
 
   // The session planners share the run's own cache names + key builders, so the
@@ -1726,7 +1711,7 @@ export async function estimateGuardTokens(
   const included = opts.only
     ? stages.filter((s) => GENERATE_STEP_STAGES[opts.only!].includes(s.stage))
     : stages;
-  return estimateStageTokens(withLabels(included), changedSubject(plan.sections.length, work.length, 'section'), prices);
+  return estimateStageTokens(withLabels(included), changedSubject(plan.docs.length, plan.changedDocs.size, 'document'), prices);
 }
 
 /** Which priced stages each `only` step actually runs. */

@@ -558,14 +558,10 @@ function blockedIndex(
 
   for (const gap of readGuardResult(repoRoot)?.coverageGaps ?? []) {
     if (gap.kind !== 'blocked-on') continue;
-    // A flow-level gap is named by its flow (its id when the corpus no longer
-    // titles it); a claim-level one belongs to no flow, so it is named by the
-    // section it pivots on — never a blank row.
-    const title = gap.flowId
-      ? flowTitles.get(gap.flowId) ?? gap.flowId
-      : `${gap.doc} § ${gap.anchor}`;
+    // A gap is named by its flow (its id when the corpus no longer titles it).
+    const title = flowTitles.get(gap.flowId) ?? gap.flowId;
     for (const capability of gap.blocker?.dependencies ?? parseBlockedOnCapabilities(gap.reason)) {
-      push(capability, { ...(gap.flowId ? { flowId: gap.flowId } : {}), title, kind: 'not-authored' });
+      push(capability, { flowId: gap.flowId, title, kind: 'not-authored' });
     }
   }
   return out;

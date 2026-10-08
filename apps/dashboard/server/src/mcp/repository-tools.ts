@@ -299,7 +299,7 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
           totals: view.totals,
           claims: view.claims.map((c) => ({
             id: c.id,
-            claim: c.claim,
+            statement: c.statement,
             doc: c.doc,
             status: guardCoveragePlainStatus(c.status),
             ...(c.reason ? { reason: c.reason } : {}),

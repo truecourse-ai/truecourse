@@ -37,16 +37,12 @@ afterEach(async () => {
 const report = (generatedAt: string): GuardGenerateReport => ({
   generatedAt,
   status: 'ok',
-  sectionsTotal: 1,
-  sectionsChanged: 1,
-  skippedUnchanged: 0,
   noChanges: false,
   written: [],
   coverageGaps: [],
   birthFindings: [],
   errors: [],
   extractionFailures: [],
-  orphaned: [],
 });
 
 /** A one-file scenario set saved at `commit`. */

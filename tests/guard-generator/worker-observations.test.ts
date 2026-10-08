@@ -7,7 +7,7 @@ const observation: GuardFailureObservation = {
   operation: 'to see', locator: { role: 'button', name: 'Save' }, matchCount: 0, visibility: 'hidden', reason: 'absent',
 }
 const result = (over: Partial<GuardScenarioResult> = {}): GuardScenarioResult => ({
-  id: 'test', title: 'test', binds: { doc: 'spec.md', section: 'save', fingerprint: 'spec', sentences: ['save'] },
+  id: 'test', title: 'test', binds: { doc: 'spec.md', sentences: ['save'] },
   outcome: 'fail', durationMs: 0,
   failure: { step: 1, expected: 'Save visible', actual: 'no Save button', observation }, ...over,
 })

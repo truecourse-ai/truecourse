@@ -4,7 +4,6 @@ import os from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
-import { buildDocSectionIndex } from '@truecourse/guard-runner'
 import { specClaimsFilePath } from '@truecourse/shared/work-tree'
 import {
   claimId,
@@ -25,7 +24,9 @@ import {
   generateGuards,
   type FlowSet,
   flowAreaKey,
+  type FlowClaimInput,
   type FlowSynthesisArea,
+  type SynthesizedMilestone,
   type FlowsAreaSessionResult,
   type FlowsAreaSessionSeam,
   type FlowsEpicSessionSeam,
@@ -121,13 +122,12 @@ export function writeCorpus(repo: string, docs: { ref: string; areaTags?: string
 
 /** The live binding for a section by its heading text, bound to the section's first sentence as {@link writeClaims}'s default claim is. */
 export function bindsFor(repo: string, docRel: string, headingText: string): GuardScenario['binds'] {
-  const content = fs.readFileSync(path.join(repo, docRel), 'utf-8')
-  const section = buildDocSectionIndex(docRel, content).sections.find((s) => s.headingText === headingText)
+  const tree = parseDocTree(docRel, fs.readFileSync(path.join(repo, docRel), 'utf-8'))
+  const section = tree.sections.find((s) => s.headingText === headingText)
   if (!section) throw new Error(`no section "${headingText}" in ${docRel}`)
-  const tree = parseDocTree(docRel, content)
-  const first = sectionSentences(tree, tree.sections.find((s) => s.anchor === section.anchor)!)[0]
+  const first = sectionSentences(tree, section)[0]
   if (!first) throw new Error(`section "${headingText}" in ${docRel} has no sentence`)
-  return [{ doc: docRel, section: section.anchor, fingerprint: section.fingerprint, sentences: [sentenceKey(first.text, first.repeat)] }]
+  return [{ doc: docRel, sentences: [sentenceKey(first.text, first.repeat)] }]
 }
 
 /** A raw generated CLI scenario as a model would return it (behavioral fields only). */
@@ -414,19 +414,34 @@ function continuing(prior: readonly GuardFlow[], title: string): { id: string } 
 }
 
 /**
- * Flow synthesis fake: ONE atomic flow per claim, titled from the claim's anchor —
- * so a flow's id IS the anchor slug and its scenarios read `<anchor>.<surface>.<n>`.
- * The default for tests that care about a claim, not a composition.
+ * The title the flow fakes give a claim's flow: the claim's statement minus the
+ * ` claim` suffix {@link writeClaims}'s default statement carries, so a default
+ * claim under section `cli/version` yields the flow id `cli-version` and its
+ * scenarios read `cli-version.<surface>.<n>`.
+ */
+export function flowTitleOf(claim: { title: string }): string {
+  return claim.title.replace(/ claim$/, '')
+}
+
+/** A flow milestone over one synthesis claim, as the fakes emit it. */
+function milestoneOf(c: FlowClaimInput, order: number): SynthesizedMilestone {
+  return { order, claimId: c.id, ...(c.verification?.cases ? { caseIds: c.verification.cases.map((v) => v.id) } : {}) }
+}
+
+/**
+ * Flow synthesis fake: ONE atomic flow per claim, titled by {@link flowTitleOf} —
+ * so a default claim's flow id IS its section slug. The default for tests that
+ * care about a claim, not a composition.
  */
 export function flowPerClaimSession(onArea?: (areaId: string) => void): FlowsAreaSessionSeam {
   return flowsAreaSessionOf((area, prior) => {
     onArea?.(area.areaId)
     return {
       flows: area.claims.map((c) => ({
-        ...continuing(prior, c.anchor),
-        title: c.anchor,
+        ...continuing(prior, flowTitleOf(c)),
+        title: flowTitleOf(c),
         goal: `verify ${c.title}`,
-        milestones: [{ order: 1, doc: c.doc, anchor: c.anchor, claimTitle: c.title, sentences: [c.anchor], ...(c.verification?.cases ? { caseIds: c.verification.cases.map(v => v.id) } : {}) }],
+        milestones: [milestoneOf(c, 1)],
       })),
       noFlowClaims: [],
     }
@@ -445,7 +460,7 @@ export function flowOfAllSession(title: string, onArea?: (areaId: string) => voi
           ...continuing(prior, title),
           title,
           goal: `walk ${area.claims.length} milestone(s)`,
-          milestones: area.claims.map((c, i) => ({ order: i + 1, doc: c.doc, anchor: c.anchor, claimTitle: c.title, sentences: [c.anchor], ...(c.verification?.cases ? { caseIds: c.verification.cases.map(v => v.id) } : {}) })),
+          milestones: area.claims.map((c, i) => milestoneOf(c, i + 1)),
         },
       ],
       noFlowClaims: [],

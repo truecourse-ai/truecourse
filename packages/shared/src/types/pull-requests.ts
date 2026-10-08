@@ -123,8 +123,8 @@ export const PullRequestCheckReportSchema = z.object({
       blocksRepositories: z.array(z.string()),
     }),
   ),
-  /** Sections whose text moved, with the flows bound to each. */
-  sectionsMoved: z.array(z.object({ doc: z.string(), anchor: z.string(), flows: z.array(FlowRefSchema) })),
+  /** Documents whose bound sentences moved, with the flows bound to each. */
+  docsMoved: z.array(z.object({ doc: z.string(), flows: z.array(FlowRefSchema) })),
   /** Other repositories whose slice the merge would move. */
   repositoriesAffected: z.array(z.object({ repoFullName: z.string(), slug: z.string() })),
   run: z
@@ -198,7 +198,7 @@ export interface PullRequestCheckSummary {
   /** The report's counts; null before the check settled with one. */
   counts: {
     conflictsCreated: number
-    sectionsMoved: number
+    docsMoved: number
     newFailures: number
     preExisting: number
     fixed: number
@@ -212,7 +212,7 @@ export interface PullRequestListItem extends PullRequestRecord {
 
 /**
  * One open pull request whose latest check settled with a report, with the
- * two parts Context draws: the conflicts it created and the sections it moved.
+ * two parts Context draws: the conflicts it created and the documents it moved.
  */
 export interface WorkspacePullRequestRow extends PullRequestRecord {
   check: {
@@ -221,7 +221,7 @@ export interface WorkspacePullRequestRow extends PullRequestRecord {
     reason: PullRequestCheckReason
     settledAt: string
     conflictsCreated: PullRequestCheckReport['conflictsCreated']
-    sectionsMoved: PullRequestCheckReport['sectionsMoved']
+    docsMoved: PullRequestCheckReport['docsMoved']
   }
 }
 

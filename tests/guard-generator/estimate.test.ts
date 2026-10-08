@@ -32,7 +32,6 @@ import {
 } from '../../packages/core/src/services/guard-generate/index.js'
 import {
   planGuardWork,
-  collectWorkDocs,
   type FlowSynthesisArea,
   type FlowWorkerTask,
 } from '@truecourse/guard-generator'
@@ -316,10 +315,9 @@ describe('estimateGuardTokens — cache awareness', () => {
     const est = await estimateGuardTokens(r)
     expect(est.stages).toEqual([])
     expect(est.totalEstimatedTokens).toBe(0)
-    // `background` states no claim, so no flow binds it — and the completed
-    // generate PINNED that verdict in the manifest's gap record, so an
-    // unchanged section is cached work, not perpetual work.
-    expect(est.subjectLabel).toBe('all 2 sections cached')
+    // The completed generate recorded the document's text in the manifest, so
+    // an unchanged document is cached work, not perpetual work.
+    expect(est.subjectLabel).toBe('all 1 document cached')
 
     const second = await runGenerate({
       repoRoot: r,

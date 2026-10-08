@@ -33,17 +33,16 @@ const LATEST = {
   run: { runId: RUN_ID, ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:r' },
   summary: { total: 1, pass: 0, fail: 1, stale: 0, orphaned: 0, error: 0 },
   scenarios: [
-    { id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x', sentences: ['alpha'] }, outcome: 'fail', durationMs: 3, failure: { step: 1, expected: 'x', actual: 'y' }, evidencePath: `.truecourse/guard/evidence/${RUN_ID}/a1` },
+    { id: 'a1', title: 'alpha claim', binds: { doc: DOC, sentences: ['alpha'] }, outcome: 'fail', durationMs: 3, failure: { step: 1, expected: 'x', actual: 'y' }, evidencePath: `.truecourse/guard/evidence/${RUN_ID}/a1` },
   ],
-  sections: [{ doc: DOC, section: 'alpha', status: 'fail', scenarioIds: ['a1'] }],
 };
 
 const MANIFEST = {
   flows: [
     {
-      flowId: `${DOC}#alpha`,
+      flowId: 'alpha',
       flowFingerprint: 'sha256:x',
-      bindings: [{ doc: DOC, anchor: 'alpha', fingerprint: 'sha256:x', sentences: ['alpha'] }],
+      bindings: [{ doc: DOC, sentences: ['alpha'] }],
       scenarios: [{ id: 'a1', surface: 'cli' }],
       generationInputsHash: null,
       gaps: [],
@@ -54,31 +53,25 @@ const MANIFEST = {
 const RESULT = {
   generatedAt: '2026-07-06T00:00:00.000Z',
   status: 'ok',
-  sectionsTotal: 2,
-  sectionsChanged: 0,
-  skippedUnchanged: 2,
   noChanges: false,
   written: [],
-  coverageGaps: [{ doc: DOC, anchor: 'beta', kind: 'no-claim', reason: 'no assertable claim' }],
+  coverageGaps: [{ flowId: 'alpha', kind: 'no-claim', reason: 'no assertable claim' }],
   birthFindings: [],
   errors: [],
   extractionFailures: [],
-  orphaned: [],
 };
 
 const HISTORY = {
   runs: [{ runId: RUN_ID, ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'abc', summary: LATEST.summary }],
 };
 
-const scenarioYaml = (id: string, section: string) =>
+const scenarioYaml = (id: string, sentence: string) =>
   [
     `id: ${id}`,
-    `title: ${section} claim`,
+    `title: ${sentence} claim`,
     'binds:',
     `  - doc: ${DOC}`,
-    `    section: ${section}`,
-    '    fingerprint: sha256:x',
-    `    sentences: [${section}]`,
+    `    sentences: [${sentence}]`,
     'driver: cli',
     'steps:',
     '  - run: []',
@@ -89,7 +82,7 @@ const scenarioYaml = (id: string, section: string) =>
 
 const SCENARIO_YAML = scenarioYaml('a1', 'alpha');
 
-// A recipe.json and a hand-written scenario (`h1` — no manifest section binds it).
+// A recipe.json and a hand-written scenario (`h1` — no manifest flow lists it).
 const RECIPE = { build: 'pnpm build', entry: ['node', 'dist/index.js'], env: { APP_MODE: 'test' } };
 
 describe('Guard routes', () => {
@@ -173,10 +166,10 @@ describe('Guard routes', () => {
 
   // --- Happy paths ---------------------------------------------------------
 
-  it('status composes coverage / last run / last generate', async () => {
+  it('status composes flows / last run / last generate', async () => {
     seed();
     const res = await request(app).get(url('status')).expect(200);
-    expect(res.body.coverage).toMatchObject({ totalSections: 1, withScenarios: 1 });
+    expect(res.body.flows).toMatchObject({ total: 1 });
     expect(res.body.lastRun).toMatchObject({ ranAt: '2026-07-07T00:00:00.000Z', summary: LATEST.summary });
     expect(res.body.lastGenerate).toMatchObject({ generatedAt: '2026-07-06T00:00:00.000Z', status: 'ok' });
   });
@@ -207,25 +200,25 @@ describe('Guard routes', () => {
     expect(res.body.coverageGaps).toEqual(RESULT.coverageGaps);
   });
 
-  it('report carries each birth finding as stored, with no section heading joined', async () => {
+  it('report carries each birth finding as stored, with no heading joined', async () => {
     seed();
     writeJson('.truecourse/guard/result.json', {
       ...RESULT,
       birthFindings: [
-        { doc: DOC, anchor: 'alpha', title: 'alpha finding', step: 1, expected: 'x', actual: 'y' },
-        { doc: DOC, anchor: 'ghost', title: 'ghost finding', step: 2, expected: 'a', actual: 'b' },
+        { doc: DOC, claimId: 'claim::docs/spec.md::alpha', title: 'alpha finding', step: 1, expected: 'x', actual: 'y' },
+        { doc: DOC, title: 'ghost finding', step: 2, expected: 'a', actual: 'b' },
       ],
     });
     const res = await request(app).get(url('report')).expect(200);
-    expect(res.body.birthFindings[0]).toMatchObject({ anchor: 'alpha', title: 'alpha finding' });
+    expect(res.body.birthFindings[0]).toMatchObject({ claimId: 'claim::docs/spec.md::alpha', title: 'alpha finding' });
     expect(res.body.birthFindings[0].headingText).toBeUndefined();
-    expect(res.body.birthFindings[1].anchor).toBe('ghost');
+    expect(res.body.birthFindings[1]).not.toHaveProperty('claimId');
   });
 
   it('scenarios lists the corpus with hand-written flag + recipe card', async () => {
     seedInventory();
     const res = await request(app).get(url('scenarios')).expect(200);
-    // Sorted by doc, then anchor: alpha (generated a1) before beta (hand-written h1).
+    // Sorted by doc, then id: a1 (generated) before h1 (hand-written).
     expect(res.body.scenarios.map((s: { id: string; handWritten: boolean }) => [s.id, s.handWritten])).toEqual([
       ['a1', false],
       ['h1', true],
@@ -234,7 +227,6 @@ describe('Guard routes', () => {
       id: 'a1',
       title: 'alpha claim',
       doc: DOC,
-      anchor: 'alpha',
       file: path.join('.truecourse', 'scenarios', 'core', 'a1.yaml'),
     });
     // Recipe card: build/entry/env pass through on the surface that runs them.
@@ -309,8 +301,6 @@ describe('Guard routes', () => {
     'title: seeded world',
     'binds:',
     `  - doc: ${DOC}`,
-    '    section: alpha',
-    '    fingerprint: sha256:x',
     '    sentences: [alpha]',
     'setup:',
     '  files:',
@@ -579,8 +569,6 @@ describe('Guard routes', () => {
     'title: three steps',
     'binds:',
     `  - doc: ${DOC}`,
-    '    section: alpha',
-    '    fingerprint: sha256:x',
     '    sentences: [alpha]',
     'driver: cli',
     'steps:',
@@ -713,7 +701,7 @@ describe('Guard routes', () => {
 
   it('status is 200 with all-null on a fresh repo', async () => {
     const res = await request(app).get(url('status')).expect(200);
-    expect(res.body).toEqual({ coverage: null, claims: null, lastRun: null, lastGenerate: null });
+    expect(res.body).toEqual({ flows: null, claims: null, lastRun: null, lastGenerate: null });
   });
 
   it('history is 200 with an empty list on a fresh repo', async () => {

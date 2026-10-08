@@ -81,7 +81,6 @@ function flow(over: Record<string, unknown>) {
     composedOf: [],
     manual: false,
     milestoneCount: 2,
-    sectionCount: 1,
     docs: ['docs/cli.md'],
     surfaces: [],
     findings: 0,
@@ -105,7 +104,6 @@ const CHECKOUT = flow({
   drivers: ['web'],
   status: 'blocked-on',
   bucket: 'blocked',
-  sectionCount: 0,
 });
 
 /** Two connected repositories, one flow each. */
