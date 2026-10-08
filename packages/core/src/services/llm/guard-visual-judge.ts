@@ -30,9 +30,8 @@
  */
 
 import fs from 'node:fs';
-import { LEGACY_VISUAL_JUDGE_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import { createHash } from 'node:crypto';
-import { getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm';
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm';
 import {
   GuardVisualJudgmentSchema,
   type GuardVisualJudgment,
@@ -135,8 +134,8 @@ function fingerprint(text: string): string {
   return createHash('sha256').update(text).digest('hex').slice(0, 16);
 }
 
-/** Bump ONLY by editing the prompt above — the cache key carries it, so a prompt
- *  change re-judges every failure instead of serving stale verdicts. */
+/** The prompt's fingerprint, a diagnostic: the cache key folds
+ *  {@link VISUAL_JUDGE_STAGE_VERSION} instead. */
 export const VISUAL_JUDGE_PROMPT_FINGERPRINT = fingerprint(VISUAL_JUDGE_SYSTEM_PROMPT);
 
 /**
@@ -239,7 +238,7 @@ export type VisualJudgeOutcome =
   | { status: 'failed'; reason: string };
 
 /**
- * The cache key moves with the FAILURE IDENTITY — the prompt, the exact pixels,
+ * The cache key moves with the FAILURE IDENTITY — the stage version, the exact pixels,
  * the claim, the expectation and both halves of the mismatch. A re-run that
  * reproduces the same failure against the same page is a hit and costs nothing;
  * anything about the page or the assertion changing re-judges.
@@ -248,27 +247,10 @@ export function visualJudgeCacheKey(
   input: GuardVisualJudgeInput,
   screenshot: Buffer,
 ): string {
-  return visualJudgeKeyOver(`visual-judge-v${VISUAL_JUDGE_STAGE_VERSION}`, input, screenshot);
-}
-
-/** {@link visualJudgeCacheKey} as it was computed while the prompt was in it —
- *  the key a miss falls back to. Delete with the legacy hash. */
-export function visualJudgeLegacyCacheKey(
-  input: GuardVisualJudgeInput,
-  screenshot: Buffer,
-): string {
-  return visualJudgeKeyOver(LEGACY_VISUAL_JUDGE_PROMPT_FINGERPRINT, input, screenshot);
-}
-
-function visualJudgeKeyOver(
-  stage: string,
-  input: GuardVisualJudgeInput,
-  screenshot: Buffer,
-): string {
   return createHash('sha256')
     .update(
       [
-        stage,
+        `visual-judge-v${VISUAL_JUDGE_STAGE_VERSION}`,
         createHash('sha256').update(screenshot).digest('hex'),
         (input.claim ?? '').replace(/\s+/g, ' ').trim(),
         input.expectation,
@@ -303,12 +285,7 @@ export async function runVisualJudge(
   if (screenshot.length === 0) return { status: 'skipped', reason: 'screenshot-unreadable' };
 
   const cacheKey = visualJudgeCacheKey(input, screenshot);
-  const cached = await getCacheEntryOrLegacy(
-    repoRoot,
-    VISUAL_JUDGE_CACHE_NAME,
-    cacheKey,
-    visualJudgeLegacyCacheKey(input, screenshot),
-  ).catch(() => null);
+  const cached = await getCacheEntry(repoRoot, VISUAL_JUDGE_CACHE_NAME, cacheKey).catch(() => null);
   if (cached) {
     const parsed = GuardVisualJudgmentSchema.safeParse(cached);
     if (parsed.success) return { status: 'judged', judgment: parsed.data };

@@ -32,7 +32,6 @@ import {
   type VocabMap,
 } from '@truecourse/spec-consolidator'
 import { promptFingerprint } from '../agent/session-cache.js'
-import { LEGACY_SETTLE_AREAS_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import {
   docTitle,
   docsWithLabelTool,
@@ -189,7 +188,8 @@ VALIDATE BEFORE YOU FINISH: call \`check_settlement\` with your complete draft. 
 
 The outcome is one object: { "concernMerges": [...], "productMerges": [...], "productVerdicts": [...], "subdivisions": [...] }. Each merge is one entry { "drifted": <label>, "canonical": <label> }, and a subdivision's \`assignments\` are entries { "doc": <ref>, "target": <new concern> }. Empty containers are fine where there is truly nothing to do, but judge the GRAIN before you decide that: docs cluster into a handful of areas, so a vocabulary of dozens of concerns over a few dozen docs — most labels carrying one or two docs — is UNDER-MERGED, not settled. An empty settlement on such a vocabulary is almost always wrong; read a few docs and fold the subtopics into their umbrellas first.`
 
-/** Exported for the step-7 estimate rework (probe the REAL keys). */
+/** The prompt's fingerprint, a diagnostic: the cache key folds
+ *  {@link SETTLE_AREAS_STAGE_VERSION} instead. */
 export const SETTLE_AREAS_PROMPT_FINGERPRINT = promptFingerprint(SETTLE_AREAS_SYSTEM_PROMPT)
 
 /**
@@ -211,18 +211,8 @@ export const SETTLE_AREAS_STAGE_VERSION = 1
  * appendable tail (step 6's orchestrator `instructions` land there).
  */
 export function settleAreasCacheKey(vocab: AreaVocabView, extraParts: readonly string[] = []): string {
-  return settleAreasKeyOver(`settle-areas-v${SETTLE_AREAS_STAGE_VERSION}`, vocab, extraParts)
-}
-
-/** {@link settleAreasCacheKey} as it was computed while the prompt was in it —
- *  the key a miss falls back to. Delete with the legacy hash. */
-export function settleAreasLegacyCacheKey(vocab: AreaVocabView, extraParts: readonly string[] = []): string {
-  return settleAreasKeyOver(LEGACY_SETTLE_AREAS_PROMPT_FINGERPRINT, vocab, extraParts)
-}
-
-function settleAreasKeyOver(stage: string, vocab: AreaVocabView, extraParts: readonly string[]): string {
   return scanCacheKey([
-    stage,
+    `settle-areas-v${SETTLE_AREAS_STAGE_VERSION}`,
     labelMapKeyPart(vocab.products),
     labelMapKeyPart(vocab.concerns),
     [...vocab.overThreshold].sort().join(','),

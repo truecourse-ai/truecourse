@@ -14,9 +14,8 @@
  */
 
 import { createHash } from 'node:crypto'
-import { LEGACY_FIDELITY_SESSION_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import { z } from 'zod'
-import { getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import { defineSessionKind, defineToolSpec, type SessionBudget, type SessionDef, type SessionTool, type ToolContext } from '@truecourse/agent-loop'
 import {
   FIDELITY_SYSTEM_PROMPT,
@@ -67,7 +66,8 @@ const FIDELITY_CHILD_ADDENDUM = `
 
 export const FIDELITY_SESSION_SYSTEM_PROMPT = FIDELITY_SYSTEM_PROMPT + FIDELITY_CHILD_ADDENDUM
 
-/** Exported for the step-20 estimate rework (probe the REAL keys). */
+/** The prompt's fingerprint, a diagnostic: the cache key folds
+ *  {@link FIDELITY_STAGE_VERSION} instead. */
 export const FIDELITY_SESSION_PROMPT_FINGERPRINT = promptFingerprint(FIDELITY_SESSION_SYSTEM_PROMPT)
 
 /**
@@ -132,26 +132,13 @@ export const FidelityVerdictSchema = z
 export type FidelityVerdict = z.infer<typeof FidelityVerdictSchema>
 
 /**
- * The one-shot fidelity cache key's structure, kept: prompt fp :: flow fp ::
- * scenarioBehavior — with the CHILD's prompt
- * fingerprint, so editing the child prompt invalidates exactly this cache.
+ * The fidelity cache key: stage version :: flow fp :: scenarioBehavior, so a
+ * verdict is reused exactly while the flow and what the scenario does are
+ * unchanged.
  */
 export function fidelitySessionCacheKey(input: Pick<WorkerFidelityInput, 'flowFingerprint' | 'scenarioBehavior'>): string {
-  return fidelityKeyOver(`fidelity-v${FIDELITY_STAGE_VERSION}`, input)
-}
-
-/** {@link fidelitySessionCacheKey} as it was computed while the prompt was in
- *  it — the key a miss falls back to. Delete with the legacy hash. */
-export function fidelitySessionLegacyCacheKey(input: Pick<WorkerFidelityInput, 'flowFingerprint' | 'scenarioBehavior'>): string {
-  return fidelityKeyOver(LEGACY_FIDELITY_SESSION_PROMPT_FINGERPRINT, input)
-}
-
-function fidelityKeyOver(
-  stage: string,
-  input: Pick<WorkerFidelityInput, 'flowFingerprint' | 'scenarioBehavior'>,
-): string {
   return createHash('sha256')
-    .update([stage, input.flowFingerprint, input.scenarioBehavior].join('::'))
+    .update([`fidelity-v${FIDELITY_STAGE_VERSION}`, input.flowFingerprint, input.scenarioBehavior].join('::'))
     .digest('hex')
 }
 
@@ -232,12 +219,7 @@ export async function judgeWorkerFidelity(opts: {
   tally: FidelityDispatchTally
 }): Promise<WorkerFidelityVerdict> {
   const key = fidelitySessionCacheKey(opts.input)
-  const cached = await getCacheEntryOrLegacy(
-    opts.repoRoot,
-    FIDELITY_SESSION_CACHE_NAME,
-    key,
-    fidelitySessionLegacyCacheKey(opts.input),
-  ).catch(() => null)
+  const cached = await getCacheEntry(opts.repoRoot, FIDELITY_SESSION_CACHE_NAME, key).catch(() => null)
   if (cached !== null) {
     const parsed = FidelityVerdictSchema.safeParse(cached)
     if (parsed.success) return toWorkerVerdict(parsed.data)

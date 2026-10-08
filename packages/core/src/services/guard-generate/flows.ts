@@ -33,7 +33,6 @@
  */
 
 import { createHash } from 'node:crypto'
-import { LEGACY_FLOWS_SESSION_PROMPT_FINGERPRINT, LEGACY_FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import { defineSessionKind, defineToolSpec, type SessionBudget, type SessionDef, type SessionTool } from '@truecourse/agent-loop'
 import type { GuardFlow, GuardNoFlowClaim } from '@truecourse/shared'
 import {
@@ -128,7 +127,8 @@ One object with BOTH arrays, either possibly empty, plus \`retiredFlows\` when a
     "noFlowClaims": [ { "claimId", "reason" } ],
     "retiredFlows": [ { "id", "reason" } ] }`
 
-/** Exported for the step-20 estimate rework (probe the REAL keys). */
+/** The prompt's fingerprint, a diagnostic: the cache key folds
+ *  {@link FLOWS_STAGE_VERSION} instead. */
 export const FLOWS_SESSION_PROMPT_FINGERPRINT = promptFingerprint(FLOWS_SESSION_SYSTEM_PROMPT)
 
 export const FLOWS_EPIC_SESSION_SYSTEM_PROMPT = `You are given the FLOWS a product's specification areas produced — each a user-goal path, summarized as its title, its goal, and its milestones. Your one job: decide whether any of them chain into an EPIC — a single interface a real user performs end-to-end ACROSS areas ("sign up → create a first project → invite a teammate").
@@ -167,40 +167,25 @@ function sha(text: string): string {
 }
 
 /**
- * The area session's cache key: session prompt fingerprint ::
- * areaId :: sha(claims) :: sha(outlines) — the SAME claim/outline material the
- * one-shot key hashes (claims now fold `needs`), under the session prompt's
- * fingerprint. Grounding (interface digests, dependency catalog) is
- * deliberately OUTSIDE the key: it orients composition the way tool results
- * do, and keying on the whole catalog would re-synthesize every area on
+ * The area session's cache key: stage version :: areaId :: sha(claims) ::
+ * sha(outlines), the claims folding their `needs`. Grounding (interface
+ * digests, dependency catalog) is deliberately OUTSIDE the key: it orients
+ * composition the way tool results do, and keying on the whole catalog would
+ * re-synthesize every area on
  * unrelated route churn. So are the unit's EXISTING FLOWS: they supply the ids
  * and the retirements, which the fold resolves against the live corpus, and
  * folding them would cost every real change a second session (the corpus
  * moves after the first).
  */
 export function flowsSessionCacheKey(area: FlowSynthesisArea): string {
-  return flowsKeyOver(`flows-v${FLOWS_STAGE_VERSION}`, area)
-}
-
-/** {@link flowsSessionCacheKey} as it was computed while the prompt was in it —
- *  the key a miss falls back to. Delete with the legacy hash. */
-export function flowsSessionLegacyCacheKey(area: FlowSynthesisArea): string {
-  return flowsKeyOver(LEGACY_FLOWS_SESSION_PROMPT_FINGERPRINT, area)
-}
-
-function flowsKeyOver(stage: string, area: FlowSynthesisArea): string {
-  return sha(`${stage}::${area.areaId}::${sha(flowAreaClaimsMaterial(area))}::${sha(flowAreaOutlinesMaterial(area))}`)
+  return sha(
+    `flows-v${FLOWS_STAGE_VERSION}::${area.areaId}::${sha(flowAreaClaimsMaterial(area))}::${sha(flowAreaOutlinesMaterial(area))}`,
+  )
 }
 
 /** The epic session's cache key: its stage version over the digests hash. */
 export function flowsEpicSessionCacheKey(digests: readonly FlowDigest[]): string {
   return sha(`flows-epic-v${FLOWS_EPIC_STAGE_VERSION}::${sha(flowEpicDigestsMaterial(digests))}`)
-}
-
-/** {@link flowsEpicSessionCacheKey} as it was computed while the prompt was in
- *  it — the key a miss falls back to. Delete with the legacy hash. */
-export function flowsEpicSessionLegacyCacheKey(digests: readonly FlowDigest[]): string {
-  return sha(`${LEGACY_FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT}::${sha(flowEpicDigestsMaterial(digests))}`)
 }
 
 /** The work items, as the session index and the transcripts record them. A

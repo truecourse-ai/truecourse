@@ -1,12 +1,10 @@
 /**
- * What the one-shot RETIREMENT left behind, pinned on the
- * three things a refactor could quietly break:
+ * What the one-shot RETIREMENT left behind, pinned on the things a refactor
+ * could quietly break:
  *
  *  - the four session seams are REQUIRED options — a caller that forgets one
  *    must not compile, because there is no production fallback any more;
- *  - `legacyFlowGenerationInputsHash` FROZE the retired prompts' fingerprints as
- *    literal salt, so every user's committed flow hashes survived the cut-over.
- *    That value must never move again;
+ *  - a flow settles by its named inputs, compared name by name;
  *  - an abort still reports EVERY stage's losses: the transport tally of the
  *    surviving one-shots AND the session-kind tallies, which the transport audit
  *    never sees.
@@ -18,9 +16,7 @@ import path from 'node:path'
 import { readManifest, loadScenarios } from '@truecourse/guard-runner'
 import {
   generateGuards,
-  legacyFlowGenerationInputsHash,
   flowGenerationInputComponents,
-  flowInterfaceFingerprintBag,
   flowSettleVerdict,
   type FlowGenerationInputParts,
   MATCH_SESSION_KIND,
@@ -71,63 +67,11 @@ function seed(): string {
   return r
 }
 
-// ---------------------------------------------------------------------------
-// The frozen hash.
-// ---------------------------------------------------------------------------
-
-describe('legacyFlowGenerationInputsHash — the frozen retirement salt', () => {
-  /**
-   * The value the PRE-retirement code produced for these inputs, recomputed off
-   * git HEAD before the cut-over. `section-plan.ts` keeps the retired
-   * extract/flows/epic prompt fingerprints as literal constants precisely so
-   * this number could not move: swapping in the session prompts' fingerprints
-   * would have re-authored every committed flow in every user's repo for no
-   * behavioral reason. If this case ever goes red, the salt moved and every
-   * committed corpus is about to be re-worked.
-   *
-   * MOVED ONCE, DELIBERATELY, with the blast-radius cut: the canonical cli/api
-   * scenario schemas gained `world` and the author doctrine gained the
-   * shared-world/self-mint contract, both of which the corpus is MEANT to
-   * re-author under — the old corpora were written with no blast-radius
-   * discipline at all (a committed delete-account scenario deleted the seeded
-   * principal mid-run).
-   */
-  // Bindings go by sentence, so the hash no longer folds bound section text
-  // keys: a row stamped under the section-keyed hash misses once and re-authors.
-  const GOLDEN = 'sha256:b9e29e9bfe1a14851fe724f638bf2b4d7ef42e3567036fc087b3096eea31723a'
-
-  it('retains the retirement salt with the current matching doctrine', () => {
-    expect(
-      legacyFlowGenerationInputsHash({
-        flowFingerprint: 'f',
-        interfaceFingerprints: ['i'],
-        recipeFingerprint: 'r',
-      }),
-    ).toBe(GOLDEN)
-  })
-
-  it('still moves with every input it is supposed to track', () => {
-    const base = { flowFingerprint: 'f', interfaceFingerprints: ['i'], recipeFingerprint: 'r' }
-    for (const moved of [
-      { ...base, flowFingerprint: 'f2' },
-      { ...base, interfaceFingerprints: ['i2'] },
-      { ...base, recipeFingerprint: 'r2' },
-    ]) {
-      expect(legacyFlowGenerationInputsHash(moved)).not.toBe(legacyFlowGenerationInputsHash(base))
-    }
-    // Order-insensitive on the sorted list.
-    expect(
-      legacyFlowGenerationInputsHash({ ...base, interfaceFingerprints: ['y', 'x'] }),
-    ).toBe(legacyFlowGenerationInputsHash({ ...base, interfaceFingerprints: ['x', 'y'] }))
-  })
-})
-
 describe('flowGenerationInputComponents — the hash, by name', () => {
   const parts: FlowGenerationInputParts = {
     flowFingerprint: 'f',
     assignmentFingerprints: ['a'],
     interfaceFingerprints: ['i1', 'i2'],
-    webCatalogFingerprint: 'w',
     webCatalogReads: ['web/home:abc'],
     hasScenario: false,
     recipeSlice: 'rs',
@@ -143,9 +87,7 @@ describe('flowGenerationInputComponents — the hash, by name', () => {
     expect(moved({ flowFingerprint: 'f2' })).toEqual(['flow'])
     expect(moved({ assignmentFingerprints: ['a2'] })).toEqual(['assignment'])
     expect(moved({ interfaceFingerprints: ['i1'] })).toEqual(['interfaces'])
-    // The whole catalog rides the LEGACY bag alone; what the flow's session
-    // read is the component.
-    expect(moved({ webCatalogFingerprint: 'w2' })).toEqual([])
+    // The web catalog enters by what the flow's session read.
     expect(moved({ webCatalogReads: ['web/home:moved'] })).toEqual(['webCatalog.reads'])
     expect(moved({ recipeSlice: 'rs2' })).toEqual(['recipe.slice'])
     expect(moved({ roster: 'ro2' })).toEqual(['roster'])
@@ -169,15 +111,9 @@ describe('flowGenerationInputComponents — the hash, by name', () => {
     const stored = flowGenerationInputComponents(parts)
     expect(movedSchemeInputs(stored, base)).toEqual([])
   })
-
-  it('folds into the hash every member the bag always carried, the retired prerequisite state frozen', () => {
-    expect([...flowInterfaceFingerprintBag(parts)].sort()).toEqual(['[]', 'a', 'i1', 'i2', 'w'])
-    const { webCatalogFingerprint: _none, ...noWeb } = parts
-    expect([...flowInterfaceFingerprintBag(noWeb)].sort()).toEqual(['[]', 'a', 'i1', 'i2'])
-  })
 })
 
-describe('flowSettleVerdict — the three compare rules and the one legacy check', () => {
+describe('flowSettleVerdict — the compare rules', () => {
   const components = flowGenerationInputComponents({
     flowFingerprint: 'f',
     assignmentFingerprints: ['a'],
@@ -187,33 +123,31 @@ describe('flowSettleVerdict — the three compare rules and the one legacy check
     roster: 'ro',
     preparation: 'pr',
   })
-  const legacyHash = 'sha256:' + 'a'.repeat(64)
+  const settledHash = 'sha256:' + 'a'.repeat(64)
 
   it('settles a row whose stored names all still match, ignoring the ones it retired', () => {
     // A row from the old scheme: it carries `sections`, `prompts`, `recipe.*`
     // and the state-folding `prerequisites`, none of which exist any more, and
     // lacks the ones the scheme gained.
     const stored = { flow: components.flow, sections: 'ffffffffffffffff', prompts: 'deadbeefdeadbeef', 'recipe.manifests': 'cafecafecafecafe', prerequisites: 'f00df00df00df00d' }
-    expect(flowSettleVerdict({ prior: { generationInputsHash: legacyHash, generationInputs: stored }, components, legacyHash: 'sha256:other' }))
+    expect(flowSettleVerdict({ prior: { generationInputsHash: settledHash, generationInputs: stored }, components }))
       .toEqual({ settled: true, moved: [] })
   })
 
   it('re-opens on a name both records carry that differs, and names it', () => {
     const stored = { ...components, roster: 'ffffffffffffffff' }
-    expect(flowSettleVerdict({ prior: { generationInputsHash: legacyHash, generationInputs: stored }, components, legacyHash }))
+    expect(flowSettleVerdict({ prior: { generationInputsHash: settledHash, generationInputs: stored }, components }))
       .toEqual({ settled: false, moved: ['roster'] })
   })
 
-  it('checks a row with no names against the legacy hash, once, and names nothing', () => {
-    expect(flowSettleVerdict({ prior: { generationInputsHash: legacyHash }, components, legacyHash }))
-      .toEqual({ settled: true, moved: null })
-    expect(flowSettleVerdict({ prior: { generationInputsHash: 'sha256:moved' }, components, legacyHash }))
+  it('does not settle a row with a hash and no names, and names nothing', () => {
+    expect(flowSettleVerdict({ prior: { generationInputsHash: settledHash }, components }))
       .toEqual({ settled: false, moved: null })
   })
 
   it('never settles a flow nothing has authored', () => {
-    expect(flowSettleVerdict({ prior: undefined, components, legacyHash })).toEqual({ settled: false, moved: null })
-    expect(flowSettleVerdict({ prior: { generationInputsHash: null }, components, legacyHash }))
+    expect(flowSettleVerdict({ prior: undefined, components })).toEqual({ settled: false, moved: null })
+    expect(flowSettleVerdict({ prior: { generationInputsHash: null }, components }))
       .toEqual({ settled: false, moved: null })
   })
 })

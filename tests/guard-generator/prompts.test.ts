@@ -12,7 +12,6 @@ import {
   FIDELITY_PROMPT_FINGERPRINT,
   MATCH_SYSTEM_PROMPT,
   MATCH_PROMPT_FINGERPRINT,
-  legacyFlowGenerationInputsHash,
   flowGenerationInputComponents,
   buildAuthorUserPrompt,
   buildFidelityUserPrompt,
@@ -721,22 +720,13 @@ describe('guard-generator prompts', () => {
   it('rolling an authoring prompt re-plans no committed flow', () => {
     // A committed flow has been run and proven; rewording the prompt that wrote
     // it does not make it wrong. So no prompt fingerprint appears among a flow's
-    // settle components, and the legacy hash folds the FROZEN literals, which no
-    // prompt edit can move. A capability that must re-author the flows waiting
-    // on it bumps its stage version by hand instead.
-    const inputs = {
-      flowFingerprint: 'sha256:flow',
-      interfaceFingerprints: ['sha256:interface'],
-      recipeFingerprint: 'sha256:recipe',
-    }
-    expect(legacyFlowGenerationInputsHash(inputs)).toBe(legacyFlowGenerationInputsHash(inputs))
+    // settle components. A capability that must re-author the flows waiting on
+    // it bumps its stage version by hand instead.
     const components = flowGenerationInputComponents({
       flowFingerprint: 'sha256:flow',
       assignmentFingerprints: [],
       interfaceFingerprints: ['sha256:interface'],
       hasScenario: true,
-      prerequisiteMaterial: '',
-      prerequisiteShape: '',
       recipeSlice: 'slice',
       roster: 'roster',
       preparation: 'preparation',

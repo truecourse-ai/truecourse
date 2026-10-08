@@ -504,7 +504,6 @@ export {
   recipeContractFingerprint,
   authoringRecipeContract,
   computePreparationFingerprint,
-  legacyPreparationFingerprint,
   preparationFingerprintComponents,
   flowRecipeSliceFingerprint,
   seedRosterFingerprint,

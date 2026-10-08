@@ -1928,8 +1928,8 @@ describe('generateGuards — the per-flow pipeline', () => {
 
     // Re-run against a STALE manifest: both flows re-author and must land on the
     // SAME ids (each frees its own before assigning), never colliding. Stale
-    // means the settle record is gone, names and all — a hash alone is only ever
-    // checked the legacy way.
+    // means the settle record is gone, names and all — a hash alone settles
+    // nothing.
     writeManifest(r, {
       flows: readManifest(r)!.flows.map(({ generationInputs: _named, ...f }) => ({ ...f, generationInputsHash: 'sha256:stale' })),
     })

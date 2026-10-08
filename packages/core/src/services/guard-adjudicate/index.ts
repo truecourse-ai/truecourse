@@ -21,7 +21,6 @@ export {
   ADJUDICATE_SYSTEM_PROMPT,
   adjudicationBriefing,
   adjudicationCacheKey,
-  adjudicationLegacyCacheKey,
   adjudicationSessionDef,
   adjudicationWorkItem,
   scenarioBehaviorHash,

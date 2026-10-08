@@ -338,7 +338,6 @@ describe('runReconcileInterfacesSession', () => {
       diagnostics: disputes,
       entry: ENTRY,
       recipeContract: 'fp-1',
-      legacyRecipeFingerprint: 'legacy-fp-1',
       driver: async () => {
         acquired++;
         return stub.driver;
@@ -366,7 +365,6 @@ describe('runReconcileInterfacesSession', () => {
       diagnostics: disputes,
       entry: ENTRY,
       recipeContract: 'fp-1',
-      legacyRecipeFingerprint: 'legacy-fp-1',
       driver: async () => {
         throw new Error('the driver must not be acquired on a cache hit');
       },

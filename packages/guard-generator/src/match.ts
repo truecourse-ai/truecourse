@@ -21,7 +21,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { getCacheEntry, getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import {
   ANONYMOUS_PRINCIPAL,
   isCreditsExhausted,
@@ -38,7 +38,6 @@ import {
   type InterfaceStep,
 } from '@truecourse/shared'
 import { RealizationMatchSchema, type RealizationStep, type RealizationGap, type RealizationMatch } from './schemas.js'
-import { LEGACY_MATCH_PROMPT_FINGERPRINT } from './legacy-prompt-fingerprints.js'
 import {
   type InterfaceDigest,
   type MatchIssues,
@@ -263,34 +262,8 @@ export function matchCacheKey(
   flow: Pick<GuardFlow, 'fingerprint'>,
   catalog: Pick<SurfaceCatalog, 'surface' | 'identity'>,
 ): string {
-  return matchKeyOver(`match-v${MATCH_STAGE_VERSION}`, flow, catalog.surface, catalog.identity)
-}
-
-/**
- * {@link matchCacheKey} under the two formulas that came before it, newest
- * first: the whole catalog fingerprint (authored prose included) under this
- * stage version, and the same fingerprint under the prompt fingerprint the key
- * used to fold. A miss reads them in turn, so no workspace pays to re-match
- * what it already has. Delete with the legacy hash.
- */
-export function matchLegacyCacheKeys(
-  flow: Pick<GuardFlow, 'fingerprint'>,
-  catalog: Pick<SurfaceCatalog, 'surface' | 'fingerprint'>,
-): string[] {
-  return [
-    matchKeyOver(`match-v${MATCH_STAGE_VERSION}`, flow, catalog.surface, catalog.fingerprint),
-    matchKeyOver(LEGACY_MATCH_PROMPT_FINGERPRINT, flow, catalog.surface, catalog.fingerprint),
-  ]
-}
-
-function matchKeyOver(
-  stage: string,
-  flow: Pick<GuardFlow, 'fingerprint'>,
-  surface: GuardDriverId,
-  catalogFingerprint: string,
-): string {
   return createHash('sha256')
-    .update([stage, surface, catalogFingerprint, flow.fingerprint].join('::'))
+    .update([`match-v${MATCH_STAGE_VERSION}`, catalog.surface, catalog.identity, flow.fingerprint].join('::'))
     .digest('hex')
 }
 
@@ -316,7 +289,7 @@ export async function readCachedMatch(
   cacheKey: string | undefined = undefined,
 ): Promise<{ plan: RealizationPlan | null } | null> {
   cacheKey ??= matchCacheKey(flow, catalog)
-  const cached = await getCacheEntryOrLegacy(repoRoot, MATCH_CACHE_NAME, cacheKey, ...matchLegacyCacheKeys(flow, catalog))
+  const cached = await getCacheEntry(repoRoot, MATCH_CACHE_NAME, cacheKey)
   if (!cached) return null
   const parsed = RealizationMatchSchema.safeParse(cached)
   if (!parsed.success || parsed.data.unrealizable) return null
@@ -563,7 +536,7 @@ export async function matchFlow(
   const markContext = (): Promise<void> =>
     setCacheEntry(repoRoot, MATCH_CONTEXT_CACHE_NAME, cacheKey!, { catalog: catalog.fingerprint })
 
-  const cached = await getCacheEntryOrLegacy(repoRoot, MATCH_CACHE_NAME, cacheKey, ...matchLegacyCacheKeys(flow, catalog))
+  const cached = await getCacheEntry(repoRoot, MATCH_CACHE_NAME, cacheKey)
   if (cached) {
     const parsed = RealizationMatchSchema.safeParse(cached)
     if (parsed.success && !parsed.data.unrealizable) {

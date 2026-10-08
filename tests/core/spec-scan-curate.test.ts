@@ -23,22 +23,16 @@ import {
 } from '../helpers/memory-kv-cache'
 import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs'
 import {
-  CURATE_DOC_CACHE_NAME,
   CURATE_DOC_SESSION_KIND,
   CURATE_DOC_SYSTEM_PROMPT,
-  DocVerdictSchema,
   curateDocBriefing,
   curateDocCacheKey,
-  curateDocLegacyCacheKeys,
 } from '../../packages/core/src/services/spec-scan/curate-doc'
-import { readCachedSessionOutput } from '../../packages/core/src/services/agent/session-cache'
-import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import { curateInProcess } from '../../packages/core/src/commands/spec-in-process'
 import {
   corpusFilePath,
   readCorpus,
   type DecisionsFile,
-  resolveWorkspaceIdentity,
   type RepoIdentity,
 } from '../../packages/spec-consolidator/src/index.js'
 import {
@@ -298,34 +292,6 @@ describe('the curate-doc prompt and briefing', () => {
     expect(curateDocCacheKey({ identity: IDENTITY, doc: after })).toBe(
       curateDocCacheKey({ identity: IDENTITY, doc: before }),
     )
-  })
-
-  // The key once folded the prompt's fingerprint where the stage version now
-  // sits. A verdict stored under that key is read on a miss and re-saved, so
-  // the change costs no document a session.
-  describe('the prompt-era key', () => {
-    const doc = { path: 'docs/api.md', contentHash: 'h1' }
-
-    it('serves a verdict stored under it with no session, once', async () => {
-      const identity = resolveWorkspaceIdentity('Acme Widgets, a warehouse inventory service.')
-      const [promptEra] = curateDocLegacyCacheKeys({ identity, doc })
-      const key = curateDocCacheKey({ identity, doc })
-      expect(promptEra).not.toBe(key)
-      const verdict = { keep: true, reason: 'spec', areas: [{ product: 'core', concern: 'api' }] }
-      await setCacheEntry(repo, CURATE_DOC_CACHE_NAME, promptEra, verdict)
-
-      expect(
-        await readCachedSessionOutput({
-          repoRoot: repo,
-          cacheName: CURATE_DOC_CACHE_NAME,
-          key,
-          legacyKeys: curateDocLegacyCacheKeys({ identity, doc }),
-          schema: DocVerdictSchema,
-        }),
-      ).toMatchObject({ keep: true })
-      // …and it is under the new key afterwards, so the fallback is paid once.
-      expect(await getCacheEntry(repo, CURATE_DOC_CACHE_NAME, key)).toMatchObject({ keep: true })
-    })
   })
 })
 

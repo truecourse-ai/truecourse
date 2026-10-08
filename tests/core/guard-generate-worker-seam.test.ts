@@ -52,7 +52,6 @@ import {
   FLOW_WORKER_BUDGET,
   FLOW_WORKER_CACHE_NAME,
   FLOW_WORKER_STAGE_VERSION,
-  flowWorkerLegacyCacheKeys,
   FLOW_WORKER_CLI_SYSTEM_PROMPT,
   FLOW_WORKER_WEB_SYSTEM_PROMPT,
   FLOW_WORKER_SESSION_KIND,
@@ -62,7 +61,6 @@ import {
   fidelitySessionCacheKey,
   fidelitySessionDef,
   flowWorkerCacheKey,
-  flowWorkerPromptFingerprint,
   flowWorkerSessionDef,
   judgeWorkerFidelity,
 } from '../../packages/core/src/services/guard-generate/index'
@@ -130,7 +128,6 @@ function fakeTask(over: Partial<FlowWorkerTask> = {}, flowId = 'create-a-task'):
     cacheMaterial: {
       flowFingerprint: `fp-${flowId}`,
       interfaceFingerprints: ['iface-1'],
-      recipeFingerprint: 'recipe-1',
       mode: 'scratch',
       priorShas: [],
     },
@@ -238,13 +235,6 @@ describe('flowWorkerSessionDef', () => {
     }
   })
 
-  it('keys the legacy cache read on the frozen prompt fingerprints, never the live prompt', () => {
-    // A prompt edit must not move the old key: every entry stored before the
-    // prompt left the key is read through it once and re-saved.
-    expect(['cli', 'api', 'web'].map(surface => flowWorkerPromptFingerprint(surface as 'cli' | 'api' | 'web')))
-      .toEqual(['15277774880ee40e', '1ef548ff71971375', 'e3062e1cd80be77a'])
-  })
-
   it('routes both tools to the task’s engine closures', async () => {
     const { task, calls } = fakeTask()
     const d = flowWorkerSessionDef({ task, judgeWith: () => async () => ({ kind: 'faithful' }) })
@@ -279,18 +269,6 @@ describe('flowWorkerCacheKey', () => {
         workerRecipeMaterial(base.cacheMaterial),
       ),
     )
-    // The old key — the surface's prompt over the whole recipe fingerprint —
-    // stays computable, so a committed entry is served once on the way over.
-    expect(flowWorkerLegacyCacheKeys(base)).toEqual([expect.not.stringMatching(flowWorkerCacheKey(base))])
-    // The ONE old key folds the bag as it was then, never a formula nothing
-    // shipped: a web task whose bag moved still has exactly one.
-    const web = { ...base, surface: 'web' as const,
-      cacheMaterial: { ...base.cacheMaterial, interfaceFingerprints: ['iface-1', 'handed'], legacyInterfaceFingerprints: ['iface-1', 'whole-catalog'] } }
-    const [webLegacy, ...rest] = flowWorkerLegacyCacheKeys(web)
-    expect(rest).toEqual([])
-    expect(webLegacy).toBe(workerCacheKey(flowWorkerPromptFingerprint('web'), { fingerprint: base.cacheMaterial.flowFingerprint }, 'web',
-      ['iface-1', 'whole-catalog'], base.cacheMaterial.recipeFingerprint))
-    expect(webLegacy).not.toBe(flowWorkerCacheKey(web))
   })
 
   it('moves with every behavior-affecting input and with nothing else', () => {
@@ -304,9 +282,6 @@ describe('flowWorkerCacheKey', () => {
     expect(move({ roster: 'other' })).not.toBe(key)
     expect(move({ preparations: 'other' })).not.toBe(key)
     expect(move({}, 'api')).not.toBe(key)
-    // The whole recipe fingerprint rides along for the OLD key alone: a
-    // dependency bump moves it and re-authors nothing.
-    expect(move({ recipeFingerprint: 'other' })).toBe(key)
     // The flow ID and work item are bookkeeping, not key material.
     expect(flowWorkerCacheKey({ ...base, flowId: 'renamed', workItem: 'flow:renamed:cli' })).toBe(key)
   })
@@ -397,36 +372,6 @@ describe('the flow-worker pool’s cache', () => {
     expect(constructions).toBe(0)
   })
 
-  it('an entry under the retired bag’s key is served with no session and re-saved under the new one', async () => {
-    const r = docRepo()
-    // The bag used to carry the prerequisites' resolved STATE, so every task
-    // keyed under it has an old key. Without the fallback read, the first run
-    // after the change re-authors the corpus.
-    const { task, calls } = fakeTask({
-      cacheMaterial: {
-        ...fakeTask().task.cacheMaterial,
-        interfaceFingerprints: ['prereq-shape', 'iface-1'],
-        legacyInterfaceFingerprints: ['[["currencybeacon","provided"]]', 'iface-1'],
-      },
-    })
-    const [legacyKey] = flowWorkerLegacyCacheKeys(task)
-    expect(legacyKey).not.toBe(flowWorkerCacheKey(task))
-    await setCacheEntry(r, FLOW_WORKER_CACHE_NAME, legacyKey, {
-      outcome: { kind: 'settled', scenarioYamlSha: sha256(YAML), expectedReds: [] },
-      scenarioYaml: YAML,
-      reviews: [reviewFor(YAML)],
-    })
-
-    const { summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
-
-    expect(summary).toMatchObject({ ran: 0, fromCache: 1, failed: 0 })
-    expect(calls.prepare).toBe(0)
-    expect(constructions).toBe(0)
-    expect(await getCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task))).toMatchObject({
-      scenarioYaml: YAML,
-    })
-  })
-
   it('carries a web task’s read-set through the cache in both directions', async () => {
     const r = docRepo()
     // A HIT stands in for the session, so the flow records what that session read.
@@ -478,8 +423,7 @@ describe('the flow-worker pool’s cache', () => {
       cacheMaterial: {
         flowFingerprint: 'fp-create-a-task',
         interfaceFingerprints: ['iface-1'],
-        recipeFingerprint: 'recipe-1',
-        mode: 'edit',
+          mode: 'edit',
         priorShas: [sha256('prior yaml')],
       },
       ...over,
