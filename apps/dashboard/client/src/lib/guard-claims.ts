@@ -30,7 +30,7 @@ export interface GuardUntestableEntry {
 
 /** Every untestable statement with its stable id, index over the WHOLE list, so a
  *  search that hides rows never renumbers the ones that stay. */
-export function guardUntestableEntries(view: GuardClaimsView | null): GuardUntestableEntry[] {
+export function guardUntestableEntries(view: Pick<GuardClaimsView, 'untestable'> | null): GuardUntestableEntry[] {
   return (view?.untestable ?? []).map((row, i) => ({ id: untestableRowId(row, i), row }));
 }
 
@@ -51,9 +51,11 @@ export function findGuardClaimSelection(
 }
 
 /** Worst first by the one precedence, then by document, then by statement. */
-export function sortGuardClaims(claims: readonly GuardClaimRow[]): GuardClaimRow[] {
-  const rank = (c: GuardClaimRow): number => {
-    const i = GUARD_COVERAGE_STATUS_PRECEDENCE.indexOf(c.status);
+export function sortGuardClaims<T extends { status: string; doc: string; statement: string }>(claims: readonly T[]): T[] {
+  // A status outside the coverage precedence (a claim no repository holds) sorts last.
+  const precedence: readonly string[] = GUARD_COVERAGE_STATUS_PRECEDENCE;
+  const rank = (c: T): number => {
+    const i = precedence.indexOf(c.status);
     return i === -1 ? GUARD_COVERAGE_STATUS_PRECEDENCE.length : i;
   };
   return [...claims].sort(

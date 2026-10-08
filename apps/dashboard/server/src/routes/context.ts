@@ -16,6 +16,8 @@
  *                                             outline; with section, that section alone
  *   GET    /api/context/documents             the rows of the Documents view, status folded
  *                                             and inclusion said, corpus or not
+ *   GET    /api/context/claims                the rows of the Claims view, folded across
+ *                                             every repository that reads each claim
  *   POST   /api/context/scan                  the workspace Document scan; 202 { jobId }
  *   GET    /api/context/staleness             has the context moved since the corpus?
  *   GET    /api/context/corpus                the workspace corpus + its decisions
@@ -69,6 +71,7 @@ import {
   addSource,
   editSource,
   listSources,
+  listWorkspaceClaims,
   listWorkspaceDocuments,
   pauseSource,
   previewSource,
@@ -265,6 +268,15 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
           inclusion: req.query.inclusion === undefined ? [] : queryValues(req.query.inclusion),
         }),
       );
+    } catch (e) {
+      respond(res, next, e);
+    }
+  });
+
+  // THE Claims view: every claim a repository holds, folded across them.
+  router.get('/claims', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.json(await listWorkspaceClaims(callerOf(req)));
     } catch (e) {
       respond(res, next, e);
     }

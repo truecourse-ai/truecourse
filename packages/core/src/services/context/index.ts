@@ -57,6 +57,7 @@ export {
   type ContextRowDocument,
   type ContextRowSource,
 } from './documents.js';
+export { composeContextClaims, NOT_LINKED_CLAIM_REASON, type ContextClaimReading } from './claims.js';
 export {
   repositoryConfig,
   repositorySourceId,

@@ -22,6 +22,7 @@ import type { GuardDependenciesView, GuardDependencyPatch } from '@/types/guard-
 import type {
   ContextBindingsResponse,
   ContextConnectionsResponse,
+  ContextClaimsViewResponse,
   ContextDocumentsViewResponse,
   ContextSource,
   ContextSourceCheck,
@@ -900,6 +901,11 @@ export function listContextDocuments(query: {
   return fetchApi<ContextDocumentsViewResponse>(
     `/api/context/documents${search ? `?${search}` : ''}`,
   );
+}
+
+/** The rows of the Claims view, folded across repositories on the server. */
+export function listContextClaims(): Promise<ContextClaimsViewResponse> {
+  return fetchApi<ContextClaimsViewResponse>('/api/context/claims');
 }
 
 /** One document's body, by the ref the corpus names it with. */

@@ -17,11 +17,13 @@
  *
  * Context LANDS on its sources (`/context`), each source is a page of its own
  * (`/context/sources/:id`), and their documents are a place of their own
- * (`/context/documents`, narrowed by the query the filter row writes).
+ * (`/context/documents`, narrowed by the query the filter row writes), as are
+ * the claims those documents make (`/context/claims`).
  */
 
 import { Route, Routes, useParams } from 'react-router-dom';
 import AgentPage from './pages/AgentPage';
+import ClaimsPage from './pages/ClaimsPage';
 import CodePage from './pages/CodePage';
 import ConflictsPage from './pages/ConflictsPage';
 import ContextConflictPage from './pages/ContextConflictPage';
@@ -81,6 +83,7 @@ export function DashboardRoutes() {
       <Route path="context" element={<SourcesPage />} />
       <Route path="context/sources/:sourceId" element={<ContextSourceRoute />} />
       <Route path="context/documents" element={<DocumentsPage />} />
+      <Route path="context/claims" element={<ClaimsPage />} />
       <Route path="context/conflicts" element={<ConflictsPage />} />
       <Route path="context/conflicts/:conflictId" element={<ContextConflictRoute />} />
       <Route path="context/doc/:docRef" element={<ContextDocRoute />} />

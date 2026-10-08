@@ -8,7 +8,7 @@
  * Generate / Run buttons are).
  *
  * A doc tab renders the document as its text and nothing else: what the
- * document promises and how each promise stands is read on the Claims tab,
+ * document promises and how each promise stands is read on Context's Claims,
  * claim by claim. A conflict tab renders the full-pane SpecConflictDetail (the
  * same five-option resolver Context's conflicts use). Doc/conflict selection
  * mirrors `?doc`/`?conflict`.
