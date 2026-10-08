@@ -1,5 +1,3 @@
-import { GuardBlockerSchema, GuardObligationRefSchema } from './verification.js'
-import { GuardCaseEvidenceSchema } from './proof.js'
 /**
  * `scenarios/manifest.json` — the binding record for the committed scenarios, the
  * guard analogue of `contracts/manifest.json`. It is keyed by FLOW (v2): each
@@ -17,7 +15,7 @@ import { z } from 'zod'
 import { GuardDriverIdSchema, type GuardDriverId } from './drivers.js'
 import { GuardFlowBindingSchema, GuardFlowMilestoneSchema } from './flows.js'
 import { GuardMilestoneProofSchema } from './proof.js'
-import { GuardCoverageGapKindSchema, GuardScenarioDiagnosisSchema } from './report.js'
+import { GuardBlockerSchema, GuardCoverageGapKindSchema, GuardScenarioDiagnosisSchema } from './report.js'
 import { GuardTestStatusSchema } from './result.js'
 
 /**
@@ -66,12 +64,10 @@ export const GuardManifestScenarioSchema = z.preprocess(
       /** Assertion drivers per milestone, valid for this entry's flowFingerprint.
        * Absent on legacy scenarios and retained tests for older requirements. */
       milestoneCoverage: z.array(GuardMilestoneProofSchema).optional(),
-      /** False when the assertion review was unavailable. */
+      /** False when the fidelity review was unavailable. */
       reviewed: z.boolean().optional(),
-      caseEvidence: z.array(GuardCaseEvidenceSchema).optional(),
-      /** The exact parsed scenario independently reviewed for these cases. */
+      /** The exact parsed scenario the fidelity judge reviewed; a hand-edited file no longer matches it. */
       reviewedScenarioFingerprint: z.string().min(1).optional(),
-      reviewPolicyVersion: z.number().int().positive().optional(),
       /**
        * The test's status as of the generate that wrote it: `failing` when it failed
        * its birth execution (committed anyway — the code and the doc disagree),
@@ -104,9 +100,7 @@ export const GuardManifestGapSchema = z
     /** The surface the gap is about. */
     surface: GuardDriverIdSchema,
     kind: GuardCoverageGapKindSchema,
-    /** Case-level gap scope. Absent only for historical whole-milestone gaps. */
-    obligations: z.array(GuardObligationRefSchema).min(1).optional(),
-    /** Exact obligations this gap leaves uncovered; absent in older manifests. */
+    /** The milestones this gap leaves uncovered; absent on a whole-flow gap. */
     milestones: z.array(z.number().int().positive()).min(1).optional(),
     reason: z.string(),
     blocker: GuardBlockerSchema.optional(),

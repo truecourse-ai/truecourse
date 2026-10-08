@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setCacheEntry } from '@truecourse/llm'
-import { claimId, flowFingerprint, GUARD_REVIEW_POLICY_VERSION, interfaceFingerprint, movedSchemeInputs, sentenceKey, type GuardFlow, type Interface } from '@truecourse/shared'
+import { claimId, flowFingerprint, interfaceFingerprint, movedSchemeInputs, sentenceKey, type GuardFlow, type Interface } from '@truecourse/shared'
 import { buildRouteManifest, loadRecipe, readMergedInterfaceCatalog, recipePath } from '@truecourse/guard-runner'
 import {
   buildServerRouteIndex,
@@ -54,7 +54,7 @@ function seededRepo() {
 
 /** The flow the web fixture's own action realizes — the shortlist's terms. */
 function webFlow(): GuardFlow {
-  const milestones = [{ order: 1, doc: 'synthetic.md', claimId: 'claim::creation', claimTitle: 'Creating an organisation displays its dialog', sentences: ['creation'], proofDrivers: ['web' as const] }]
+  const milestones = [{ order: 1, doc: 'synthetic.md', claimId: 'claim::creation', claimTitle: 'Creating an organisation displays its dialog', sentences: ['creation'] }]
   return { id: 'organisation', title: 'Create organisation', goal: 'Show the creation dialog', fingerprint: flowFingerprint(milestones),
     milestones, bindings: [{ doc: 'synthetic.md', sentences: ['creation'] }], composedOf: [], synthesisInputsHash: 'same' }
 }
@@ -64,8 +64,6 @@ const BASE_PARTS: FlowGenerationInputParts = {
   flowFingerprint: 'sha256:flow',
   assignmentFingerprints: ['assignment'],
   interfaceFingerprints: ['sha256:organisation'],
-  prerequisiteMaterial: 'none',
-  prerequisiteShape: 'none',
   recipeSlice: 'slice',
   roster: 'roster',
   preparation: 'preparation',
@@ -93,13 +91,12 @@ describe('author-only changes retain upstream cache compatibility', () => {
   it('classifies valid, invalid, missing and deterministic no-call matching pairs individually', async () => {
     const root = makeTempRepo(); roots.push(root)
     const fixture = authoringFixture(); const catalog = buildSurfaceCatalogs([fixture.own]).get('web')!
-    const makeFlow = (id: string, implementation = false): GuardFlow => {
-      const milestones = [{ order: 1, doc: 'synthetic.md', claimId: `claim::${id}`, claimTitle: 'Show dialog', sentences: [id], proofDrivers: ['web' as const],
-        ...(implementation ? { verification: { method: 'implementation' as const, observable: 'Inspect source algorithm' } } : {}) }]
+    const makeFlow = (id: string): GuardFlow => {
+      const milestones = [{ order: 1, doc: 'synthetic.md', claimId: `claim::${id}`, claimTitle: 'Show dialog', sentences: [id] }]
       return { id, title: id, goal: 'Show dialog', fingerprint: flowFingerprint(milestones), milestones,
         bindings: [{ doc: 'synthetic.md', sentences: [id] }], composedOf: [], synthesisInputsHash: 'same' }
     }
-    const valid = makeFlow('valid'), invalid = makeFlow('invalid'), missing = makeFlow('missing'), skipped = makeFlow('skipped', true)
+    const valid = makeFlow('valid'), invalid = makeFlow('invalid'), missing = makeFlow('missing')
     const reply = { plan: [{ interfaceId: fixture.own.id, milestone: 1 }], gaps: [] }
     const originalKey = matchCacheKey(valid, catalog)
     await setCacheEntry(root, MATCH_CACHE_NAME, originalKey, reply)
@@ -111,7 +108,6 @@ describe('author-only changes retain upstream cache compatibility', () => {
     expect(await readCachedMatch(root, invalid, catalog)).toBeNull()
     expect(await readCachedMatch(root, missing, catalog)).toBeNull()
     expect(await matchFlow(root, valid, catalog, calls)).toMatchObject({ calls: 0 })
-    expect(await matchFlow(root, skipped, catalog, calls)).toMatchObject({ calls: 0, kind: 'gap' })
     expect(calls).not.toHaveBeenCalled()
     expect(await matchFlow(root, invalid, catalog, calls)).toMatchObject({ calls: 1 })
     expect(await matchFlow(root, missing, catalog, calls)).toMatchObject({ calls: 1 })
@@ -147,10 +143,9 @@ describe('author-only changes retain upstream cache compatibility', () => {
       expect(flowWorkerCacheKey(task(surface, material(own)))).toBe(flowWorkerCacheKey(task(surface, material(f.resources))))
       expect(flowWorkerPromptFingerprint(surface)).not.toBe(flowWorkerPromptFingerprint('web'))
     }
-    const cached = { version: GUARD_REVIEW_POLICY_VERSION - 1,
-      outcome: { kind: 'settled', scenarioYamlSha: 'sha', expectedReds: [] }, scenarioYaml: 'yaml', reviews: [] }
-    expect(CachedWorkerEntrySchema.safeParse(cached).success).toBe(false)
-    expect(CachedWorkerEntrySchema.safeParse({ ...cached, version: GUARD_REVIEW_POLICY_VERSION }).success).toBe(true)
+    const cached = { outcome: { kind: 'settled', scenarioYamlSha: 'sha', expectedReds: [] }, scenarioYaml: 'yaml', reviews: [] }
+    expect(CachedWorkerEntrySchema.safeParse(cached).success).toBe(true)
+    expect(CachedWorkerEntrySchema.safeParse({ ...cached, version: 5 }).success).toBe(false)
   })
 
   it('settles a web flow against the entries its session read, and nothing else', () => {

@@ -19,7 +19,6 @@ import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { computeRecipeFingerprint, recipePath, readManifest } from '@truecourse/guard-runner'
 import {
-  GUARD_REVIEW_POLICY_VERSION,
   movedSchemeInputs,
   parseDocTree,
   sectionOwnText,
@@ -204,6 +203,13 @@ export function corpusOpenApiDocs(repoRoot: string): { doc: string; content: str
  *
  * Delete it, and the frozen literals, once no stored manifest lacks components.
  */
+/** The review-policy version the retired formula folded, frozen with the prompt fingerprints. */
+const LEGACY_REVIEW_POLICY_VERSION = '5'
+
+/** The resolved prerequisite state the retired formula folded in its interface
+ *  bag: no flow carried a prerequisite by then, so every row folded this. */
+const LEGACY_PREREQUISITE_STATE = '[]'
+
 export function legacyFlowGenerationInputsHash(input: {
   flowFingerprint: string
   /** Fingerprints of the planned interfaces and any browser setup catalog offered. */
@@ -222,7 +228,7 @@ export function legacyFlowGenerationInputsHash(input: {
     LEGACY_GENERATE_API_PROMPT_FINGERPRINT,
     LEGACY_GENERATE_WEB_PROMPT_FINGERPRINT,
     LEGACY_FIDELITY_PROMPT_FINGERPRINT,
-    String(GUARD_REVIEW_POLICY_VERSION),
+    LEGACY_REVIEW_POLICY_VERSION,
   ]
   return 'sha256:' + createHash('sha256').update(parts.join('\0')).digest('hex')
 }
@@ -245,11 +251,6 @@ export interface FlowGenerationInputParts {
   /** Each catalog entry the flow's web session was served, with its CURRENT
    *  fingerprint. Present (possibly empty) for a flow with a web plan. */
   webCatalogReads?: readonly string[]
-  /** The resolved dependency STATE — for {@link legacyFlowGenerationInputsHash}'s
-   *  bag alone. */
-  prerequisiteMaterial: string
-  /** What the flow's prerequisites ARE, as a scenario depends on them. */
-  prerequisiteShape: string
   /** The recipe slice of the surface this flow is realized on. */
   recipeSlice: string
   /**
@@ -270,7 +271,7 @@ export function flowInterfaceFingerprintBag(parts: FlowGenerationInputParts): st
     ...parts.assignmentFingerprints,
     ...parts.interfaceFingerprints,
     ...(parts.webCatalogFingerprint ? [parts.webCatalogFingerprint] : []),
-    parts.prerequisiteMaterial,
+    LEGACY_PREREQUISITE_STATE,
   ]
 }
 
@@ -301,17 +302,11 @@ export function flowGenerationInputComponents(parts: FlowGenerationInputParts): 
     // the hash of its sentences: a reworded sentence is a new claim, a new
     // fingerprint and a re-opened flow, with no text key of its own.
     flow: digest([parts.flowFingerprint]),
-    // A NEW name, because the retired `prerequisites` folded resolved state: a
-    // stored value under that name would compare unequal for every flow that
-    // has one, and re-open all of them at once. Under its own name the stored
-    // one is simply ignored and this one is filled in with no session.
-    'prerequisites.shape': digest([parts.prerequisiteShape]),
-    policy: String(GUARD_REVIEW_POLICY_VERSION),
     'recipe.slice': digest([parts.recipeSlice]),
     roster: digest([parts.roster]),
-    // A NEW name for the same reason as `prerequisites.shape`: the retired
-    // `preparation` folded each profile's qualification evidence too, which the
-    // session rewrites whenever a cited file moves.
+    // Its own name, not the retired `preparation`: that one folded each
+    // profile's qualification evidence too, which the session rewrites whenever
+    // a cited file moves, and a stored value under it would re-open every flow.
     'preparation.run': digest([parts.preparation]),
   }
   if (parts.hasScenario) return components

@@ -27,8 +27,6 @@
 import { z } from 'zod'
 import { defineSessionKind, defineToolSpec, type SessionBudget, type SessionDef, type SessionTool, type ToolContext } from '@truecourse/agent-loop'
 import {
-  GuardCaseEvidenceSchema,
-  GUARD_REVIEW_POLICY_VERSION,
   GuardExpectedRedSchema,
   GuardFlowWorkerOutcomeSchema,
   type GuardDriverId,
@@ -100,8 +98,7 @@ NOT answer with one JSON object. You work a LOOP against the real program:
 4. On acceptance the engine stashes your yaml under a sha and tells you so.
 
 # One complete test per flow
-Submit one candidate that proves EVERY flow milestone and EVERY selected source case.
-Put checks: ["case-id"] only on the assertion steps that prove that case; preparation
+Submit one candidate that proves EVERY flow milestone. Preparation
 steps may remain untagged. Reproduce all required starting state in this test.
 Never sever a dependent transition or narrow the promise to make a prefix pass.
 Partial probes are observations only. A later submission revises the same complete
@@ -110,7 +107,7 @@ in separately synthesized flows. If any obligation cannot be proved, report its
 concrete blocker. A separate reviewer validates the whole immutable flow contract.
 Unavailable request control is a capability gap, not a demand for live credentials.
 A complete reviewed candidate survives a later transport failure; partial candidates
-are never accepted or published, even when their union would cover every case.
+are never accepted or published, even when their union would cover every milestone.
 
 # Repair assertions without losing requirements
 A locator failure is not an unavailable capability. Use the mapped target and the
@@ -119,7 +116,7 @@ its accessible name. Quote YAML strings containing colons, template tokens or re
 syntax; never drop an obligation to avoid a YAML parsing error.
 Use hidden after a previously visible dialog to prove closure, inputValue before
 filling to prove defaults, and count to prove cardinality. These expectations retry
-inside the runner; do not add sleeps. An empty-ledger case needs isolated declared
+inside the runner; do not add sleeps. An empty-ledger flow needs isolated declared
 fresh-state setup and an assertion proving that starting state. Minting two records
 in a populated ledger does not establish the overall sum of all records.
 
@@ -134,25 +131,11 @@ At least one scenario must be accepted for a \`settled\` outcome; if none can
 be, end \`blocked\` or \`retired\` and the committed scenarios stay as they are.
 Without that block there is nothing to edit: never pass \`replaces\`.
 
-# Current remaining work
-For explicit-case tasks, blocked and retired outcomes must include remaining: an array
-with exactly one row per outstanding assigned case:
-{ "milestone": 1, "caseId": "cancel-without-saving", "reasonKind": "assertion",
-  "evidence": "the current observed defect", "issueId": "engine-provided issue ID" }.
-Use reasonKind assertion, annotation, preparation, unsupported-capability,
-review-unavailable, or not-attempted. Copy the current engine issueId when provided;
-do not reclassify an assertion defect as unavailable preparation. When the fidelity
-judge rejected a case because the runner cannot observe what would prove it, end
-blocked with that issue's issueId and reasonKind unsupported-capability, naming the
-missing capability in evidence. A failing run of a changed candidate records a new
-issueId, so copy it from the latest rejection or correction. A stale aggregate failure does not explain a later Cancel
-rejection. The engine asks once per case for a changed executable candidate before
-you end blocked or retired, within the SAME budget; submit one complete revised
-candidate and preserve every flow obligation.
+# Specific starting state
 For Cancel, arrange a fully valid unsaved form including ALL required inputs, verify
 the dialog is visible, cancel, verify closure and that this draft was not saved.
 A required Amount left blank cannot prove Cancel prevented a save.
-Select setup.preparation when the case requires empty/controlled private state.
+Select setup.preparation when the flow requires empty/controlled private state.
 Only that profile's fixtures and credentials exist in the private world.
 
 # The outcome — how the session MUST end
@@ -256,11 +239,10 @@ export function flowWorkerLegacyCacheKeys(task: FlowWorkerTask): string[] {
 export const CachedWorkerEntrySchema = z
   .object({
     outcome: GuardFlowWorkerOutcomeSchema,
-    version: z.literal(GUARD_REVIEW_POLICY_VERSION).optional(),
+    /** The fidelity judge's acceptance per accepted scenario, index-aligned
+     *  with the yamls; an unreviewed green is never written. */
     reviews: z.array(z.object({
-      policyVersion: z.literal(GUARD_REVIEW_POLICY_VERSION),
       scenarioFingerprint: z.string().min(1),
-      caseEvidence: z.array(GuardCaseEvidenceSchema),
     }).strict()).optional(),
     /** The single accepted yaml — the legacy one-scenario entry. */
     scenarioYaml: z.string().min(1).optional(),
@@ -408,7 +390,7 @@ export function flowWorkerSessionDef(input: FlowWorkerSessionInput): SessionDef<
     display: { title: 'Scenario author' },
     systemPrompt: flowWorkerSystemPrompt(task.surface),
     tools: [...catalogTools(task), runScenarioTool(task), submitScenarioTool(task, input.judgeWith), dropScenarioTool(task)],
-    validateOutcome: (outcome, context) => task.validateOutcome(outcome, context),
+    validateOutcome: (outcome) => task.validateOutcome(outcome),
     outcomeSchemaRepairs: 2,
     budget: FLOW_WORKER_BUDGET,
     // The structural half of "run before you conclude": an

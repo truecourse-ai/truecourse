@@ -33,7 +33,6 @@ import {
 import {
   planGuardWork,
   type FlowSynthesisArea,
-  type FlowWorkerTask,
 } from '@truecourse/guard-generator'
 import {
   makeTempRepo,
@@ -423,25 +422,6 @@ describe('estimateGuardTokens — the surfaces a missing recipe is priced on', (
   })
 })
 
-
-/** A repo whose one flow binds a case to a supplied account nobody registered.
- *  `onTask` sees each worker task the run builds, cache material and all. */
-function accountBoundRepo(onTask?: (task: FlowWorkerTask) => void) {
-  const r = coldRepo()
-  writeRecipe(r, { api: { serve: ['node', 'unused.js'], externals: {
-    currencybeacon: { baseUrlEnv: 'CURRENCYBEACON_BASE_URL', baseUrl: 'http://127.0.0.1:1', env: { CURRENCYBEACON_API_KEY: {} } },
-  } } })
-  const extractor = claimsBy({ background: { untestable: 'bg' }, version: [{
-    needs: [{ kind: 'credential', name: 'currencybeacon-api-key', detail: 'Uses CURRENCYBEACON_API_KEY' }],
-    verification: { method: 'behavior', scope: 'configuration', observable: 'Version prints with a supplied account',
-      cases: [{ id: 'version', claim: 'Version prints', method: 'behavior', requires: ['process'], conditions: [], prerequisites: [{ dependency: 'currencybeacon-api-key', mode: 'provided' }] }] },
-  }] })
-  const author = submitWorkerSessions(() => raw('v', PASSING_STEPS.map(step => ({ ...step, milestone: 1, checks: ['version'] }))), {
-    judge: async () => ({ kind: 'faithful', evidence: [{ milestone: 1, caseId: 'version', steps: [1], reason: 'Observes the documented CLI version output.' }] }),
-    ...(onTask ? { onBriefing: onTask } : {}),
-  })
-  return { r, extractor, author, overlay: path.join(r, '.truecourse/scenarios/externals.local.json') }
-}
 
 it('estimates one complete alternative realization and keeps its valid prior choice on a no-op run', async () => {
   const h = await import('./helpers.js')

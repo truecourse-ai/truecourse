@@ -1,7 +1,6 @@
 import { withGuardReadTree } from '../lib/guard-read-tree.js'
 import { log } from '../lib/logger.js'
-import { GUARD_REVIEW_POLICY_VERSION, bindRealizes, scenarioFullFlowDefect, type GuardFlowProgress } from '@truecourse/shared'
-import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
+import { bindRealizes, scenarioFullFlowDefect, type GuardFlowProgress } from '@truecourse/shared'
 /**
  * Read-surface drivers for the guard dashboard. All route logic lives here so the
  * Express adapter stays thin (the CLAUDE.md route→driver→store rule): the
@@ -714,7 +713,6 @@ function toFlowGap(
     reason: string
     driver?: GuardDriverId
     blocker?: GuardFlowGap['blocker']
-    obligations?: GuardFlowGap['obligations']
     milestones?: number[]
   },
   externals: GuardExternalSetupIndex | null = null,
@@ -723,7 +721,6 @@ function toFlowGap(
   return {
     kind: gap.kind,
     reason: gap.reason,
-    ...(gap.obligations ? { obligations: gap.obligations } : {}),
     ...(gap.milestones ? { milestones: gap.milestones } : {}),
     ...(gap.blocker ? { blocker: gap.blocker } : {}),
     ...(gap.driver ? { driver: gap.driver } : {}),
@@ -783,9 +780,8 @@ function flowSurfaces(flowId: string, join: FlowJoin): GuardFlowSurface[] {
       ? scenario.flow?.fingerprint === fingerprint && bindings.every((binding) => scenario.binds.some((bind) => bindRealizes(bind, binding)))
       : entry?.flowFingerprint === fingerprint
     // Retained stale scenarios and unreviewed candidates remain visible, but
-    // cannot discharge new or unaudited obligations.
-    const casesReviewed = !milestones.some(m => m.verification?.cases) || !!(scenario && recorded?.reviewPolicyVersion === GUARD_REVIEW_POLICY_VERSION && recorded?.caseEvidence && recorded.reviewedScenarioFingerprint === scenarioReviewFingerprint(scenario) && !scenarioFullFlowDefect(milestones, scenario.steps, recorded.caseEvidence))
-    const proof = current && recorded?.reviewed !== false && casesReviewed
+    // cannot discharge new or unaudited milestones.
+    const proof = current && recorded?.reviewed !== false
       ? (scenario ? scenarioMilestoneProof(scenario.steps) : recorded?.milestoneCoverage ?? []) : []
     // With neither the scenario's steps nor a recorded coverage to read, the
     // proof is unknown rather than missing.
@@ -799,13 +795,10 @@ function flowSurfaces(flowId: string, join: FlowJoin): GuardFlowSurface[] {
   const proven = coversFlowMilestones(milestones, passingProof) === true
   const gaps = entry ? entry.gaps : (join.reportGapsByFlow.get(flowId) ?? [])
   for (const gap of gaps) {
-    const refs: GuardFlowGap['obligations'] = gap.obligations ?? ('milestones' in gap ? gap.milestones?.map(milestone => ({ milestone })) : undefined)
-    const gapProven = refs?.length ? refs.every(ref => {
-      const milestone = milestones.find(m => m.order === ref.milestone)
-      if (!milestone) return false
-      if (ref.caseId) return !!milestone.verification?.cases?.some(c => c.id === ref.caseId) &&
-        passingProof.some(p => p.milestone === ref.milestone && (!milestone.proofDrivers?.length || milestone.proofDrivers.includes(p.driver)) && p.checks?.includes(ref.caseId!))
-      return coversFlowMilestones([milestone], passingProof) === true
+    const orders = 'milestones' in gap ? gap.milestones : undefined
+    const gapProven = orders?.length ? orders.every(order => {
+      const milestone = milestones.find(m => m.order === order)
+      return !!milestone && coversFlowMilestones([milestone], passingProof) === true
     }) : proven
     const flowGap = toFlowGap(gap, join.externals)
     surfaces.push({
@@ -813,7 +806,7 @@ function flowSurfaces(flowId: string, join: FlowJoin): GuardFlowSurface[] {
       status: gapStatus(gap, flowGap.needsSetup),
       // Only unsuccessful realization attempts can be alternatives. Failures,
       // authoring errors, dismissals and unrelated/legacy gaps never disappear.
-      ...(gapProven && gap.surface && milestones.some((m) => !m.proofDrivers?.length || m.proofDrivers.includes(gap.surface!)) &&
+      ...(gapProven && gap.surface && milestones.length > 0 &&
         ['no-interface', 'unrealizable', 'blocked-on', 'awaiting-driver'].includes(gap.kind)
         ? { coveredByAlternative: true } : {}),
       gap: flowGap,
@@ -1401,24 +1394,9 @@ function flowPassingProof(
     const scenario = join.scenarioById.get(row.scenarioId!)
     if (record?.reviewed === false || !scenario || scenario.flow?.fingerprint !== (flow?.fingerprint ?? entry?.flowFingerprint)) continue
     if (!(flow?.bindings ?? entry?.bindings ?? []).every(b => scenario.binds.some(s => bindRealizes(s, b)))) continue
-    if (milestones.some(m => m.verification?.cases) && (record?.reviewPolicyVersion !== GUARD_REVIEW_POLICY_VERSION || !record?.caseEvidence || record.reviewedScenarioFingerprint !== scenarioReviewFingerprint(scenario) || scenarioFullFlowDefect(milestones, scenario.steps, record.caseEvidence))) continue
     if (!scenarioFullFlowDefect(milestones, scenario.steps)) proof.push(...scenarioMilestoneProof(scenario.steps))
   }
   return proof
-}
-
-/** Whether one CASE of one milestone is discharged by the flow's passing proof. */
-function caseVerified(
-  milestone: GuardFlowMilestone,
-  caseId: string,
-  proof: ReturnType<typeof scenarioMilestoneProof>,
-): boolean {
-  return proof.some(
-    (p) =>
-      p.milestone === milestone.order &&
-      (!milestone.proofDrivers?.length || milestone.proofDrivers.includes(p.driver)) &&
-      p.checks?.includes(caseId),
-  )
 }
 
 function flowProgress(flowId: string, view: FlowViewSources, surfaces: GuardFlowSurface[]): GuardFlowProgress {
@@ -1428,19 +1406,8 @@ function flowProgress(flowId: string, view: FlowViewSources, surfaces: GuardFlow
   const milestones = flow?.milestones ?? entry?.milestones ?? []
   const rows = surfaces.filter(s => s.scenarioId)
   const proof = flowPassingProof(flowId, view, surfaces)
-  const cases = milestones.length > 0 && milestones.every(m => m.verification?.cases?.length)
-  let total = 0, verified = 0
-  for (const m of milestones) {
-    if (cases) for (const c of m.verification!.cases!) {
-      total++
-      if (caseVerified(m, c.id, proof)) verified++
-    } else {
-      total++
-      if (coversFlowMilestones([m], proof) === true) verified++
-    }
-  }
-  const systemCount = milestones.filter(m => m.verification?.scope === 'configuration' || m.verification?.scope === 'implementation' ||
-    (!m.verification?.scope && m.verification && m.verification.method !== 'behavior')).length
+  const total = milestones.length
+  const verified = milestones.filter(m => coversFlowMilestones([m], proof) === true).length
   const passed = rows.filter(r => r.status === 'pass' || r.status === 'guarded').length
   const execution = !rows.length ? 'not-generated' : rows.some(r => r.status === 'fail') ? 'failed'
     : rows.some(r => r.status === 'error') ? 'error' : rows.some(r => r.status === 'blocked') ? 'blocked'
@@ -1450,9 +1417,8 @@ function flowProgress(flowId: string, view: FlowViewSources, surfaces: GuardFlow
     : gaps.some(g => g.needsSetup || g.blocker?.kind === 'configuration') ? 'needs-setup'
     : gaps.some(g => g.blocker?.kind === 'unsupported-capability' || g.kind === 'awaiting-driver') ? 'unsupported'
     : verified === total && total > 0 ? 'ready' : 'incomplete'
-  return { execution, scenarios: rows.length, passed, verified, total, unit: cases ? 'cases' : 'milestones',
-    coverage: !total ? 'unknown' : verified === total ? 'complete' : verified ? 'partial' : 'unverified',
-    category: !systemCount ? 'behavior' : systemCount === milestones.length ? 'system' : 'mixed', generation }
+  return { execution, scenarios: rows.length, passed, verified, total,
+    coverage: !total ? 'unknown' : verified === total ? 'complete' : verified ? 'partial' : 'unverified', generation }
 }
 
 function flowListItem(
@@ -1577,20 +1543,13 @@ export async function readGuardFlowDetail(
   const milestones: GuardFlowMilestoneView[] = (flow?.milestones ?? [])
     .slice()
     .sort((a, b) => a.order - b.order)
-    .map((m) => {
-      // The cases ride as cases. They used to be folded into the claim sentence
-      // as one semicolon-joined run-on, which a milestone with a dozen of them
-      // turned into an unreadable paragraph and named none of them.
-      const cases = (m.verification?.cases ?? []).map((c) => ({ id: c.id, claim: c.claim }))
-      return {
-        order: m.order,
-        doc: m.doc,
-        claimId: m.claimId,
-        claimTitle: m.claimTitle,
-        ...(cases.length > 0 ? { cases } : {}),
-        ...(m.note ? { note: m.note } : {}),
-      }
-    })
+    .map((m) => ({
+      order: m.order,
+      doc: m.doc,
+      claimId: m.claimId,
+      claimTitle: m.claimTitle,
+      ...(m.note ? { note: m.note } : {}),
+    }))
 
   const fileById = await scenarioFilesById(repoKey, view.commit)
   // The birth-stage failure results, keyed by the test they belong to — what a

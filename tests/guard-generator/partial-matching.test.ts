@@ -14,14 +14,14 @@ const control: Interface = { id: 'web/cancel-add', title: 'Cancel adding', type:
   steps: [{ kind: 'activate', target: { role: 'button', name: 'Cancel' }, within: { role: 'dialog', name: 'Add expense', exact: true } }],
   fingerprint: 'sha256:cancel' }
 const catalog = buildSurfaceCatalogs([control]).get('web')!
-function flow(extra: Partial<GuardFlowMilestone> = {}): GuardFlow {
+function flow(): GuardFlow {
   const milestones: GuardFlowMilestone[] = [1, 2].map((order) => ({ order, doc: 'spec.md', claimId: `claim::spec.md::o${order}`,
-    claimTitle: `Obligation ${order}`, sentences: ['expenses'], proofDrivers: ['web'], ...(order === 2 ? extra : {}) }))
+    claimTitle: `Obligation ${order}`, sentences: ['expenses'] }))
   return { id: 'expenses', title: 'Expenses', goal: 'Manage expenses', fingerprint: flowFingerprint(milestones),
     milestones, bindings: [{ doc: 'spec.md', sentences: ['expenses'] }], composedOf: [], synthesisInputsHash: 'inputs' }
 }
 
-describe('matching incomplete catalogs and verification capabilities', () => {
+describe('matching incomplete catalogs', () => {
   it('keeps grounded portions and round-trips milestone gaps through the cache', async () => {
     const root = repo(); const f = flow()
     const runner = vi.fn(async (ctx) => {
@@ -67,15 +67,6 @@ describe('matching incomplete catalogs and verification capabilities', () => {
     const runner = vi.fn(async () => ({ plan: [{ interfaceId: control.id, milestone: 1 }] }))
     expect(await matchFlow(repo(), flow(), catalog, runner)).toMatchObject({ kind: 'plan', calls: 2,
       gaps: [{ milestone: 2, kind: 'mapping' }] })
-  })
-  it('does not let the matcher replace implementation inspection with a UI assertion', async () => {
-    const f = flow({ verification: { method: 'implementation', observable: 'Inspect arithmetic to exclude floating-point multiplication' } })
-    const runner = vi.fn(async (ctx) => {
-      expect(ctx.milestones.map((m) => m.order)).toEqual([1])
-      return { plan: [{ interfaceId: control.id, milestone: 1 }] }
-    })
-    expect(await matchFlow(repo(), f, catalog, runner)).toMatchObject({ kind: 'plan', calls: 1,
-      gaps: [{ milestone: 2, kind: 'capability', reason: expect.stringContaining('implementation') }] })
   })
   it.each([
     { plan: [{ interfaceId: 'web/invented', milestone: 1 }], gaps: [{ milestone: 2, kind: 'mapping', reason: 'missing' }] },
@@ -126,110 +117,6 @@ describe('matching incomplete catalogs and verification capabilities', () => {
     expect(repreconditioned.identity).toBe(catalog.identity)
   })
 
-  it('plans zero model calls when all obligations require unavailable inspection', async () => {
-    const root = repo()
-    const f = flow()
-    for (const m of f.milestones) m.verification = { method: 'implementation', observable: 'Inspect transaction implementation' }
-    f.fingerprint = flowFingerprint(f.milestones)
-    const runner = vi.fn()
-    expect(await planFlowMatching(root, [f], [catalog])).toMatchObject({ calls: 0 })
-    expect(await matchFlow(root, f, catalog, runner)).toMatchObject({ kind: 'gap', calls: 0 })
-    expect(runner).not.toHaveBeenCalled()
-  })
-})
-
-function caseFlow(): GuardFlow {
-  const f = flow()
-  f.milestones = [{ ...f.milestones[0], verification: { method: 'behavior', scope: 'web', observable: 'Inspect table and navigation', cases: [
-    { id: 'date-order', claim: 'Rows descend by expense date', method: 'behavior', requires: ['browser'], conditions: [] },
-    { id: 'tie-order', claim: 'Equal dates descend by ID', method: 'behavior', requires: ['browser'], conditions: [] },
-    { id: 'description-link', claim: 'Description opens details', method: 'behavior', requires: ['browser'], conditions: [] },
-  ] } }]
-  f.fingerprint = flowFingerprint(f.milestones)
-  return f
-}
-
-describe('case-level realization assignments', () => {
-  it('retains both sorts while the description action is missing, including cache replay', async () => {
-    const root = repo(); const f = caseFlow()
-    const runner = vi.fn(async () => ({ plan: [{ interfaceId: control.id, milestone: 1, checks: ['date-order', 'tie-order'] }],
-      gaps: [{ milestone: 1, checks: ['description-link'], kind: 'mapping', reason: 'Description navigation action missing; reconcile spec.md' }] }))
-    expect(await matchFlow(root, f, catalog, runner)).toMatchObject({ kind: 'plan', calls: 1,
-      plan: { steps: [{ checks: ['date-order', 'tie-order'] }] }, gaps: [{ checks: ['description-link'] }] })
-    expect(await readCachedMatch(root, f, catalog)).toMatchObject({ plan: { steps: [{ checks: ['date-order', 'tie-order'] }] } })
-    expect(await matchFlow(root, f, catalog, runner)).toMatchObject({ kind: 'plan', calls: 0, gaps: [{ checks: ['description-link'] }] })
-    expect(runner).toHaveBeenCalledTimes(1)
-  })
-  it('retains repeated grounded actions serving the same check in their original order', async () => {
-    const result = await matchFlow(repo(), caseFlow(), catalog, async () => ({ plan: [
-      { interfaceId: control.id, milestone: 1, checks: ['date-order'], note: 'arrange' },
-      { interfaceId: control.id, milestone: 1, checks: ['date-order', 'tie-order', 'description-link'], note: 'observe' },
-    ] }))
-    expect(result).toMatchObject({ kind: 'plan', plan: { steps: [{ note: 'arrange' }, { note: 'observe' }] }, gaps: [] })
-  })
-  it.each([
-    { checks: ['date-order', 'unknown'], gapChecks: ['tie-order', 'description-link'], issue: 'unknown check unknown' },
-    { checks: ['date-order', 'tie-order'], gapChecks: ['date-order', 'description-link'], issue: 'check date-order appears in both plan and gaps' },
-    { checks: ['date-order', 'date-order'], gapChecks: ['tie-order', 'description-link'], issue: 'repeats a check' },
-  ])('rejects invalid case references: $issue', async ({ checks, gapChecks, issue }) => {
-    const result = await matchFlow(repo(), caseFlow(), catalog, async () => ({
-      plan: [{ interfaceId: control.id, milestone: 1, checks }], gaps: [{ milestone: 1, checks: gapChecks, kind: 'mapping', reason: 'missing' }],
-    }))
-    expect(result).toMatchObject({ kind: 'error', calls: 2, reason: expect.stringContaining(issue) })
-  })
-  it('rejects duplicate gap dispositions for the same case', async () => {
-    expect(await matchFlow(repo(), caseFlow(), catalog, async () => ({
-      plan: [{ interfaceId: control.id, milestone: 1, checks: ['date-order', 'tie-order'] }],
-      gaps: [1, 2].map(() => ({ milestone: 1, checks: ['description-link'], kind: 'mapping', reason: 'missing' })),
-    }))).toMatchObject({ kind: 'plan', plan: { steps: [{ checks: ['date-order', 'tie-order'] }] }, gaps: [{ checks: ['description-link'], reason: expect.stringContaining('check description-link has duplicate gaps') }] })
-  })
-  it('gives omitted checks one correction, then preserves exact missing cases with source references', async () => {
-    const runner = vi.fn(async () => ({ plan: [{ interfaceId: control.id, milestone: 1, checks: ['date-order'] }] }))
-    expect(await matchFlow(repo(), caseFlow(), catalog, runner)).toMatchObject({ kind: 'plan', calls: 2,
-      gaps: [{ milestone: 1, checks: ['tie-order', 'description-link'], reason: expect.stringContaining('spec.md (claim claim::spec.md::o1)') }] })
-    expect(runner.mock.calls[1][0].issues.gapErrors).toContain('milestone 1 has unaccounted checks: tie-order, description-link')
-  })
-  it('filters unavailable observations per case without removing a supported sibling', async () => {
-    const f = caseFlow()
-    f.milestones[0].verification!.cases![2].requires = ['request-control']
-    const runner = vi.fn(async (ctx) => {
-      expect(ctx.milestones[0].verification.cases.map((c: { id: string }) => c.id)).toEqual(['date-order', 'tie-order'])
-      return { plan: [{ interfaceId: control.id, milestone: 1, checks: ['date-order', 'tie-order'] }] }
-    })
-    expect(await matchFlow(repo(), f, catalog, runner)).toMatchObject({ kind: 'plan', calls: 1,
-      gaps: [{ checks: ['description-link'], kind: 'capability', reason: expect.stringContaining('request-control') }] })
-  })
-  it('misses an old explicit-case cache row instead of broadening its assignment', async () => {
-    const { setCacheEntry } = await import('@truecourse/llm')
-    const { matchCacheKey } = await import('../../packages/guard-generator/src/match.js')
-    const root = repo(); const f = caseFlow()
-    await setCacheEntry(root, 'guard/match', matchCacheKey(f, catalog), { plan: [{ interfaceId: control.id, milestone: 1 }] })
-    expect(await readCachedMatch(root, f, catalog)).toBeNull()
-    const runner = vi.fn(async () => ({ plan: [{ interfaceId: control.id, milestone: 1, checks: ['date-order', 'tie-order', 'description-link'] }] }))
-    expect(await matchFlow(root, f, catalog, runner)).toMatchObject({ kind: 'plan', calls: 1 })
-  })
-})
-
-it('uses case assignments and preparation filtering consistently for runtime and estimates', async () => {
-  const { realizationAssignmentFingerprint, partitionPlanPreparations } = await import('../../packages/guard-generator/src/match.js')
-  const f = caseFlow()
-  f.milestones[0].verification!.cases![0].preparation = 'controlled'
-  // Legacy explicit cases already carried fresh-state before preparations existed.
-  f.milestones[0].verification!.cases![1].conditions = ['fresh-state']
-  const result = await matchFlow(repo(), f, catalog, async () => ({ plan: [{ interfaceId: control.id, milestone: 1, checks: ['date-order', 'tie-order', 'description-link'] }] }))
-  expect(result.kind).toBe('plan')
-  if (result.kind !== 'plan') return
-  const none = partitionPlanPreparations(f, result.plan, [])
-  expect(none.plan?.steps[0].checks).toEqual(['description-link'])
-  expect(none.missing).toEqual([{ milestone: 1, caseId: 'date-order', requirement: 'controlled' }, { milestone: 1, caseId: 'tie-order', requirement: 'empty' }])
-  const seeded = partitionPlanPreparations(f, result.plan, [{ baseline: 'seeded' }])
-  expect(seeded.plan?.steps[0].checks).toEqual(['date-order', 'description-link'])
-  const empty = partitionPlanPreparations(f, result.plan, [{ baseline: 'empty' }])
-  expect(empty.plan).toEqual(result.plan)
-  expect(empty.missing).toEqual([])
-  expect(realizationAssignmentFingerprint(none.plan!)).not.toBe(realizationAssignmentFingerprint(result.plan))
-  const reorderedChecks = { ...result.plan, steps: result.plan.steps.map(s => ({ ...s, checks: [...s.checks!].reverse() })) }
-  expect(realizationAssignmentFingerprint(reorderedChecks)).toBe(realizationAssignmentFingerprint(result.plan))
 })
 
 describe('bounded matcher schema correction', () => {
@@ -251,53 +138,6 @@ describe('bounded matcher schema correction', () => {
     const result = await matchFlow(repo(), flow(), catalog, runner)
     expect(result).toMatchObject({ kind: 'plan', calls: 2, plan: { steps: [{ milestone: 1 }] } })
   })
-  it('never sends a cross-timezone-only case to the matcher', async () => {
-    const f = flow(); f.milestones = [{ ...f.milestones[0], verification: { scope: 'web', method: 'behavior', observable: 'Date invariant across browser timezones', cases: [{ id: 'zones', claim: 'Invariant', method: 'behavior', requires: ['browser', 'browser-timezone-control'], conditions: [] }] } }]
-    const runner = vi.fn()
-    expect(await matchFlow(repo(), f, catalog, runner)).toMatchObject({ kind: 'gap', calls: 0, gaps: [{ kind: 'capability' }] })
-    expect(runner).not.toHaveBeenCalled()
-  })
-})
-
-
-it('retains only independent valid cases when an unknown action survives a failed correction', async () => {
-  const runner = vi.fn().mockResolvedValueOnce({ plan: [
-    { interfaceId: control.id, milestone: 1, checks: ['date-order'] },
-    { interfaceId: 'web/unknown', milestone: 1, checks: ['tie-order'] },
-    { interfaceId: control.id, milestone: 1, checks: ['tie-order'] },
-  ] }).mockResolvedValueOnce({})
-  const result = await matchFlow(repo(), caseFlow(), catalog, runner)
-  expect(result).toMatchObject({ kind: 'plan', calls: 2,
-    plan: { steps: [{ checks: ['date-order'] }] },
-    gaps: [{ checks: ['tie-order', 'description-link'], reason: expect.stringContaining('Matcher correction failed') }] })
-  if (result.kind === 'plan') expect(result.plan.steps).toHaveLength(1)
-})
-
-it('never salvages a conflicted case alongside an independent valid case', async () => {
-  const runner = vi.fn().mockResolvedValueOnce({ plan: [
-    { interfaceId: control.id, milestone: 1, checks: ['date-order'] },
-    { interfaceId: control.id, milestone: 1, checks: ['tie-order'] },
-  ], gaps: [{ milestone: 1, checks: ['tie-order'], kind: 'mapping', reason: 'Conflicting assignment' }] })
-    .mockResolvedValueOnce({})
-  const result = await matchFlow(repo(), caseFlow(), catalog, runner)
-  expect(result).toMatchObject({ kind: 'plan', calls: 2,
-    plan: { steps: [{ checks: ['date-order'] }] }, gaps: [{ checks: ['tie-order', 'description-link'] }] })
-  if (result.kind === 'plan') expect(result.plan.steps).toHaveLength(1)
-})
-
-
-it('excludes every case coupled to an unsafe shared setup action', async () => {
-  const runner = vi.fn().mockResolvedValueOnce({ plan: [
-    { interfaceId: control.id, milestone: 1, checks: ['date-order', 'tie-order'], note: 'shared setup' },
-    { interfaceId: control.id, milestone: 1, checks: ['date-order'], note: 'dependent observation' },
-    { interfaceId: control.id, milestone: 1, checks: ['description-link'], note: 'independent' },
-  ], gaps: [{ milestone: 1, checks: ['tie-order'], kind: 'mapping', reason: 'Conflicting assignment' }] })
-    .mockResolvedValueOnce({})
-  const result = await matchFlow(repo(), caseFlow(), catalog, runner)
-  expect(result).toMatchObject({ kind: 'plan', calls: 2,
-    plan: { steps: [{ checks: ['description-link'], note: 'independent' }] },
-    gaps: [{ checks: ['date-order', 'tie-order'] }] })
-  if (result.kind === 'plan') expect(result.plan.steps).toHaveLength(1)
 })
 
 
@@ -306,73 +146,4 @@ it('retains independent work when the corrective matcher call throws', async () 
     .mockRejectedValueOnce(new Error('transport unavailable'))
   expect(await matchFlow(repo(), flow(), catalog, runner)).toMatchObject({ kind: 'plan', calls: 2,
     plan: { steps: [{ milestone: 1 }] }, gaps: [{ reason: expect.stringContaining('transport unavailable') }] })
-})
-
-// Regression from the expense-tracker generation on 2026-09-14: fixtures were
-// mistaken for missing application interfaces before an author could use them.
-describe('runner-owned provider matching', () => {
-  function providerFlow(): GuardFlow {
-    const f = flow()
-    f.milestones = [{ ...f.milestones[0], verification: {
-      scope: 'web', method: 'behavior', observable: 'Loading and conversion result', cases: [
-        { id: 'pending', claim: 'Show loading until the provider replies', method: 'behavior', requires: ['browser', 'provider-control'], conditions: ['request-pending'], providerControls: [{ service: 'CurrencyBeacon', operations: ['response', 'header-delay'] }] },
-      ],
-    } }]
-    f.fingerprint = flowFingerprint(f.milestones)
-    return f
-  }
-  it.each(['stub', 'proxy'] as const)('briefs %s wiring and corrects a false capability refusal', async realization => {
-    const root = repo(); const f = providerFlow()
-    const providerControls = [{ service: 'currencybeacon', realization, baseUrlEnvs: ['CURRENCYBEACON_BASE_URL'], credentialEnv: ['CURRENCYBEACON_API_KEY'], operations: ['header-delay', 'response'] }]
-    const runner = vi.fn().mockImplementationOnce(async ctx => {
-      expect(ctx.capabilities).toContain('provider-control')
-      expect(ctx.providerControls).toEqual(providerControls)
-      expect(buildMatchTaskPrompt(ctx)).toContain('CURRENCYBEACON_BASE_URL')
-      return { gaps: [{ milestone: 1, checks: ['pending'], kind: 'capability', reason: 'The web browser driver has no request interception or provider-control capability to delay that response' }] }
-    }).mockImplementationOnce(async ctx => {
-      expect(ctx.issues.gapErrors.join()).toContain('contradicts the runner registry')
-      return { plan: [{ interfaceId: control.id, milestone: 1, checks: ['pending'] }] }
-    })
-    expect(await matchFlow(root, f, catalog, runner, undefined, providerControls)).toMatchObject({ kind: 'plan', calls: 2, gaps: [] })
-    expect(await readCachedMatch(root, f, catalog, undefined, providerControls)).not.toBeNull()
-    expect(await planFlowMatching(root, [f], [catalog], () => providerControls)).toMatchObject({ calls: 0 })
-    expect(await readCachedMatch(root, f, catalog)).toBeNull()
-    expect(await readCachedMatch(root, f, catalog, undefined, [{ ...providerControls[0], realization: realization === 'stub' ? 'proxy' : 'stub' }])).toBeNull()
-    expect(await readCachedMatch(root, f, catalog, undefined, [{ ...providerControls[0], baseUrlEnvs: ['NEW_BASE'] }])).toBeNull()
-  })
-  it('refuses repeated false capability gaps without caching an unsupported verdict', async () => {
-    const root = repo(); const f = providerFlow()
-    const runner = vi.fn(async () => ({ gaps: [{ milestone: 1, checks: ['pending'], kind: 'capability', reason: 'No provider control interface' }] }))
-    expect(await matchFlow(root, f, catalog, runner)).toMatchObject({ kind: 'error', calls: 2, reason: expect.stringContaining('contradicts the runner registry') })
-    expect(await readCachedMatch(root, f, catalog)).toBeNull()
-  })
-  it('rejects cached false capability gaps in both the estimate and execution paths', async () => {
-    const { setCacheEntry } = await import('@truecourse/llm')
-    const { matchCacheKey } = await import('../../packages/guard-generator/src/match.js')
-    const root = repo(); const f = providerFlow()
-    await setCacheEntry(root, 'guard/match', matchCacheKey(f, catalog), { gaps: [{ milestone: 1, checks: ['pending'], kind: 'capability', reason: 'No provider interface' }] })
-    expect(await readCachedMatch(root, f, catalog)).toBeNull()
-    expect(await matchFlow(root, f, catalog, async () => ({ plan: [{ interfaceId: control.id, milestone: 1, checks: ['pending'] }] }))).toMatchObject({ kind: 'plan', calls: 1 })
-  })
-  it('does not discard a supported sibling when correction of a false gap fails', async () => {
-    const f = providerFlow()
-    f.milestones.push({ ...flow().milestones[1] })
-    const runner = vi.fn(async () => ({ plan: [{ interfaceId: control.id, milestone: 2 }], gaps: [{ milestone: 1, checks: ['pending'], kind: 'capability', reason: 'No provider control' }] }))
-    const result = await matchFlow(repo(), f, catalog, runner)
-    expect(result).toMatchObject({ kind: 'plan', calls: 2, plan: { steps: [{ milestone: 2 }] }, gaps: [{ checks: ['pending'], kind: 'mapping', reason: expect.stringContaining('Matcher correction failed') }] })
-  })
-})
-
-it('resolves canonical provider contracts without confusing account names with service names', async () => {
-  const { matchProviderControls, matchCacheKey } = await import('../../packages/guard-generator/src/match.js')
-  const { RecipeSchema } = await import('@truecourse/guard-runner')
-  const f = caseFlow()
-  f.milestones[0].verification!.cases = ['first', 'second'].map(id => ({ id, claim: 'A chosen rate', method: 'behavior', requires: ['browser', 'provider-control'], conditions: [], providerControls: [{ service: 'CurrencyBeacon', operations: ['response'] }] }))
-  const recipe = RecipeSchema.parse({ build: 'true', api: { serve: ['node', 'server.js'], healthPath: '/health', externals: { currencybeacon: { baseUrlEnv: 'BEACON_BASE', env: { BEACON_KEY: {} } } } } })
-  const targets = [{ name: 'provider-account', aliases: ['CurrencyBeacon'], credentialEnv: ['BEACON_KEY'], state: 'unprovided' as const, registerIn: 'private.json', providers: [{ service: 'currencybeacon', baseUrlEnvs: ['BEACON_BASE'] }] }]
-  const controls = matchProviderControls(f, 'web', targets, recipe)
-  expect(controls).toEqual([{ service: 'currencybeacon', realization: 'stub', baseUrlEnvs: ['BEACON_BASE'], credentialEnv: ['BEACON_KEY'], operations: ['response'] }])
-  const provided = matchProviderControls(f, 'web', [{ ...targets[0], state: 'provided' }], recipe)
-  expect(provided).toMatchObject([{ realization: 'proxy' }])
-  expect(matchCacheKey(f, catalog, controls)).not.toBe(matchCacheKey(f, catalog, provided))
 })

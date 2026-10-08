@@ -1,6 +1,5 @@
 import type { AuthorCatalogSummary } from './author-catalog.js'
-import type { ResolvedProviderControl, preparationCatalog } from '@truecourse/guard-runner'
-import type { GuardVerification } from '@truecourse/shared'
+import type { preparationCatalog } from '@truecourse/guard-runner'
 /**
  * The guard-generator prompt doctrine — scenario authoring (reused verbatim as
  * the flow-worker session prompts' base), fidelity review (the worker's child
@@ -111,7 +110,7 @@ export interface OutlineEntry {
 // did not move when the prompts left.
 
 export const GENERATE_SYSTEM_PROMPT = `\
-Keep per-case prerequisites and successful setup evidence intact. Missing account/setup cannot establish product drift. Accessible names differ from visible text: an unnamed status is selected by {role: status}, then its text asserted with expect.within and expect.text.contains. Never derive a status accessible name from its message. Query parameters must come from documented or mapped triggers. Production readiness cannot prove a development command or fixed address.
+Keep prerequisites and successful setup evidence intact. Missing account/setup cannot establish product drift. Accessible names differ from visible text: an unnamed status is selected by {role: status}, then its text asserted with expect.within and expect.text.contains. Never derive a status accessible name from its message. Query parameters must come from documented or mapped triggers. Production readiness cannot prove a development command or fixed address.
 You author ONE guard SCENARIO — a declarative, executable test that walks a spec
 FLOW through a command-line program. A flow is a user-goal path: an ordered list of
 MILESTONES, each one a spec claim. You are given the flow, each milestone's claim
@@ -168,10 +167,10 @@ the assertion states that output exactly as quoted. A block nothing runs (a pure
 illustration) constrains nothing.
 
 # Prove the complete flow in one test
-The flow's milestones are ORDERED and every selected source case is required.
+The flow's milestones are ORDERED.
 Establish the starting state and walk the entire dependent path in one sandbox.
 A partial candidate is a probe only; it can never become this flow's test.
-Verify every milestone and every case in this single candidate.
+Verify every milestone in this single candidate.
 - Every flow milestone MUST be verified by an assertion, and each such step carries
   \`milestone: <that milestone's number>\`. A step that only prepares the world (seeding,
   a command whose output nothing asserts) carries NO \`milestone\` — it paints neutral.
@@ -282,7 +281,7 @@ export const GENERATE_PROMPT_FINGERPRINT = fingerprint(GENERATE_SYSTEM_PROMPT)
 // ---------------------------------------------------------------------------
 
 export const GENERATE_API_SYSTEM_PROMPT = `\
-Keep per-case prerequisites and successful setup evidence intact. Missing account/setup cannot establish product drift. Accessible names differ from visible text: an unnamed status is selected by {role: status}, then its text asserted with expect.within and expect.text.contains. Never derive a status accessible name from its message. Query parameters must come from documented or mapped triggers. Production readiness cannot prove a development command or fixed address.
+Keep prerequisites and successful setup evidence intact. Missing account/setup cannot establish product drift. Accessible names differ from visible text: an unnamed status is selected by {role: status}, then its text asserted with expect.within and expect.text.contains. Never derive a status accessible name from its message. Query parameters must come from documented or mapped triggers. Production readiness cannot prove a development command or fixed address.
 You author ONE guard SCENARIO — a declarative, executable test that walks a spec
 FLOW through an HTTP service. A flow is a user-goal path: an ordered list of
 MILESTONES, each one a spec claim. You are given the flow, each milestone's claim
@@ -328,7 +327,7 @@ sends it and the matcher form. A block nothing sends (a pure illustration)
 constrains nothing.
 
 # Prove the complete flow in one test
-Establish every prerequisite and assert every flow milestone and selected source case
+Establish every prerequisite and assert every flow milestone
 in one sandbox. Partial probes never become published tests.
 - Every flow milestone MUST be verified by an assertion, and each such step carries
   \`milestone: <that milestone's number>\`. A step that only prepares the world (an
@@ -596,7 +595,7 @@ export const GENERATE_API_PROMPT_FINGERPRINT = fingerprint(GENERATE_API_SYSTEM_P
 // ---------------------------------------------------------------------------
 
 export const GENERATE_WEB_SYSTEM_PROMPT = `\
-Keep per-case prerequisites and successful setup evidence intact. Missing account/setup cannot establish product drift. Accessible names differ from visible text: an unnamed status is selected by {role: status}, then its text asserted with expect.within and expect.text.contains. Never derive a status accessible name from its message. Query parameters must come from documented or mapped triggers. Production readiness cannot prove a development command or fixed address.
+Keep prerequisites and successful setup evidence intact. Missing account/setup cannot establish product drift. Accessible names differ from visible text: an unnamed status is selected by {role: status}, then its text asserted with expect.within and expect.text.contains. Never derive a status accessible name from its message. Query parameters must come from documented or mapped triggers. Production readiness cannot prove a development command or fixed address.
 You author ONE guard SCENARIO — a declarative, executable test that walks a spec
 FLOW through an application's WEB SURFACE, in a real browser. A flow is a
 user-goal path: an ordered list of MILESTONES, each one a spec claim. You are
@@ -640,7 +639,7 @@ the prose also quotes the example's OUTCOME, the assertion states that outcome e
 as quoted. A block nothing runs (a pure illustration) constrains nothing.
 
 # Prove the complete flow in one test
-Establish every prerequisite and assert every flow milestone and selected source case
+Establish every prerequisite and assert every flow milestone
 in one sandbox. Partial probes never become published tests.
 - Every flow milestone MUST be verified by an assertion, and each such step carries
   \`milestone: <that milestone's number>\`. A step that only prepares the world (a
@@ -881,7 +880,6 @@ export interface BirthRetryContext extends OutputExcerpts {
  * verbs by the adapter table).
  */
 export interface AuthorMilestone {
-  verification?: GuardVerification
   /** 1-based position in the flow's path — the `milestone` value steps carry. */
   order: number
   /** The extracted claim's text — assertions come from HERE. */
@@ -1469,8 +1467,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
     }
   }
   if ((ctx.driver === 'api' || ctx.driver === 'web') && ctx.externalServices?.length) {
-    lines.push('', 'PROVIDER CONTROL — use the realization selected by account availability.',
-      'For each providerControls requirement on a verification case, use these declared recipe bindings:')
+    lines.push('', 'PROVIDER CONTROL — use the realization selected by account availability.')
     for (const service of ctx.externalServices) {
       lines.push(`- ${service.name}: ${service.provided ? 'proxy (setup.externals)' : 'stub (setup.http)'}; base URL variables: ${(service.baseUrlEnvs ?? (service.baseUrlEnv ? [service.baseUrlEnv] : [])).join(', ') || 'NONE — wiring gap'}; credential variable names: ${(service.credentialEnv ?? []).join(', ') || 'none'}.`)
     }
@@ -1480,7 +1477,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       'Both realizations support delayMs before headers, bodyDelayMs after headers (proxy requires respond), refuse: true for socket reset, and once: true for a one-use rule followed by a later rule for the same path. Redirects use status and Location; malformed payloads use body. A refusal cannot include a response.',
       'Assert outgoing method/path, query, headers and JSON through expect; proxies use match.method/path/endpoint, where endpoint is the declared base URL variable name. Proxy calls counts all endpoints together.',
       'Response, delay, reset and request-assertion operations require at least one observed provider call; sequencing requires at least two. Only an explicit call-count-only contract may assert zero.',
-      'These controls arrange app-to-provider behavior on API and web drivers. They cannot delay, fail, or count browser-to-app requests. own-request-control remains unsupported. Preparation baseline checks run before scenario scripts.',
+      'These controls arrange app-to-provider behavior on API and web drivers. They cannot delay, fail, or count browser-to-app requests. Preparation baseline checks run before scenario scripts.',
     )
   }
   // How the app itself builds the requests it SENDS upstream, and which response
@@ -1722,7 +1719,6 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       '',
       `--- milestone ${m.order}`,
       `claim: ${m.claim}`,
-      ...(m.verification ? [`verification: ${m.verification.method} — ${m.verification.observable}`, `scope: ${m.verification.scope ?? "legacy"}`, `cases: ${JSON.stringify(m.verification.cases ?? [])}`] : []),
       `section: ${m.sectionHeading}  (${m.doc})`,
     )
     if (m.note) lines.push(`note: ${m.note}`)
@@ -1774,7 +1770,7 @@ export function buildAuthorUserPrompt(ctx: AuthorUserContext): string {
       '  4. `drop_scenario` ONLY when the obligation a prior scenario asserted is GONE',
       '     from the current text; the reason must name that obligation. Never drop a',
       '     scenario you merely chose to rewrite — replace it.',
-      '  5. The submitted scenario must verify all flow milestones and selected cases completely and establish their prerequisites.',
+      '  5. The submitted scenario must verify all flow milestones completely and establish their prerequisites.',
     )
     for (const p of ctx.priorScenarios) lines.push('', `--- prior scenario ${p.id}`, p.yaml)
   }
@@ -2457,7 +2453,7 @@ export function buildSeedUserPrompt(input: SeedDraftInput): string {
 // ---------------------------------------------------------------------------
 
 export const FIDELITY_SYSTEM_PROMPT = `\
-Keep per-case prerequisites and successful setup evidence intact. Missing account/setup cannot establish product drift. Accessible names differ from visible text: an unnamed status is selected by {role: status}, then its text asserted with expect.within and expect.text.contains. Never derive a status accessible name from its message. Query parameters must come from documented or mapped triggers. Production readiness cannot prove a development command or fixed address.
+Keep prerequisites and successful setup evidence intact. Missing account/setup cannot establish product drift. Accessible names differ from visible text: an unnamed status is selected by {role: status}, then its text asserted with expect.within and expect.text.contains. Never derive a status accessible name from its message. Query parameters must come from documented or mapped triggers. Production readiness cannot prove a development command or fixed address.
 You are a strict reviewer. You are given ONE test scenario that already PASSES
 against the current code, and the FLOW it was authored from: an ordered list of
 MILESTONES, each a spec CLAIM with the section text it was read against. Your ONE
@@ -2498,16 +2494,16 @@ how much else it checks. Judge only what the milestones claim — a scenario is 
 flagged for failing to test something no milestone states.
 
 # Scope and verification evidence
-The listed milestones are the flow's immutable complete obligations. Require this one candidate to prove every milestone and case; do not accept a subset or a union of tests. Section text is
-context, not permission to add unselected guarantees. Judge every selected claim
-strictly, including its stated verification method. Returned integer values do not
+The listed milestones are the flow's immutable complete obligations. Require this one candidate to prove every milestone; do not accept a subset or a union of tests. Section text is
+context, not permission to add unselected guarantees. Judge every claim
+strictly. Returned integer values do not
 prove an internal arithmetic mechanism; quiet reads do not prove concurrent snapshot
 consistency. Do not require those internal guarantees for a behavior-only claim.
 The complete scenario must establish its prerequisites through supported actions and
 must not claim in its title or assertions to verify omitted obligations.
 
-# Complete selected cases
-A selected case must prove every guarantee within that case. For date-descending
+# Complete claims
+For date-descending
 ordering with an ID tie-breaker, require distinct-date records AND equal-date records.
 Equal dates alone cannot establish date ordering. Cancel requires a previously
 visible dialog to become hidden and a subsequent read proving no record was saved;
@@ -2516,21 +2512,20 @@ on a later page, and preserved filters require applying them before saving. Exac
 ledger totals need controlled known records; an increase alone is not an exact sum.
 Defaults must be checked before filling, against independently established expected
 values. Never compare an input's value to a capture of that same input as proof.
-For an expected failure, review whether the assertions faithfully encode the selected
+For an expected failure, review whether the assertions faithfully encode the
 claims; the failure is evidence of disagreement, not permission to weaken assertions.
 Assertions after the first failure are authored coverage, never passing execution.
 
 # Request evidence must use the claimed boundary
-Read requestBoundary against the original claim and section text. If they disagree,
-flag the case as miscast. browser-to-app means the browser's calls to the application;
+browser-to-app means the browser's calls to the application;
 app-to-provider means the application's outbound calls to its provider. setup.http
 route counts and setup.externals proxy counts prove only app-to-provider traffic.
 For "Clicking Convert calls the conversion endpoint once", three provider calls for
 three clicks do not prove one browser-to-app request per click. The app might issue
 duplicate requests and satisfy them from a cache, or deduplicate them before calling
-the provider. Flag that proof as weak, even if metadata mistakenly says provider-control.
+the provider. Flag that proof as weak.
 UI result assertions cannot prove request cardinality. Preserve independently proven
-UI behavior, but do not mark the request-count case faithful without evidence at its
+UI behavior, but do not mark a request-count claim faithful without evidence at its
 specified boundary. Never weaken the claim to fit an available provider counter.
 
 # Two-sided claims — both halves must be asserted
@@ -2567,7 +2562,6 @@ export const FIDELITY_PROMPT_FINGERPRINT = fingerprint(FIDELITY_SYSTEM_PROMPT)
 
 /** One milestone as the fidelity reviewer sees it — the claim and its section text. */
 export interface FidelityMilestone {
-  verification?: GuardVerification
   order: number
   claim: string
   doc: string
@@ -2599,7 +2593,6 @@ export function buildFidelityUserPrompt(ctx: FidelityUserContext): string {
       '',
       `--- milestone ${m.order}`,
       `claim: ${m.claim}`,
-      ...(m.verification ? [`verification: ${m.verification.method} — ${m.verification.observable}`, `scope: ${m.verification.scope ?? "legacy"}`, `cases: ${JSON.stringify(m.verification.cases ?? [])}`] : []),
       `section: ${m.sectionHeading}  (${m.doc})`,
       'section text:',
       '"""',
@@ -2639,7 +2632,7 @@ export interface FlowDigest {
   areaId: string
   title: string
   goal: string
-  milestones: { doc: string; claimId: string; claimTitle: string; sentences: string[]; caseIds?: string[] }[]
+  milestones: { doc: string; claimId: string; claimTitle: string; sentences: string[] }[]
 }
 
 /** The epic pass's engine feedback for its ONE corrective re-ask. */
@@ -2716,10 +2709,7 @@ ${OUTPUT_ONLY_GUARDRAIL}
 # The rules
 - Use ONLY interfaces from the catalog below, addressed by their \`id\` copied VERBATIM.
   An id that is not in the catalog invalidates your whole answer.
-- Account for every explicit verification case with a grounded plan or an explicit gap.
-  Put nonempty checks: ["case-id"] on each plan/gap row, copied from that milestone.
-  A milestone may have planned cases and different blocked cases; never classify the whole
-  milestone because one sibling lacks an action or capability. A milestone may take two
+- Account for every milestone with a grounded plan or an explicit gap. A milestone may take two
   interfaces (do it, then observe it); an interface may serve two milestones.
 - Keep the plan in milestone order — it is a path, and each step acts on the state
   the previous one left.
@@ -2740,7 +2730,7 @@ reload interface. This does not add request interception, database inspection or
 server lifecycle controls to the browser driver.
 
 # API and web own controlled upstream providers
-The runner capabilities and resolved provider fixtures are authoritative. Provider
+Provider
 control is built into API and web execution; it needs no application interface.
 An unprovided account uses an isolated setup.http stub wired through the listed
 base URL environment variables. A provided account uses setup.externals proxy
@@ -2751,8 +2741,7 @@ provider response. Match loading, retry and stale-response UI behavior against t
 mapped app actions and describe the provider fixture in the plan note. Match provider
 request inspection against the app endpoint that triggers it. Never require a
 mock/timeout/call-count interface in the catalog for these runner-owned operations.
-Capabilities and wiring have already been checked before matching. Do not invent a
-capability gap for supported case requirements. A mapping gap must identify a missing
+A mapping gap must identify a missing
 APP action, never a missing provider-fixture interface. Browser-to-app request control
 and counting remain unsupported; upstream provider counts cannot prove app request counts.
 
@@ -2779,9 +2768,9 @@ say so in the \`note\`. Do not call it unrealizable.
 
 # Missing actions and unsupported verification
 Return grounded partial plans; never stretch an interface to cover a missing action.
-For each uncovered case return a gap: kind "mapping" when a needed executable
-control/operation is absent from this catalog, or "capability" when the specified
-verification needs observations or fixtures this driver cannot provide. State the
+For each uncovered milestone return a gap: kind "mapping" when a needed executable
+control/operation is absent from this catalog, or "capability" when the claim
+needs observations or fixtures this driver cannot provide. State the
 missing action or capability precisely. A catalog omission never establishes that
 the application lacks the behavior. Supporting control interfaces (cancel branches,
 pagination, navigation) are executable and can be composed with user tasks.
@@ -2790,23 +2779,17 @@ Do not turn readable-only locators into invented executable actions.
 # Output schema (CANONICAL)
 ${MATCH_JSON_SCHEMA}
 Return one object with a plan, gaps, or both:
-{ "plan": [{ "interfaceId": "web/add-expense", "milestone": 1, "checks": ["save"] }],
-  "gaps": [{ "milestone": 2, "checks": ["cancel"], "kind": "mapping", "reason": "No cancel action has been mapped for the add dialog." }] }
-Every case must be accounted for as planned or uncovered. A milestone may appear
-in both plan and gaps with DISJOINT checks. Two interfaces may support the same planned
-case, but no case may be both planned and gapped. Legacy milestones without cases omit
-checks and remain milestone-level. Plan only grounded behavior.
-For example: plan [{interfaceId:"web/list",milestone:1,checks:["columns","descending-order"]}]
-and gaps [{milestone:1,checks:["description-link"],kind:"mapping",reason:"Description link action is unmapped"}].
-Do not let a missing link hide supported column/order assertions. UI save feedback and
-HTTP POST status are separate cases; browser appearance cannot prove protocol metadata.
+{ "plan": [{ "interfaceId": "web/add-expense", "milestone": 1 }],
+  "gaps": [{ "milestone": 2, "kind": "mapping", "reason": "No cancel action has been mapped for the add dialog." }] }
+Every milestone must be accounted for as planned or uncovered. Two interfaces may support the same planned
+milestone, but no milestone may be both planned and gapped. Plan only grounded behavior.
+Browser appearance cannot prove protocol metadata.
 `
 
 export const MATCH_PROMPT_FINGERPRINT = fingerprint(MATCH_SYSTEM_PROMPT)
 
 /** One milestone as the matcher sees it — its number and its claim, never code. */
 export interface MatchMilestoneLine {
-  verification?: GuardVerification
   order: number
   claim: string
   /** Synthesis' note on why this step sits here, when it wrote one. */
@@ -2847,9 +2830,6 @@ export interface MatchUserContext {
   milestones: MatchMilestoneLine[]
   /** The surface being matched (a driver-registry id, e.g. `cli`). */
   surface: string
-  /** Runner capabilities and resolved fixtures, separate from app interfaces. */
-  capabilities?: readonly string[]
-  providerControls?: readonly ResolvedProviderControl[]
   /** The surface's whole interface catalog, as digests. */
   interfaces: InterfaceDigest[]
   /** On a re-ask after engine validation, exactly what was wrong. */
@@ -2877,14 +2857,11 @@ export function buildMatchCatalogPrompt(ctx: Pick<MatchUserContext, 'surface' | 
   return lines.join('\n')
 }
 
-/** One flow's side of a match, sent as the user turn: its obligations and
- * fixtures, then what the previous answer got wrong. It varies independently
- * of the catalog. */
+/** One flow's side of a match, sent as the user turn: its milestones, then
+ * what the previous answer got wrong. It varies independently of the catalog. */
 export function buildMatchTaskPrompt(ctx: Omit<MatchUserContext, 'interfaces'>): string {
   const lines: string[] = [
     `Surface: ${ctx.surface}`,
-    `Runner observation capabilities: ${JSON.stringify(ctx.capabilities ?? [])}`,
-    `Resolved provider fixtures: ${JSON.stringify(ctx.providerControls ?? [])}`,
     '',
     `FLOW: ${ctx.flow.title}`,
     `goal: ${ctx.flow.goal}`,
@@ -2892,7 +2869,7 @@ export function buildMatchTaskPrompt(ctx: Omit<MatchUserContext, 'interfaces'>):
     'MILESTONES — the path to walk, in order:',
   ]
   for (const m of ctx.milestones) {
-    lines.push(`  ${m.order}. ${m.claim}${m.note ? `  (${m.note})` : ''}${m.verification ? `  [${m.verification.method}: ${m.verification.observable}; cases: ${JSON.stringify(m.verification.cases ?? [])}]` : ''}`)
+    lines.push(`  ${m.order}. ${m.claim}${m.note ? `  (${m.note})` : ''}`)
   }
   if (ctx.issues) {
     if (ctx.issues.unknownInterfaces.length > 0) {

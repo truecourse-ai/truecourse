@@ -14,7 +14,7 @@ vi.mock('@/lib/socket', () => ({ connectSocket: () => ({ on: () => {}, off: () =
 
 import FlowsPage from '@/dashboard/pages/FlowsPage';
 
-const progress: GuardFlowProgress = { execution: 'passed', scenarios: 1, passed: 1, coverage: 'partial', verified: 1, total: 2, unit: 'cases', category: 'behavior', generation: 'incomplete' };
+const progress: GuardFlowProgress = { execution: 'passed', scenarios: 1, passed: 1, coverage: 'partial', verified: 1, total: 2, generation: 'incomplete' };
 const flow = (title: string, p: GuardFlowProgress): GuardFlowListItem => ({ flowId: title, title, goal: title, status: p.coverage === 'complete' ? 'guarded' : 'blocked-on', bucket: p.coverage === 'complete' ? 'guarded' : 'partial', epic: false, composedOf: [], manual: false, milestoneCount: 1, docs: [], surfaces: [], drivers: ['web'], findings: 0, toolDefects: 0, errors: 0, progress: p });
 
 describe('execution and coverage presentation', () => {

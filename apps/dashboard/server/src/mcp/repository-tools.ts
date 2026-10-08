@@ -98,7 +98,6 @@ function flowView(detail: GuardFlowDetail) {
       order: m.order,
       claim: m.claimTitle,
       doc: m.doc,
-      ...(m.cases?.length ? { cases: m.cases.map((c) => c.claim) } : {}),
     })),
     tests: detail.surfaces.map((t) => ({
       ...(t.scenarioId ? { testId: t.scenarioId } : {}),

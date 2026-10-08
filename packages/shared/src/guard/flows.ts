@@ -10,17 +10,15 @@ import { GuardFailureObservationSchema } from './failure-observation.js'
  * states what the product should do, derived from the spec corpus alone.
  *
  * Identity is deliberately NOT the title (model-authored, unstable across
- * re-synthesis): a flow keeps its `id` through re-synthesis by its complete source obligations —
+ * re-synthesis): a flow keeps its `id` through re-synthesis by its complete milestone composition —
  * see {@link resolveFlowIdentity}. {@link flowFingerprint} hashes the ordered
  * milestone composition, so re-wrapped prose never moves it and a re-sequenced
  * path does.
  */
 
-import { GuardVerificationSchema } from './verification.js'
 import crypto from 'node:crypto'
 import { z } from 'zod'
 import type { GuardCoverageGapKind } from './report.js'
-import { GuardDriverIdSchema } from './drivers.js'
 
 /**
  * One step of a flow's path: a claim of the corpus, by id. `order` is the
@@ -39,11 +37,6 @@ export const GuardFlowMilestoneSchema = z
     claimTitle: z.string().min(1),
     /** The keys of the sentences the claim is read from: what the flow stays bound to. */
     sentences: z.array(z.string().min(1)).min(1),
-    /** Selected authoritative cases; omission reads the whole legacy claim. */
-    caseIds: z.array(z.string().min(1)).min(1).optional(),
-    /** Each listed driver can prove this entire milestone independently. Absent on legacy flows. */
-    proofDrivers: z.array(GuardDriverIdSchema).min(1).optional(),
-    verification: GuardVerificationSchema.optional(),
     /** Optional free-text note from synthesis (why this step sits here). */
     note: z.string().optional(),
   })
@@ -159,8 +152,6 @@ export const GuardNoFlowClaimSchema = z
   .object({
     /** The id of the claim placed in no flow. */
     claimId: z.string().min(1),
-    /** Selected authoritative cases; omission reads the whole legacy claim. */
-    caseIds: z.array(z.string().min(1)).min(1).optional(),
     reason: z.string().min(1),
   })
   .strict()
@@ -256,9 +247,9 @@ const FLOW_WORKER_OPTIONAL_FIELDS = {
   // (`droppedScenarios`). Both absent on a from-scratch author — the legacy
   // one-scenario shape stays byte-identical, so old cache entries still parse.
   settled: ['additionalScenarios', 'droppedScenarios'],
-  blocked: ['lastEvidence', 'attempts', 'remaining'],
+  blocked: ['lastEvidence', 'attempts'],
   'journey-defect': ['lastEvidence', 'attempts'],
-  retired: ['remaining'],
+  retired: [],
 } as const satisfies Record<keyof typeof FLOW_WORKER_PAYLOAD_FIELDS, readonly string[]>
 
 /** One accepted scenario beyond the primary: its stashed sha + declared reds. */
@@ -279,17 +270,6 @@ export const GuardDroppedScenarioSchema = z
   })
   .strict()
 export type GuardDroppedScenario = z.infer<typeof GuardDroppedScenarioSchema>
-
-/** Current reason an assigned obligation remains unfinished. Historical outcomes
- * may omit this field; new workers reconcile it against engine observations. */
-export const GuardRemainingObligationSchema = z.object({
-  milestone: z.number().int().positive(),
-  caseId: z.string().min(1).optional(),
-  reasonKind: z.enum(['assertion', 'annotation', 'preparation', 'unsupported-capability', 'review-unavailable', 'not-attempted']),
-  evidence: z.string().min(1),
-  issueId: z.string().min(1).optional(),
-}).strict()
-export type GuardRemainingObligation = z.infer<typeof GuardRemainingObligationSchema>
 
 /**
  * The `guard-generate.flow-worker` session's outcome — exhaustive: a worker cannot end without one of these four kinds.
@@ -333,7 +313,6 @@ export const GuardFlowWorkerOutcomeSchema = z
     /** retired: the last run's evidence — why no faithful scenario could be produced.
      *  blocked MAY carry it too: the run evidence behind the block. */
     lastEvidence: z.string().min(1).optional(),
-    remaining: z.array(GuardRemainingObligationSchema).optional(),
     /** settled (edit mode): scenarios accepted beyond the primary, each by its stashed sha. */
     additionalScenarios: z.array(GuardSettledScenarioSchema).optional(),
     /** settled (edit mode): prior scenarios the worker dropped, each with the vanished obligation. */
@@ -394,32 +373,26 @@ export type GuardFlowsFile = z.infer<typeof GuardFlowsFileSchema>
 // --- Fingerprint & identity ------------------------------------------------
 
 /**
- * A milestone's identity: its claim and its canonical selected cases. The ONE
- * key {@link flowFingerprint} hashes and {@link resolveFlowIdentity} compares,
- * so the fingerprint and the identity resolution can never disagree about what
- * makes two milestones "the same".
+ * A milestone's identity: the claim it proves. The ONE key {@link flowFingerprint}
+ * hashes and {@link resolveFlowIdentity} compares, so the fingerprint and the
+ * identity resolution can never disagree about what makes two milestones "the
+ * same".
  */
-export function flowMilestoneKey(milestone: Pick<GuardFlowMilestone, 'claimId'> & Partial<Pick<GuardFlowMilestone, 'caseIds' | 'verification'>>): string {
-  return `${milestone.claimId}\0${[...(milestone.caseIds ?? milestone.verification?.cases?.map(c => c.id) ?? [])].sort().join('\0')}`
+export function flowMilestoneKey(milestone: Pick<GuardFlowMilestone, 'claimId'>): string {
+  return milestone.claimId
 }
 
 /**
  * `sha256:<hex>` over the flow's ORDERED milestone list (each milestone's claim
- * id and cases). Milestones are folded in `order`, so the array's incidental
- * order never matters but re-sequencing the path does — a flow's fingerprint
- * answers "did the composition of what this flow tests change?".
+ * id). Milestones are folded in `order`, so the array's incidental order never
+ * matters but re-sequencing the path does — a flow's fingerprint answers "did
+ * the composition of what this flow tests change?".
  */
-function canonicalProofValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalProofValue)
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => [key, canonicalProofValue(child)]))
-  return value
-}
-
 export function flowFingerprint(milestones: readonly GuardFlowMilestone[]): string {
   const ordered = [...milestones].sort((a, b) => a.order - b.order)
   const digest = crypto
     .createHash('sha256')
-    .update(ordered.map((m) => flowMilestoneKey(m) + (m.proofDrivers ? `\0${[...new Set(m.proofDrivers)].sort().join(',')}` : '') + (m.verification ? `\0verification:${JSON.stringify(canonicalProofValue({ ...m.verification, ...(m.verification.cases ? { cases: [...m.verification.cases].sort((a, b) => a.id.localeCompare(b.id)) } : {}) }))}` : '')).join('\n'), 'utf-8')
+    .update(ordered.map((m) => flowMilestoneKey(m)).join('\n'), 'utf-8')
     .digest('hex')
   return `sha256:${digest}`
 }
@@ -451,9 +424,16 @@ export interface GuardFlowIdentityResolution {
   orphaned: GuardFlow[]
 }
 
+/** `value` with every object's keys sorted, so two spellings of one object serialize alike. */
+function canonicalValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalValue)
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => [key, canonicalValue(child)]))
+  return value
+}
+
 /** The contract identity resolves on: the milestone multiset and the starting state. */
 export function flowContractKey(flow: Pick<GuardFlow, 'milestones' | 'startingState'>): string {
-  return JSON.stringify(canonicalProofValue({ fingerprint: flowFingerprint(flow.milestones), startingState: flow.startingState ?? null }))
+  return JSON.stringify(canonicalValue({ fingerprint: flowFingerprint(flow.milestones), startingState: flow.startingState ?? null }))
 }
 
 /**

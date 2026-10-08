@@ -1,4 +1,3 @@
-import { stepChecks } from './step-parts.js'
 /**
  * The WEB driver's verb vocabulary — the per-driver closed sub-schema the driver
  * registry (`drivers.ts`) describes, in its own module because a driver's verbs are
@@ -685,7 +684,6 @@ export const GuardWebNavigateStepSchema = z
     timeoutMs,
     note,
     milestone,
-    checks: stepChecks,
   })
   .strict()
 
@@ -699,7 +697,6 @@ export const GuardWebClickStepSchema = z
     timeoutMs,
     note,
     milestone,
-    checks: stepChecks,
   })
   .strict()
 
@@ -730,7 +727,6 @@ export const GuardWebPressStepSchema = z
     timeoutMs,
     note,
     milestone,
-    checks: stepChecks,
   })
   .strict()
 
@@ -748,7 +744,6 @@ export const GuardWebHoverStepSchema = z
     timeoutMs,
     note,
     milestone,
-    checks: stepChecks,
   })
   .strict()
 
@@ -770,7 +765,6 @@ export const GuardWebFillStepSchema = z
     timeoutMs,
     note,
     milestone,
-    checks: stepChecks,
   })
   .strict()
 
@@ -784,7 +778,6 @@ export const GuardWebSelectStepSchema = z.object({
   timeoutMs,
   note,
   milestone,
-  checks: stepChecks,
 }).strict()
 
 /**
@@ -933,7 +926,6 @@ export const GuardWebUploadStepSchema = z
     timeoutMs,
     note,
     milestone,
-    checks: stepChecks,
   })
   .strict()
 
@@ -962,7 +954,6 @@ export const GuardWebHistoryStepSchema = z
     timeoutMs,
     note,
     milestone,
-    checks: stepChecks,
   })
   .strict()
 
@@ -980,7 +971,6 @@ export const GuardWebExpectStepSchema = z
     timeoutMs,
     note,
     milestone,
-    checks: stepChecks,
   })
   .strict()
 
@@ -1009,7 +999,6 @@ export const GuardWebCredentialStepSchema = z
     timeoutMs,
     note,
     milestone,
-    checks: stepChecks,
   })
   .strict()
 

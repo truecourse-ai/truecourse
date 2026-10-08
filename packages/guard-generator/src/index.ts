@@ -65,14 +65,12 @@ export type { ClaimPlacement, ClaimAreaInputs, ClaimAreaInputsOptions } from './
 
 export {
   matchFlow,
-  matchProviderControls,
   planFlowMatching,
   readCachedMatch,
   buildSurfaceCatalogs,
   interfaceDigest,
   realizationLines,
   realizationAssignmentFingerprint,
-  partitionPlanPreparations,
   matchCacheKey,
   matchLegacyCacheKeys,
   surfaceIdentityFingerprint,
@@ -486,8 +484,6 @@ export { apiAuthEvidence, probeCandidatesFromInterfaces, requiredResources } fro
 export type { ApiAuthEvidence, RequiredResource } from './seed-evidence.js'
 
 export type { GuardSetupPreparationSession, GuardSetupPreparationSessionInput } from './setup.js'
-
-export { partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowPrerequisiteShapeFingerprint, flowInvocationGaps } from './prerequisites.js'
 
 export { completeRealization } from './match.js'
 

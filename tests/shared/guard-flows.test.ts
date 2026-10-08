@@ -104,9 +104,8 @@ describe('flowFingerprint', () => {
     expect(flowFingerprint([{ ...CREATE, claimId: LIST.claimId }])).not.toBe(flowFingerprint([CREATE]))
   })
 
-  it('the milestone key is the claim id + its selected cases, sorted', () => {
-    expect(flowMilestoneKey(CREATE)).toBe(`${CREATE.claimId}\0`)
-    expect(flowMilestoneKey({ claimId: 'c', caseIds: ['b', 'a'] })).toBe('c\0a\0b')
+  it('the milestone key is the claim id', () => {
+    expect(flowMilestoneKey(CREATE)).toBe(CREATE.claimId)
   })
 
   it('a note never moves the fingerprint', () => {
@@ -418,18 +417,8 @@ describe('GuardFlowWorkerOutcomeSchema payload pairing', () => {
   })
 })
 
-describe('scoped flow identities', () => {
-  const cases = ['cancel', 'save'].map(id => ({ id, claim: id, method: 'behavior' as const, requires: ['process' as const], conditions: [] }))
-  const source: GuardFlowMilestone = { ...CREATE, proofDrivers: ['cli'], verification: { method: 'behavior', observable: 'result', cases } }
-  it('canonicalizes case selections and parsed object order, including legacy whole claims', () => {
-    const explicit = { ...source, caseIds: ['save', 'cancel'], verification: { ...source.verification!, cases: [...cases].reverse() } }
-    expect(flowFingerprint([explicit])).toBe(flowFingerprint([source]))
-    expect(flowFingerprint([GuardFlowMilestoneSchema.parse(explicit)])).toBe(flowFingerprint([source]))
-  })
-  it('gives disjoint children new identities and orphans the parent, including whole-milestone splits', () => {
-    const prev = [flow('parent', [source])]
-    const children = cases.map(c => flow(c.id, [{ ...source, caseIds: [c.id], verification: { ...source.verification!, cases: [c] } }]))
-    expect(resolveFlowIdentity(prev, children)).toMatchObject({ verdicts: [{ kind: 'new', id: 'cancel' }, { kind: 'new', id: 'save' }], orphaned: prev })
+describe('flow identities across splits', () => {
+  it('gives disjoint children new identities and orphans the parent', () => {
     expect(resolveFlowIdentity([flow('parent', [CREATE, LIST, COMPLETE])], [flow('first', [CREATE, LIST]), flow('second', [COMPLETE])]).verdicts.every(v => v.kind === 'new')).toBe(true)
   })
   it('does not merge equivalent-looking claims from different source documents', () => {

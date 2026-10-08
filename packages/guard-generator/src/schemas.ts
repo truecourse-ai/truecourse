@@ -19,7 +19,6 @@
 import { z } from 'zod'
 import { namedEntries, wireShape } from '@truecourse/shared/llm'
 import {
-  GuardVerificationSchema,
   GuardSetupSchema,
   GuardStepObjectSchema,
   promptKeysNeedATerminal,
@@ -502,7 +501,6 @@ export type FidelityReview = z.infer<typeof FidelityReviewSchema>
  */
 export const SynthesizedMilestoneSchema = z.object({
   claimId: z.string().min(1),
-  caseIds: z.array(z.string().min(1)).min(1).optional(),
   order: z.number().int().positive().optional(),
   note: z.string().optional(),
 })
@@ -525,7 +523,6 @@ export type SynthesizedFlow = z.infer<typeof SynthesizedFlowSchema>
  *  coverage honesty rule's other half. */
 export const SynthesizedNoFlowClaimSchema = z.object({
   claimId: z.string().min(1),
-  caseIds: z.array(z.string().min(1)).min(1).optional(),
   reason: z.string().min(1),
 })
 export type SynthesizedNoFlowClaim = z.infer<typeof SynthesizedNoFlowClaimSchema>
@@ -614,8 +611,6 @@ export const RealizationStepSchema = z.object({
   interfaceId: z.string().min(1),
   /** The flow milestone (`order`) this interface realizes. */
   milestone: z.number().int().positive(),
-  /** Explicit source case ids this action serves; required for case-bearing milestones. */
-  checks: z.array(z.string().min(1)).min(1).optional(),
   /** Optional one-liner on how the interface serves the milestone. */
   note: z.string().optional(),
 })
@@ -647,7 +642,6 @@ export type WorldClassify = z.infer<typeof WorldClassifySchema>
 
 export const RealizationGapSchema = z.object({
   milestone: z.number().int().positive(),
-  checks: z.array(z.string().min(1)).min(1).optional(),
   kind: z.enum(['mapping', 'capability']),
   reason: z.string().min(1),
 }).strict()
@@ -661,7 +655,7 @@ export const RealizationMatchSchema = z
     unrealizable: z.string().min(1).optional(),
   })
   .superRefine((m, ctx) => {
-    const message = 'plan/gaps and legacy unrealizable are mutually exclusive. Return {plan:[{interfaceId,milestone,checks?}],gaps:[{milestone,checks?,kind,reason}]} with at least one entry, or {unrealizable:reason} alone'
+    const message = 'plan/gaps and legacy unrealizable are mutually exclusive. Return {plan:[{interfaceId,milestone}],gaps:[{milestone,kind,reason}]} with at least one entry, or {unrealizable:reason} alone'
     if (m.unrealizable !== undefined && (m.plan !== undefined || m.gaps !== undefined)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['unrealizable'], message })
     } else if (m.unrealizable === undefined && !(m.plan?.length || m.gaps?.length)) {
