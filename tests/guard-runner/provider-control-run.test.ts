@@ -86,32 +86,3 @@ for (const driver of ['api', 'web'] as const) for (const provided of [false, tru
   if (result.status !== 'ok') throw new Error(JSON.stringify(result))
   expect(result.latest.scenarios.map(s => [s.id, s.outcome]), JSON.stringify(result.latest.scenarios.filter(s => s.outcome !== 'pass'))).toEqual(expect.arrayContaining(cases.map(c => [c.name, 'pass'])))
 }, 60000)
-
-it('blocks saved ambiguous request-count evidence while an independent scenario still executes', async () => {
-  const { GuardFlowsFileSchema, flowFingerprint } = await import('@truecourse/shared')
-  const root = makeTempRepo(); repos.push(root)
-  const serve = ['node', path.resolve('tests/fixtures/guard-provider-control/server.mjs')]
-  writeApiRecipe(root, { serve, healthPath: '/health' })
-  const bound = specBinds('cli/version')[0]
-  const milestones = [{ order: 1, doc: bound.doc, claimId: 'claim::docs/spec.md::conversion-requests', claimTitle: 'Conversion requests', sentences: bound.sentences, proofDrivers: ['api'], verification: {
-    scope: 'api', method: 'behavior', observable: 'Request evidence', cases: [
-      { id: 'count', claim: 'Count requests', method: 'behavior', requires: ['http', 'provider-control'], conditions: [], providerControls: [{ service: 'provider', operations: ['call-count'] }] },
-      { id: 'health', claim: 'Health responds', method: 'behavior', requires: ['http'], conditions: [] },
-    ],
-  } }]
-  const corpus = GuardFlowsFileSchema.parse({ version: 1, generatedAt: new Date().toISOString(), flows: [{
-    id: 'convert', title: 'Convert', goal: 'Convert', fingerprint: 'sha256:temporary', milestones,
-    bindings: [bound], composedOf: [], synthesisInputsHash: 'inputs',
-  }] })
-  corpus.flows[0].fingerprint = flowFingerprint(corpus.flows[0].milestones)
-  fs.mkdirSync(path.join(root, '.truecourse/scenarios'), { recursive: true })
-  fs.writeFileSync(path.join(root, '.truecourse/scenarios/flows.json'), JSON.stringify(corpus))
-  for (const check of ['count', 'health']) writeScenario(root, `api/${check}.yaml`, apiScenario({ id: check, binds: specBinds('cli/version'), flow: { id: 'convert', fingerprint: corpus.flows[0].fingerprint }, steps: [
-    { request: { method: 'GET', path: '/health' }, expect: { status: 200 }, milestone: 1, checks: [check] },
-  ] }))
-  const result = await runGuard({ repoRoot: root, skipBuild: true })
-  expect(result.status).toBe('ok')
-  if (result.status !== 'ok') throw new Error(JSON.stringify(result))
-  expect(result.latest.scenarios.find(s => s.id === 'count')).toMatchObject({ outcome: 'blocked', failure: { actual: expect.stringContaining('Re-extract') } })
-  expect(result.latest.scenarios.find(s => s.id === 'health')).toMatchObject({ outcome: 'pass' })
-})

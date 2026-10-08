@@ -131,12 +131,8 @@ import {
 import type { ScanStep } from '../spec-scan/run.js';
 import {
   planGuardWork,
-  partitionFlowPrerequisites,
-  flowInvocationGaps,
   buildServerRouteIndex,
   bindRealizationServer,
-  flowPrerequisiteStateMaterial,
-  flowPrerequisiteShapeFingerprint,
   flowWorkerKeyFingerprints,
   proposeRecipe,
   recipeCacheKey,
@@ -163,13 +159,13 @@ import {
   buildWebAuthorCatalog,
   catalogReadMaterial,
   readCachedMatch,
-  matchProviderControls,
   realizationAssignmentFingerprint,
-  partitionPlanPreparations,
   readFlowsFile,
   legacyFlowGenerationInputsHash,
   flowGenerationInputComponents,
+  flowInterfaceFingerprintBag,
   flowSettleVerdict,
+  type FlowGenerationInputParts,
   flowAreaIdForDoc,
   webAuthorKeyMaterial,
   workerCacheKey,
@@ -206,8 +202,7 @@ import {
 import {
   driverRecipeKey,
   isRunnableDriver,
-  flowDriversToMatch,
-  GUARD_REVIEW_POLICY_VERSION, scenarioFullFlowDefect,
+  scenarioFullFlowDefect,
   runnableDriverIds,
   violatesSettleInvariant,
   type GuardSetupTaxonomyKey,
@@ -222,7 +217,6 @@ import {
   flowPreparationFingerprint,
   seedRosterFingerprint,
   preparationsFingerprint,
-  resolvePrerequisites,
   buildRouteManifest,
   loadDependencyCatalog,
   loadRecipe,
@@ -962,7 +956,7 @@ async function planGuardSessionStages(repoRoot: string, plan: GuardWorkPlan): Pr
     // offline — so the epic session is always quoted as its 0..1 ceiling.
     epicCalls: areasWithClaims > 1 ? 1 : 0,
     areaChars: chars.length ? Math.round(chars.reduce((n, c) => n + c, 0) / chars.length) : 0,
-    maxFlows: areas.reduce((n, a) => n + a.claims.reduce((count, claim) => count + Math.max(claim.verification?.cases?.length ?? 1, 1), 0), 0),
+    maxFlows: areas.reduce((n, a) => n + a.claims.length, 0),
     exact: true,
   };
 }
@@ -1009,14 +1003,11 @@ async function planGuardRealizationStages(
   flowStage: GuardSessionWorkPlan,
 ): Promise<GuardRealizationPlan> {
   const surfaces = preparedSurfaces(repoRoot);
-  let availablePreparations: ReturnType<typeof preparationCatalog> = [];
   let recipe: Recipe | undefined;
   try {
     recipe = loadRecipe(repoRoot, recipePath(repoRoot))?.recipe;
-    if (recipe) availablePreparations = preparationCatalog(recipe, repoRoot);
   } catch { /* Invalid recipes are repaired before runtime matching. */ }
 
-  const prerequisites = resolvePrerequisites(repoRoot, recipe?.api?.externals);
   // The recipe material every flow's key folds, computed once for the run.
   const slices = new Map<GuardDriverId, string>();
   const recipeSliceOf = (surface: GuardDriverId): string => {
@@ -1065,11 +1056,6 @@ async function planGuardRealizationStages(
       // the interfaces it grounds on are what its inputs hash folds, so an uncached
       // pair is the only unknown — and it is counted as both a match call and a
       // worker session.
-      const interfaceFingerprints: string[] = [];
-      // The two prerequisite materials the run folds: the shape every current
-      // key carries, and the resolved state the retired ones did.
-      const prerequisiteShape = flowPrerequisiteShapeFingerprint(flow, prerequisites.targets, recipe);
-      const prerequisiteMaterial = flowPrerequisiteStateMaterial(flow, prerequisites.targets, recipe);
       const plannedPairs: {
         surface: GuardDriverId;
         assignment: string;
@@ -1082,10 +1068,7 @@ async function planGuardRealizationStages(
       }[] = [];
       let unknown = false;
       for (const catalog of matchable) {
-        if (!flowDriversToMatch(flow).includes(catalog.surface)) continue;
-        const eligibleFlow = recipe ? partitionFlowPrerequisites(flow, catalog.surface, prerequisites.targets, recipe).flow : flow;
-        if (!eligibleFlow.milestones.length) continue;
-        const cached = await readCachedMatch(repoRoot, eligibleFlow, catalog, undefined, recipe ? matchProviderControls(eligibleFlow, catalog.surface, prerequisites.targets, recipe) : []);
+        const cached = await readCachedMatch(repoRoot, flow, catalog);
         if (!cached) {
           matchCalls++;
           unknown = true;
@@ -1095,15 +1078,13 @@ async function planGuardRealizationStages(
         if (recipe && serverIndex && catalog.surface === 'api') {
           const bound = bindRealizationServer(cached.plan, serverIndex);
           if (bound.kind === 'missing-server' || bound.kind === 'spans') continue;
-          if (flowInvocationGaps(flow, catalog.surface, recipe, bound.kind === 'bound' ? bound.server : undefined).length) continue;
         }
-        const preparedPlan = partitionPlanPreparations(flow, cached.plan, availablePreparations).plan;
-        if (!preparedPlan || !completeRealization(flow, preparedPlan)) continue;
-        const assignment = realizationAssignmentFingerprint(preparedPlan);
-        const interfaces = preparedPlan.interfaces.map((j) => j.fingerprint);
+        if (!completeRealization(flow, cached.plan)) continue;
+        const assignment = realizationAssignmentFingerprint(cached.plan);
+        const interfaces = cached.plan.interfaces.map((j) => j.fingerprint);
         const webCatalog = catalog.surface === 'web' ? catalog.fingerprint : undefined;
         const webAuthor = catalog.surface === 'web' && authorCatalog
-          ? webAuthorKeyMaterial(authorCatalog, preparedPlan.interfaces, flow, catalogResources)
+          ? webAuthorKeyMaterial(authorCatalog, cached.plan.interfaces, flow, catalogResources)
           : undefined;
         plannedPairs.push({
           surface: catalog.surface,
@@ -1111,8 +1092,6 @@ async function planGuardRealizationStages(
           interfaces,
           webCatalog,
           ...flowWorkerKeyFingerprints({
-            prerequisiteShape,
-            legacyPrerequisiteMaterial: prerequisiteMaterial,
             assignment,
             interfaces,
             ...(webAuthor && webCatalog ? { web: { handed: webAuthor, catalog: webCatalog } } : {}),
@@ -1123,36 +1102,32 @@ async function planGuardRealizationStages(
       const previousDrivers = priorByFlow.get(flow.id)?.scenarios.flatMap(s => s.drivers ?? []) ?? [];
       plannedPairs.sort((a, b) => Number(previousDrivers.includes(b.surface)) - Number(previousDrivers.includes(a.surface)) || a.surface.localeCompare(b.surface));
       plannedPairs.splice(1);
-      // The LEGACY SETTLE bag, which is its own formula: the whole catalog on
-      // web, and the resolved state exactly once.
-      interfaceFingerprints.push(...plannedPairs.flatMap(p => [p.assignment, ...p.interfaces, ...(p.webCatalog ? [p.webCatalog] : [])]));
-      interfaceFingerprints.push(prerequisiteMaterial);
       const prior = priorByFlow.get(flow.id);
       const priorScenarios = (prior?.scenarios ?? []).flatMap((s) => committedScenarios.get(s.id) ?? []);
       const chosenSurface = plannedPairs[0]?.surface ?? 'cli';
-      // The run's own settle compare, over the same components it computes.
+      // The run's own settle inputs, built once: the named components the
+      // compare reads, and the bag the legacy hash folds (the whole catalog on web).
+      const inputParts: FlowGenerationInputParts = {
+        flowFingerprint: flow.fingerprint,
+        assignmentFingerprints: plannedPairs.map((p) => p.assignment),
+        interfaceFingerprints: plannedPairs.flatMap((p) => p.interfaces),
+        ...(plannedPairs[0]?.webCatalog
+          ? {
+              webCatalogFingerprint: plannedPairs[0].webCatalog,
+              webCatalogReads: authorCatalog ? catalogReadMaterial(authorCatalog, prior?.catalogReads ?? []) : [],
+            }
+          : {}),
+        hasScenario: priorScenarios.length > 0,
+        recipeSlice: recipeSliceOf(chosenSurface),
+        roster: flowRosterFingerprint(recipe ?? null, priorScenarios),
+        preparation: flowPreparationFingerprint(repoRoot, recipe ?? null, priorScenarios),
+      };
       const settle = flowSettleVerdict({
         prior,
-        components: flowGenerationInputComponents({
-          flowFingerprint: flow.fingerprint,
-          assignmentFingerprints: plannedPairs.map((p) => p.assignment),
-          interfaceFingerprints: plannedPairs.flatMap((p) => p.interfaces),
-          ...(plannedPairs[0]?.webCatalog
-            ? {
-                webCatalogFingerprint: plannedPairs[0].webCatalog,
-                webCatalogReads: authorCatalog ? catalogReadMaterial(authorCatalog, prior?.catalogReads ?? []) : [],
-              }
-            : {}),
-          hasScenario: priorScenarios.length > 0,
-          prerequisiteMaterial,
-          prerequisiteShape,
-          recipeSlice: recipeSliceOf(chosenSurface),
-          roster: flowRosterFingerprint(recipe ?? null, priorScenarios),
-          preparation: flowPreparationFingerprint(repoRoot, recipe ?? null, priorScenarios),
-        }),
+        components: flowGenerationInputComponents(inputParts),
         legacyHash: legacyFlowGenerationInputsHash({
           flowFingerprint: flow.fingerprint,
-          interfaceFingerprints,
+          interfaceFingerprints: flowInterfaceFingerprintBag(inputParts),
           recipeFingerprint: plan.recipeFingerprint,
         }),
       });
@@ -1162,8 +1137,8 @@ async function planGuardRealizationStages(
         unknown || !settle.settled || (prior !== undefined && violatesSettleInvariant(prior)) ||
         (prior?.scenarios.length ?? 0) > 1 || (prior?.scenarios ?? []).some(s => {
           const scenario = committedScenarios.get(s.id);
-          return s.reviewed === false || !scenario || s.reviewPolicyVersion !== GUARD_REVIEW_POLICY_VERSION || s.reviewedScenarioFingerprint !== scenarioReviewFingerprint(scenario) ||
-            !!scenarioFullFlowDefect(flow.milestones, scenario.steps, s.caseEvidence ?? []);
+          return s.reviewed === false || !scenario || s.reviewedScenarioFingerprint !== scenarioReviewFingerprint(scenario) ||
+            !!scenarioFullFlowDefect(flow.milestones, scenario.steps);
         });
       if (!changed) continue;
       if (unknown) {

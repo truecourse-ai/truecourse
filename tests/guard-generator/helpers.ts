@@ -425,7 +425,7 @@ export function flowTitleOf(claim: { title: string }): string {
 
 /** A flow milestone over one synthesis claim, as the fakes emit it. */
 function milestoneOf(c: FlowClaimInput, order: number): SynthesizedMilestone {
-  return { order, claimId: c.id, ...(c.verification?.cases ? { caseIds: c.verification.cases.map((v) => v.id) } : {}) }
+  return { order, claimId: c.id }
 }
 
 /**
@@ -691,7 +691,7 @@ export function submitWorkerSessions(
 export function matchAll(onCall?: (flowId: string, surface: string) => void): MatchRunner {
   return async ({ flow, milestones, interfaces, surface }) => {
     onCall?.(flow.id, surface)
-    return { plan: milestones.map((m) => ({ interfaceId: interfaces[0].id, milestone: m.order, ...(m.verification?.cases?.length ? { checks: m.verification.cases.map(c => c.id) } : {}) })) }
+    return { plan: milestones.map((m) => ({ interfaceId: interfaces[0].id, milestone: m.order })) }
   }
 }
 
@@ -701,7 +701,7 @@ export function matchBy(unrealizable: Record<string, string>, onCall?: (flowId: 
     onCall?.(ctx.flow.id)
     const reason = unrealizable[ctx.flow.id]
     if (reason) return { unrealizable: reason }
-    return { plan: ctx.milestones.map((m) => ({ interfaceId: ctx.interfaces[0].id, milestone: m.order, ...(m.verification?.cases?.length ? { checks: m.verification.cases.map(c => c.id) } : {}) })) }
+    return { plan: ctx.milestones.map((m) => ({ interfaceId: ctx.interfaces[0].id, milestone: m.order })) }
   }
 }
 

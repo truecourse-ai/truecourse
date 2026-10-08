@@ -5,7 +5,6 @@ import {
   FlowTestStatusSchema,
   type FlowTestStatus,
 } from './flow-tests.js'
-import { GuardBlockerSchema, GuardObligationRefSchema } from './verification.js'
 /**
  * Derived guard read-surface DTOs the dashboard renders — the per-claim
  * coverage join, the flow inventory and its detail, the interface catalog, the
@@ -31,6 +30,7 @@ import { GuardOutcomeSchema, GuardFailureDetailSchema, GuardResultStageSchema } 
 import type { GuardOutcome, GuardFailureDetail, GuardLatest, GuardTestStatus } from './result.js'
 import {
   GuardBirthFindingSchema,
+  GuardBlockerSchema,
   GuardCoverageGapKindSchema,
   GuardGenerateErrorSchema,
   GuardTriageSchema,
@@ -334,7 +334,6 @@ export function manualFlowScenarioId(flowId: string): string | null {
 export const GuardFlowGapSchema = z
   .object({
     kind: GuardCoverageGapKindSchema,
-    obligations: z.array(GuardObligationRefSchema).min(1).optional(),
     milestones: z.array(z.number().int().positive()).min(1).optional(),
     /** The generator's one-line explanation. */
     reason: z.string(),
@@ -670,8 +669,6 @@ export const GuardFlowProgressSchema = z.object({
   coverage: z.enum(['complete', 'partial', 'unverified', 'unknown']),
   verified: z.number().int().nonnegative(),
   total: z.number().int().nonnegative(),
-  unit: z.enum(['cases', 'milestones']),
-  category: z.enum(['behavior', 'system', 'mixed']),
   generation: z.enum(['ready', 'incomplete', 'error', 'unsupported', 'needs-setup']),
 }).strict()
 export type GuardFlowProgress = z.infer<typeof GuardFlowProgressSchema>
@@ -877,23 +874,6 @@ export const GuardFlowMilestoneViewSchema = z
     claimTitle: z.string(),
     /** Synthesis' note on why this step sits here. */
     note: z.string().optional(),
-    /**
-     * The milestone's CASES — the situations that would prove it, each as the
-     * sentence it states. No per-case state: a flow's cases stand or fall
-     * together, and the flow's own verdict says which. Absent on a milestone
-     * that declares none (the legacy shape).
-     */
-    cases: z
-      .array(
-        z
-          .object({
-            id: z.string().min(1),
-            /** The case's own sentence, never its machine id. */
-            claim: z.string().min(1),
-          })
-          .strict(),
-      )
-      .optional(),
   })
   .strict()
 export type GuardFlowMilestoneView = z.infer<typeof GuardFlowMilestoneViewSchema>

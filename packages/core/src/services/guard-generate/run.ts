@@ -39,7 +39,6 @@ import type {
 } from '@truecourse/agent-loop'
 import { getCacheEntry, getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
 import {
-  GUARD_REVIEW_POLICY_VERSION,
   isCreditsExhausted,
   settledScenariosOf,
   type GuardFlowWorkerOutcome,
@@ -581,7 +580,6 @@ export function createGuardGenerateSessionSeams(
             const yamls = cachedScenarioYamls(parsed.data)
             const aligned =
               outcome.kind === 'settled' &&
-              parsed.data.version === GUARD_REVIEW_POLICY_VERSION &&
               parsed.data.reviews?.length === accepted.length &&
               accepted.length > 0 &&
               yamls.length === accepted.length &&
@@ -730,7 +728,6 @@ export function createGuardGenerateSessionSeams(
                 const catalogReads = task.catalogReads?.() ?? []
                 const entry: CachedWorkerEntry = {
                   outcome: settled.output,
-                  version: GUARD_REVIEW_POLICY_VERSION,
                   reviews,
                   scenarioYaml: yamls[0]!,
                   ...(yamls.length > 1 ? { scenarioYamls: yamls } : {}),

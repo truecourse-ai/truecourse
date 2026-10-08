@@ -1,4 +1,3 @@
-import { GuardBlockerSchema, GuardObligationRefSchema } from './verification.js'
 /**
  * The persisted last-generate report — written to `.truecourse/guard/result.json`
  * at the end of every `guard generate`.
@@ -89,6 +88,19 @@ export const GuardCoverageGapKindSchema = z.enum([
 export type GuardCoverageGapKind = z.infer<typeof GuardCoverageGapKindSchema>
 
 /**
+ * What stands behind a `blocked-on` gap, when the generator could say: a
+ * capability the runner cannot observe, configuration the operator can supply
+ * (the dependencies to register and the action to take), or generation that
+ * has not produced a test yet.
+ */
+export const GuardBlockerSchema = z.object({
+  kind: z.enum(['unsupported-capability', 'configuration', 'generation']),
+  action: z.string().min(1).optional(),
+  dependencies: z.array(z.string().min(1)).optional(),
+}).strict()
+export type GuardBlocker = z.infer<typeof GuardBlockerSchema>
+
+/**
  * Migrate an OLD-shape gap row (`kind:'api'|'web'|'tui'`) to the un-conflated
  * shape (`kind:'awaiting-driver', driver:'api'`). Applied at the schema layer so
  * EVERY reader of a persisted report — the store `readGuardResult`, the routes
@@ -101,8 +113,6 @@ export const GuardCoverageGapSchema = z
     flowId: z.string(),
     kind: GuardCoverageGapKindSchema,
     milestones: z.array(z.number().int().positive()).min(1).optional(),
-    /** Case-level gap scope. Absent only for historical whole-milestone gaps. */
-    obligations: z.array(GuardObligationRefSchema).min(1).optional(),
     reason: z.string(),
     blocker: GuardBlockerSchema.optional(),
     /** Present iff `kind === 'awaiting-driver'` — the non-runnable driver awaited. */

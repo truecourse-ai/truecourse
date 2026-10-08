@@ -92,11 +92,6 @@ describe('legacyFlowGenerationInputsHash — the frozen retirement salt', () => 
    * discipline at all (a committed delete-account scenario deleted the seeded
    * principal mid-run).
    */
-  // Intentionally rolled for case-granular matching, reviewed preparation profiles,
-  // prerequisite eligibility, grounded proof, and the explicit review-policy version.
-  // Policy v5 deliberately revalidates committed coverage under typed web evidence.
-  // Provider control changes the authoring contract and includes the web prompt
-  // in this hash. The retired extract/flows/epic salts remain unchanged.
   // Bindings go by sentence, so the hash no longer folds bound section text
   // keys: a row stamped under the section-keyed hash misses once and re-authors.
   const GOLDEN = 'sha256:b9e29e9bfe1a14851fe724f638bf2b4d7ef42e3567036fc087b3096eea31723a'
@@ -135,8 +130,6 @@ describe('flowGenerationInputComponents — the hash, by name', () => {
     webCatalogFingerprint: 'w',
     webCatalogReads: ['web/home:abc'],
     hasScenario: false,
-    prerequisiteMaterial: 'p',
-    prerequisiteShape: 'ps',
     recipeSlice: 'rs',
     roster: 'ro',
     preparation: 'pr',
@@ -154,9 +147,6 @@ describe('flowGenerationInputComponents — the hash, by name', () => {
     // read is the component.
     expect(moved({ webCatalogFingerprint: 'w2' })).toEqual([])
     expect(moved({ webCatalogReads: ['web/home:moved'] })).toEqual(['webCatalog.reads'])
-    // The resolved STATE rides the legacy bag alone; the shape is the component.
-    expect(moved({ prerequisiteMaterial: 'p2' })).toEqual([])
-    expect(moved({ prerequisiteShape: 'ps2' })).toEqual(['prerequisites.shape'])
     expect(moved({ recipeSlice: 'rs2' })).toEqual(['recipe.slice'])
     expect(moved({ roster: 'ro2' })).toEqual(['roster'])
     expect(moved({ preparation: 'pr2' })).toEqual(['preparation.run'])
@@ -180,10 +170,10 @@ describe('flowGenerationInputComponents — the hash, by name', () => {
     expect(movedSchemeInputs(stored, base)).toEqual([])
   })
 
-  it('folds into the hash every member the bag always carried', () => {
-    expect([...flowInterfaceFingerprintBag(parts)].sort()).toEqual(['a', 'i1', 'i2', 'p', 'w'])
+  it('folds into the hash every member the bag always carried, the retired prerequisite state frozen', () => {
+    expect([...flowInterfaceFingerprintBag(parts)].sort()).toEqual(['[]', 'a', 'i1', 'i2', 'w'])
     const { webCatalogFingerprint: _none, ...noWeb } = parts
-    expect([...flowInterfaceFingerprintBag(noWeb)].sort()).toEqual(['a', 'i1', 'i2', 'p'])
+    expect([...flowInterfaceFingerprintBag(noWeb)].sort()).toEqual(['[]', 'a', 'i1', 'i2'])
   })
 })
 
@@ -193,8 +183,6 @@ describe('flowSettleVerdict — the three compare rules and the one legacy check
     assignmentFingerprints: ['a'],
     interfaceFingerprints: ['i'],
     hasScenario: false,
-    prerequisiteMaterial: 'p',
-    prerequisiteShape: 'ps',
     recipeSlice: 'rs',
     roster: 'ro',
     preparation: 'pr',

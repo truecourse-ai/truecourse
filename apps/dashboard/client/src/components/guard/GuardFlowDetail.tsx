@@ -108,68 +108,11 @@ const LABEL =
 const BTN =
   "inline-flex max-w-full items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground";
 
-/** How many cases a milestone lists before the rest collapse behind a count. */
-const CASES_SHOWN = 4;
-
-/**
- * ONE milestone's cases: the situations this flow proves, each as the
- * source-grounded sentence it states.
- *
- * They carry no state of their own. A flow's cases stand or fall together — the
- * block below says Blocked once, the verdict says Passed once — so a mark per
- * case could only repeat it, in the one colour a reader is scanning for.
- *
- * A single case is listed like any other: a milestone's cases are a SELECTION
- * from its claim's, so one case usually means this flow proves one of the
- * claim's several situations, and the sentence is what says which. A long list
- * collapses: seventeen cases is a wall, and the count is the honest summary
- * until a reader asks for the rest.
- */
-function MilestoneCases({
-  cases,
-}: {
-  cases: NonNullable<GuardFlowMilestoneView['cases']>;
-}) {
-  const [all, setAll] = useState(false);
-  const shown = all ? cases : cases.slice(0, CASES_SHOWN);
-  const rest = cases.length - shown.length;
-  return (
-    <ul className="mt-1.5 space-y-1" aria-label="Cases">
-      {shown.map((c) => (
-        <li key={c.id} className="flex min-w-0 items-start gap-1.5">
-          <span
-            aria-hidden
-            className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/40"
-          />
-          <span className="min-w-0 flex-1 text-[11px] leading-snug text-muted-foreground">
-            {c.claim}
-          </span>
-        </li>
-      ))}
-      {rest > 0 && (
-        <li>
-          <button
-            type="button"
-            onClick={() => setAll(true)}
-            className="text-[11px] text-primary hover:underline"
-          >
-            {`${rest} more`}
-          </button>
-        </li>
-      )}
-    </ul>
-  );
-}
-
 /**
  * The flow's milestones, the claim sentences in order, each linking to the
  * section that states it: the flow's CHAIN, shown whether or not a test exists.
  * A step names its milestone only once opened, so the step list does not stand
  * in for this.
- *
- * Below each claim ride its CASES, the situations this flow proves of it, as
- * muted sentences. They carry no mark of their own: the page's one verdict
- * stays the test's.
  */
 function MilestoneList({
   milestones,
@@ -194,7 +137,6 @@ function MilestoneList({
             <span className="block text-[12px] leading-snug text-foreground">
               {m.claimTitle}
             </span>
-            {m.cases && m.cases.length > 0 && <MilestoneCases cases={m.cases} />}
           </span>
           <button
             type="button"
@@ -216,10 +158,10 @@ function MilestoneList({
 /**
  * The surface rows to draw, with gaps that say the SAME THING folded into one.
  *
- * A gap is recorded per CASE, so one dependency holding up two situations is two
- * gaps carrying one reason and one action between them — which rendered as two
- * blocks a reader could not tell apart. The cases themselves are listed above,
- * so WHICH obligations are held up is already said; what this block adds is the
+ * A gap is recorded per MILESTONE, so one dependency holding up two milestones is
+ * two gaps carrying one reason and one action between them — which rendered as
+ * two blocks a reader could not tell apart. The milestones themselves are listed
+ * above, so WHICH are held up is already said; what this block adds is the
  * reason and the fix, and it says each once.
  *
  * Rows carrying a TEST are never folded: two tests are two results, however
@@ -248,9 +190,9 @@ function foldGapRows(
  * deliberately NOT test-shaped: no verdict card, no steps, muted copy. The one
  * exception is the needs-setup CTA, which is a to-do the reader can clear today.
  *
- * It names no case. WHICH obligations are held up is said once, in the milestone
- * list above, where every case is already named; repeating them here
- * made the block a second copy of that list. What only this block can say is the
+ * It names no milestone. WHICH milestones are held up is said once, in the
+ * milestone list above; repeating them here made the block a second copy of
+ * that list. What only this block can say is the
  * reason and the action, and it says each once.
  */
 function WhyNoTest({

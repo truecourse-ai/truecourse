@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
-import { GUARD_REVIEW_POLICY_VERSION, type GuardScenario } from '@truecourse/shared'
+import type { GuardScenario } from '@truecourse/shared'
 import type { GuardExecutor } from '@truecourse/guard-runner'
 import { qualifyFixtureRecipe } from '../guard-runner/preparation-qualification-fixture.js'
 import {
@@ -80,10 +80,7 @@ describe('prepared mutator execution boundary', () => {
           // A previously accepted shared-state scenario has a valid review and
           // unchanged cache identity. It must still obey the current pool gate.
           const scenario = structuredClone(executedScenario!)
-          const cached = (s: GuardScenario) => [{ yaml: yaml.dump(s), expectedReds: [], review: {
-            policyVersion: GUARD_REVIEW_POLICY_VERSION,
-            scenarioFingerprint: scenarioReviewFingerprint(s), caseEvidence: [],
-          } }]
+          const cached = (s: GuardScenario) => [{ yaml: yaml.dump(s), expectedReds: [], review: { scenarioFingerprint: scenarioReviewFingerprint(s) } }]
           expect(await task.confirmCached(cached(scenario))).toBe(true)
           expect(executions).toBe(2)
           delete scenario.setup

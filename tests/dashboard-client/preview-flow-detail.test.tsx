@@ -35,8 +35,6 @@ const DETAIL: GuardFlowDetailData = {
     coverage: 'unverified',
     verified: 0,
     total: 3,
-    unit: 'cases',
-    category: 'behavior',
     generation: 'incomplete',
   },
 };
@@ -50,7 +48,7 @@ function renderDetail(detail: GuardFlowDetailData = DETAIL) {
 }
 
 describe('the milestone chain', () => {
-  it('lists a milestone’s single case under its claim', () => {
+  it('lists each milestone by its claim', () => {
     renderDetail({
       ...DETAIL,
       milestones: [
@@ -58,18 +56,13 @@ describe('the milestone chain', () => {
           order: 1,
           doc: 'docs/conversion.md',
           claimId: 'claim::docs/conversion.md::conversion-behaviors',
-          claimTitle: 'Conversion behaviors', sentences: ['conversion-behaviors'],
-          headingText: 'Conversion behaviors',
-          live: true,
-          drifted: false,
-          cases: [{ id: 'missing-key', claim: 'A missing key converts to an empty string.' }],
+          claimTitle: 'Conversion behaviors',
         },
       ],
     });
 
     const chain = screen.getByRole('list', { name: 'Milestones' });
     expect(within(chain).getByText('Conversion behaviors')).toBeInTheDocument();
-    expect(within(chain).getByText('A missing key converts to an empty string.')).toBeInTheDocument();
   });
 });
 

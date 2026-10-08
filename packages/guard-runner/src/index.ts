@@ -514,7 +514,6 @@ export {
   dependencyCatalogIdentity,
 } from './recipe-slices.js'
 export type { RecipeWritingStep } from './recipe-slices.js'
-export { type ResolvedProviderControl, resolveProviderControl, providerControlStateMaterial, scenarioProviderControlProblems, PROVIDER_CONTROL_VERSION } from './provider-control.js'
 
 export {
   bootProductWorld,

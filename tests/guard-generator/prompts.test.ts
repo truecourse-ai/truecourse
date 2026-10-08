@@ -464,8 +464,8 @@ describe('guard-generator prompts', () => {
     // stating a positive AND a negative half is verified only when the exclusion
     // half is asserted observably too.
     // Re-pinned for explicit request-boundary review and setup-aware expected-red review.
-    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('138c88a43c2cb131')
-    expect(fingerprint(FIDELITY_SYSTEM_PROMPT)).toBe('138c88a43c2cb131')
+    expect(FIDELITY_PROMPT_FINGERPRINT).toBe('e83d9e6ab48680ad')
+    expect(fingerprint(FIDELITY_SYSTEM_PROMPT)).toBe('e83d9e6ab48680ad')
   })
 
   it('buildFidelityUserPrompt carries the flow, every milestone with its section text, and the YAML', () => {
@@ -663,9 +663,11 @@ describe('guard-generator prompts', () => {
     // tests the fixture rather than the promise.
     // Re-pinned for case prerequisites, proof grounding, and setup-aware fidelity review.
     // Re-pinned when regex flags moved into a `flags` field beside `matches`.
-    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('2ea0cbf73ebdb3f6')
+    // Re-pinned when per-case verification left the pipeline: the prompt stopped
+    // naming selected cases; a milestone is the unit it always proves.
+    expect(fingerprint(GENERATE_SYSTEM_PROMPT)).toBe('477afe3fce852fe1')
     // Moved once with the blast-radius cut: the canonical schema gained `world`.
-    expect(GENERATE_PROMPT_FINGERPRINT).toBe('2ea0cbf73ebdb3f6')
+    expect(GENERATE_PROMPT_FINGERPRINT).toBe('477afe3fce852fe1')
   })
 
   it('the authored cli step vocabulary is the `run` step — a runner-only kind never leaks in', () => {
@@ -677,7 +679,6 @@ describe('guard-generator prompts', () => {
     const steps = JSON.parse(schema).properties.steps
     expect(Object.keys(steps.items.properties).sort()).toEqual([
       'capture',
-      'checks',
       'cwd',
       'env',
       'expect',
@@ -916,10 +917,11 @@ describe('guard-generator prompts', () => {
     // of an absolute number that only tests the fixture.
     // Re-pinned for case prerequisites, proof grounding, and setup-aware fidelity review.
     // Re-pinned when regex flags moved into a `flags` field beside `matches`.
-    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('0af4d66bce51ffd9')
+    // Re-pinned when per-case verification left the pipeline.
+    expect(fingerprint(GENERATE_API_SYSTEM_PROMPT)).toBe('56f44a5f8b41bea2')
     // Moved once with the blast-radius cut: `world` in the schema + the
     // shared-world/self-mint doctrine block.
-    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('0af4d66bce51ffd9')
+    expect(GENERATE_API_PROMPT_FINGERPRINT).toBe('56f44a5f8b41bea2')
   })
 
   it('the api authoring prompt teaches the cookie jar and captureHeaders', () => {
@@ -1168,10 +1170,9 @@ describe('guard-generator prompts', () => {
     expect(MATCH_SYSTEM_PROMPT).toContain('Use ONLY interfaces from the catalog below')
     expect(MATCH_SYSTEM_PROMPT).toContain('copied VERBATIM')
     expect(MATCH_SYSTEM_PROMPT).toContain('An id that is not in the catalog invalidates your whole answer')
-    // Every selected case is covered in path order, independently of siblings.
-    expect(MATCH_SYSTEM_PROMPT).toContain('Account for every explicit verification case with a grounded plan or an explicit gap')
-    expect(MATCH_SYSTEM_PROMPT).toContain('no case may be both planned and gapped')
-    expect(MATCH_SYSTEM_PROMPT).toContain('A milestone may have planned cases and different blocked cases')
+    // Every milestone is accounted for, planned or gapped, never both.
+    expect(MATCH_SYSTEM_PROMPT).toContain('Account for every milestone with a grounded plan or an explicit gap')
+    expect(MATCH_SYSTEM_PROMPT).toContain('no milestone may be both planned and gapped')
     expect(MATCH_SYSTEM_PROMPT).toContain('Keep the plan in milestone order')
     expect(MATCH_SYSTEM_PROMPT).toContain('Match on BEHAVIOR, not on wording')
   })
@@ -1209,8 +1210,10 @@ describe('guard-generator prompts', () => {
     // and plans/gaps must use mutually exclusive case references within milestones.
     // Preparation profiles and typed selected-case obligations intentionally replan existing tests.
     // Re-pinned for runner-owned provider context and bounded schema correction.
-    expect(MATCH_PROMPT_FINGERPRINT).toBe('7d11763dc27a1073')
-    expect(fingerprint(MATCH_SYSTEM_PROMPT)).toBe('7d11763dc27a1073')
+    // Re-pinned when per-case verification left the pipeline: plan and gap rows
+    // name a milestone, never a case.
+    expect(MATCH_PROMPT_FINGERPRINT).toBe('1551fa6cb45934a9')
+    expect(fingerprint(MATCH_SYSTEM_PROMPT)).toBe('1551fa6cb45934a9')
   })
 
   it('buildMatchTaskPrompt renders the flow and its milestones, and no catalog', () => {
@@ -1350,7 +1353,7 @@ describe('GENERATE_WEB_SYSTEM_PROMPT — the third authoring arm', () => {
     // The press and hover verbs, and the press/hover/upload plan translations.
     // The plan's `performed as` / `signed out` lines name a task's principal.
     // Regex flags moved into a `flags` field beside `matches`.
-    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('c2501c2312c5c27b')
+    expect(GENERATE_WEB_PROMPT_FINGERPRINT).toBe('ae4572cb7e81eb37')
   })
 
   it('a web batch advertises the world credentials as the sign-in channel, and the fixture block defers to it', () => {
@@ -1437,6 +1440,5 @@ for (const driver of ['api', 'web'] as const) it(`${driver} briefs both provider
   expect(prompt).toContain('API_KEY')
   expect(prompt).toContain('bodyDelayMs')
   expect(prompt).toContain('unmatched: error')
-  expect(prompt).toContain('own-request-control remains unsupported')
   expect(prompt).not.toContain('specific SUCCESS payload the real service does not return still needs')
 })

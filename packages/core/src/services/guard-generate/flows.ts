@@ -70,12 +70,12 @@ export const FLOWS_SESSION_BUDGET: SessionBudget = {
   tokenCeiling: 150_000,
 }
 
-export const FLOWS_SESSION_SYSTEM_PROMPT = `Keep all case prerequisites, including required earlier setup, intact. Unresolved credential/external needs are case-specific configuration work, never optional notes. Do not attach a live-account requirement to an explicit absent-key or account-free case.
+export const FLOWS_SESSION_SYSTEM_PROMPT = `Keep all prerequisites, including required earlier setup, intact. Unresolved credential/external needs are configuration work, never optional notes. Do not attach a live-account requirement to an explicit absent-key or account-free claim.
 You compose FLOWS out of a specification area's already-extracted CLAIMS. A flow is one user-goal path: a title, a goal, and an ordered list of MILESTONES, where every milestone IS one of the claims you were given.
 
 # Your input, and the only thing you may do with it
 The briefing carries the claims of ONE area — each with its id and the document it is read from — plus each document's heading outline, and GROUNDING (the app's own interfaces, and its dependency catalog). You ORDER and GROUP the claims into paths. That is the entire job.
-- Never invent or rewrite a claim. For a claim with explicit verification cases, select a nonempty caseIds list of exact existing IDs; otherwise the claim is indivisible. Each milestone names one given claim by its \`claimId\`, copied VERBATIM, character for character. A milestone naming a claim you were not given is discarded.
+- Never invent or rewrite a claim. Each milestone names one given claim by its \`claimId\`, copied VERBATIM, character for character. A milestone naming a claim you were not given is discarded.
 - A flow states WHAT the product should do for a user, never HOW a test would drive it. Do not name a command, endpoint, URL, selector, file, or function that does not already appear in the text you were given.
 - GROUNDING is orientation, not vocabulary: the interface digests show which paths the app can actually walk (favor compositions a surface can realize; a claim no interface serves still gets accounted for), and the dependency catalog shows which starting-state classes exist (a path whose claims' needs are all catalogued is realizable sooner). Milestones still come ONLY from the claims.
 
@@ -84,7 +84,7 @@ A flow is what a USER is trying to achieve, in the order they would do it.
 - One flow has ONE coherent goal and compatible starting conditions. Separate details, cancel edit, and save/reload, even when they share an expense fixture. Shared nouns, endpoints, sections or setup do not establish dependence.
 - Compose only source-required transitions: successful conversion followed by changing the amount and clearing its old result stays together. State the source-grounded reason for nontrivial composition in notes.
 - Independent missing-key, live conversion, controlled timeout/quota and loading behavior belong in separate flows. Never attach a real-account need to account-free or controlled-response behavior.
-- A short independently meaningful flow is not redundant because a longer journey contains its steps. Only exactly identical ordered obligations, starting contract and proof scope are duplicates. Do not split based on milestone counts.
+- A short independently meaningful flow is not redundant because a longer journey contains its steps. Only exactly identical ordered milestones and starting contract are duplicates. Do not split based on milestone counts.
 - Preserve source-promised end-to-end journeys; do not split a required transition to get a runnable prefix. Each flow must be proved by one complete supported realization.
 - \`title\`: the user goal in the document's own words. \`goal\`: one sentence stating what the user gets when the whole path works.
 - Group by GOAL, not by document or section: claims from different documents of the area belong in one flow when the user experiences them as one path.
@@ -108,14 +108,14 @@ when no test could cause its condition at all.
 
 # Reconcile against the EXISTING FLOWS — reinvention is a defect
 When the briefing lists EXISTING FLOWS, they are the corpus as it stands, with proven tests behind them. You are reconciling, not composing from scratch: every existing flow MUST come back as exactly one of
-- KEPT — the claims still support the same path: emit it with its \`id\` and the SAME milestones (same claims, same order, same caseIds). Do not retitle or reword it; an unchanged flow is returned unchanged.
-- AMENDED — the claims changed what the path is (a milestone added, removed, re-ordered or re-cased): emit it with its \`id\` and the new milestones. The id is the journey's identity; keep it whenever the journey is the same one a user would recognise.
+- KEPT — the claims still support the same path: emit it with its \`id\` and the SAME milestones (same claims, same order). Do not retitle or reword it; an unchanged flow is returned unchanged.
+- AMENDED — the claims changed what the path is (a milestone added, removed or re-ordered): emit it with its \`id\` and the new milestones. The id is the journey's identity; keep it whenever the journey is the same one a user would recognise.
 - RETIRED — the claims no longer support the journey at all: list it in \`retiredFlows\` with the reason, in the claims' own terms.
 A flow with no \`id\` is NEW. Emit one only for a journey no existing flow is. Never re-emit an existing journey as a new flow, never continue one id with two flows, and never both continue and retire an id. \`check_flows\` refuses a draft that leaves an existing flow unaccounted for.
 The EXISTING NO-FLOW DECISIONS are reconciled the same way: a claim that already carries one comes back in \`noFlowClaims\` with that decision's reason verbatim, unless you now place it in a flow — the milestone is the account. Never drop one in silence; \`check_flows\` refuses that too.
 
 # Coverage honesty — the rule you are graded on
-Every case of every claim MUST appear in a milestone selection or a scoped \`noFlowClaims\` selection. Claims without cases are indivisible. No source obligation may be both assigned and marked no-flow. Never silently drop one. A claim MAY appear in more than one flow when it genuinely belongs to both.
+Every claim MUST appear in a milestone or in \`noFlowClaims\`. No claim may be both assigned and marked no-flow. Never silently drop one. A claim MAY appear in more than one flow when it genuinely belongs to both.
 Legitimate \`noFlowClaims\` reasons: no test could cause the claim's condition, it restates another claim, or it states a build or configuration fact nothing observes through the product (a file path, a setup marker). A value the product returns or shows is observable and belongs in a flow. "It didn't fit" is not a reason, and neither is "an error condition".
 
 # Tools
@@ -124,8 +124,8 @@ Legitimate \`noFlowClaims\` reasons: no test could cause the claim's condition, 
 
 # The outcome
 One object with BOTH arrays, either possibly empty, plus \`retiredFlows\` when an existing flow is retired:
-  { "flows": [ { "id"?, "title", "goal", "notes"?, "startingState"?, "milestones": [ { "order", "claimId", "caseIds"?, "note"? } ] } ],
-    "noFlowClaims": [ { "claimId", "caseIds"?, "reason" } ],
+  { "flows": [ { "id"?, "title", "goal", "notes"?, "startingState"?, "milestones": [ { "order", "claimId", "note"? } ] } ],
+    "noFlowClaims": [ { "claimId", "reason" } ],
     "retiredFlows": [ { "id", "reason" } ] }`
 
 /** Exported for the step-20 estimate rework (probe the REAL keys). */
@@ -141,7 +141,7 @@ When the briefing lists EXISTING EPICS, every one of them comes back as KEPT (it
 
 # Rules for an epic you do emit
 - \`composedOf\`: the refs (\`F1\`, \`F2\`, …) of the flows it chains — at least TWO, from DIFFERENT areas. Copy the refs exactly as listed.
-- \`milestones\`: the path, in the order the user walks it. EVERY milestone must be a milestone of one of the flows in \`composedOf\`, copied VERBATIM (\`claimId\`, \`caseIds\`). Select only cases already present in the composed flows. You may drop a composed flow's milestones the interface doesn't need; you may never introduce one from elsewhere or write new text.
+- \`milestones\`: the path, in the order the user walks it. EVERY milestone must be a milestone of one of the flows in \`composedOf\`, copied VERBATIM (\`claimId\`). You may drop a composed flow's milestones the interface doesn't need; you may never introduce one from elsewhere or write new text.
 - Preserve one source-promised dependent transition. Do not recreate an umbrella combining save, cancel, live conversion, missing credentials and controlled failures. Shared setup is not dependence; describe the source reason in notes. Never split based on milestone count.
 - \`title\`: the interface in user terms. \`goal\`: one sentence for what the user achieves.
 - Never emit an epic that is just one flow restated, and never two epics with the same chain.
@@ -150,7 +150,7 @@ When the briefing lists EXISTING EPICS, every one of them comes back as KEPT (it
 - \`check_flows\` — REQUIRED before you finish: call it with your complete draft (even { "epics": [] }). It verifies every ref and milestone against the composed flows, so a wrong reference costs one turn here instead of a refused outcome at the fold.
 
 # The outcome
-One object: { "epics": [ { "id"?, "title", "goal", "notes"?, "startingState"?, "composedOf": ["F1","F4"], "milestones": [ { "order", "claimId", "caseIds"? } ] } ], "retiredEpics"?: [ { "id", "reason" } ] } — or { "epics": [] } when nothing chains.`
+One object: { "epics": [ { "id"?, "title", "goal", "notes"?, "startingState"?, "composedOf": ["F1","F4"], "milestones": [ { "order", "claimId" } ] } ], "retiredEpics"?: [ { "id", "reason" } ] } — or { "epics": [] } when nothing chains.`
 
 export const FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT = promptFingerprint(FLOWS_EPIC_SESSION_SYSTEM_PROMPT)
 
@@ -377,14 +377,14 @@ function groundingLines(grounding: FlowsSessionGrounding | undefined): string[] 
 }
 
 /** One existing flow, as both briefings render it: id, title, goal, starting
- *  state and the milestones with their case selections. */
+ *  state and the milestones. */
 function existingFlowLines(flow: GuardFlow): string[] {
   const lines = [``, `--- existing ${flow.composedOf.length > 0 ? 'epic' : 'flow'}`, `id: ${flow.id}`, `title: ${flow.title}`, `goal: ${flow.goal}`]
   if (flow.startingState) lines.push(`startingState: ${JSON.stringify(flow.startingState)}`)
   if (flow.composedOf.length > 0) lines.push(`composedOf: ${flow.composedOf.join(', ')}`)
   lines.push('milestones:')
   for (const m of [...flow.milestones].sort((a, b) => a.order - b.order)) {
-    lines.push(`  ${m.order}. ${m.claimId} — ${m.claimTitle}${m.caseIds ? ` [caseIds: ${m.caseIds.join(', ')}]` : ''}`)
+    lines.push(`  ${m.order}. ${m.claimId} — ${m.claimTitle}`)
   }
   return lines
 }
@@ -422,7 +422,6 @@ export function flowsSessionBriefing(
       `claimId: ${c.id}`,
       `doc: ${c.doc}`,
       `claim: ${c.title}`,
-      ...(c.verification ? [`verification: ${JSON.stringify(c.verification)}`] : []),
     )
   }
   lines.push(...groundingLines(grounding))
@@ -443,7 +442,7 @@ export function flowsSessionBriefing(
       'Each comes back in `noFlowClaims` with its reason verbatim, unless you now place it in a flow:',
     )
     for (const c of priorNoFlow) {
-      lines.push(`  ${c.claimId}${c.caseIds ? ` [caseIds: ${c.caseIds.join(', ')}]` : ''} — ${c.reason}`)
+      lines.push(`  ${c.claimId} — ${c.reason}`)
     }
   }
   lines.push('', 'Check the draft with `check_flows`, then produce the outcome.')
@@ -458,7 +457,7 @@ export function flowsEpicSessionBriefing(digests: readonly FlowDigest[], prior: 
   ]
   for (const d of digests) {
     lines.push('', `--- ${d.ref}  (area: ${d.areaId})`, `title: ${d.title}`, `goal: ${d.goal}`, 'milestones:')
-    d.milestones.forEach((m, i) => lines.push(`  ${i + 1}. ${m.claimId} — ${m.claimTitle}${m.caseIds ? ` [caseIds: ${m.caseIds.join(", ")}]` : ""}`))
+    d.milestones.forEach((m, i) => lines.push(`  ${i + 1}. ${m.claimId} — ${m.claimTitle}`))
   }
   if (prior.length > 0) {
     lines.push(

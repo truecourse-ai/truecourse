@@ -555,7 +555,7 @@ describe('flowsSessionBriefing', () => {
       goal: 'A user adds a task, sees it, and completes it.',
       startingState: { stepCreatable: ['a task'], seedable: [], supplied: [] },
       fingerprint: 'sha256:f',
-      milestones: [kept(C_LS, 2), { ...kept(C_ADD, 1), caseIds: ['c1'] }],
+      milestones: [kept(C_LS, 2), kept(C_ADD, 1)],
       bindings: [{ doc: DOC, sentences: [...C_ADD.sentences, ...C_LS.sentences] }],
       composedOf: [],
       synthesisInputsHash: 'sha256:i',
@@ -564,8 +564,8 @@ describe('flowsSessionBriefing', () => {
     expect(briefing).toContain('EXISTING FLOWS OF THIS AREA — 1 flow(s)')
     expect(briefing).toContain('id: create-list-and-complete-a-task')
     expect(briefing).toContain('startingState: {"stepCreatable":["a task"],"seedable":[],"supplied":[]}')
-    // Milestones in path order, with the case selection.
-    expect(briefing.indexOf(`1. ${C_ADD.id} — ${ADD} [caseIds: c1]`)).toBeLessThan(briefing.indexOf(`2. ${C_LS.id} — ${LS}`))
+    // Milestones in path order.
+    expect(briefing.indexOf(`1. ${C_ADD.id} — ${ADD}`)).toBeLessThan(briefing.indexOf(`2. ${C_LS.id} — ${LS}`))
     expect(flowsSessionBriefing(AREA, undefined)).not.toContain('EXISTING FLOWS')
   })
 
@@ -766,23 +766,9 @@ describe('the flow-synthesis wipeout', () => {
 })
 
 
-describe('flow obligation boundaries', () => {
-  it('rejects a flow mixing browser behavior with internal storage guarantees', () => {
-    const claims = CLAIMS.map((c, i) => ({ ...c, verification: i === 0
-      ? { scope: 'web' as const, method: 'behavior' as const, observable: 'Visible task' }
-      : { scope: 'implementation' as const, method: 'datastore' as const, observable: 'Stored representation' } }))
-    const check = checkFlowSet(LIFECYCLE, { area: { ...AREA, claims } })
-    expect(isFlowSetClean(check)).toBe(false)
-    expect(check.unknownReferences.join(' ')).toContain('verification')
-  })
-})
-
-it('briefs the composer with complete case, source, condition and preparation metadata', () => {
-  const verification: NonNullable<FlowClaimInput['verification']> = { scope: 'web', method: 'behavior', observable: 'Empty ledger', cases: [
-    { id: 'empty-ledger', claim: 'Empty ledger total is zero', method: 'behavior', requires: ['browser'], conditions: ['fresh-state'], preparation: 'empty' },
-  ] }
-  const briefing = flowsSessionBriefing({ ...AREA, claims: [{ ...CLAIMS[0], verification }] }, undefined)
-  expect(briefing).toContain(`verification: ${JSON.stringify(verification)}`)
+it('briefs the composer with each claim, its id and its document', () => {
+  const briefing = flowsSessionBriefing({ ...AREA, claims: [CLAIMS[0]] }, undefined)
+  expect(briefing).toContain(`claim: ${CLAIMS[0].title}`)
   expect(briefing).toContain(`doc: ${DOC}`)
   expect(briefing).toContain(`claimId: ${CLAIMS[0].id}`)
   // A documented failure state is a milestone, never a reason to leave a claim out.

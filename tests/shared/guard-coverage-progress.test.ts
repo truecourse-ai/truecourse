@@ -1,33 +1,25 @@
 import { describe, expect, it } from 'vitest'
-import { guardCoverageProgress, describeOutstandingObligations, type GuardFlowMilestone } from '@truecourse/shared'
-const milestones: GuardFlowMilestone[] = [1, 2].map(order => ({ order, doc: 'spec.md', claimId: 'claim::spec.md::list', claimTitle: 'List behavior', sentences: ['list'],
-  proofDrivers: [order === 1 ? 'web' : 'api'], verification: { method: 'behavior', observable: 'result',
-    cases: Array.from({ length: 5 }, (_, i) => ({ id: `case-${i}`, claim: `Requirement ${i}`, method: 'behavior', requires: ['browser'], conditions: [] })) } }))
+import { describeOutstandingObligations, guardCoverageProgress, type GuardFlowMilestone } from '@truecourse/shared'
 
-describe('required obligation progress', () => {
-  it('keeps five of ten cases outstanding, even when their IDs match the accepted milestone', () => {
-    const progress = guardCoverageProgress(milestones, [{ milestone: 1, driver: 'web', checks: milestones[0].verification!.cases!.map(c => c.id) }])
-    expect(progress.required).toHaveLength(10)
-    expect(progress.authored).toHaveLength(5)
-    expect(progress.outstanding).toHaveLength(5)
-    expect(progress.outstanding.every(o => o.milestone === 2)).toBe(true)
-    expect(progress.complete).toBe(false)
-    expect(describeOutstandingObligations(progress.outstanding)).toContain('Milestone 2 / case-0')
+const milestones: GuardFlowMilestone[] = [1, 2].map(order => ({
+  order, doc: 'spec.md', claimId: `claim::${order}`, claimTitle: `Requirement ${order}`, sentences: [`s${order}`],
+}))
+
+describe('guardCoverageProgress', () => {
+  it('counts a milestone as proved by any surface that asserts it', () => {
+    const progress = guardCoverageProgress(milestones, [{ milestone: 1, driver: 'web' }])
+    expect(progress.authored.map(o => o.milestone)).toEqual([1])
+    expect(progress.outstanding.map(o => o.milestone)).toEqual([2])
+    expect(progress).toMatchObject({ known: true, complete: false })
+    expect(guardCoverageProgress(milestones, [{ milestone: 1, driver: 'web' }, { milestone: 2, driver: 'api' }]).complete).toBe(true)
   })
-  it('combines accepted drivers without treating authored failures as passing', () => {
-    const proof = milestones.map(m => ({ milestone: m.order, driver: m.proofDrivers![0], checks: m.verification!.cases!.map(c => c.id) }))
-    const progress = guardCoverageProgress(milestones, proof, [proof[0]])
-    expect(progress.complete).toBe(true)
-    expect(progress.passing).toHaveLength(5)
-    expect(progress.authored).toHaveLength(10)
-    expect(guardCoverageProgress(milestones, proof.map(p => ({ ...p, driver: 'cli' }))).authored).toEqual([])
+  it('keeps passing proof separate from authored proof, and knows nothing of an empty flow', () => {
+    const progress = guardCoverageProgress(milestones, [{ milestone: 1, driver: 'web' }, { milestone: 2, driver: 'web' }], [{ milestone: 2, driver: 'web' }])
+    expect(progress.passing.map(o => o.milestone)).toEqual([2])
+    expect(guardCoverageProgress([], [])).toMatchObject({ known: false, complete: false })
   })
-  it('keeps requirements when no candidate selects them and never certifies unknown requirements', () => {
-    expect(guardCoverageProgress(milestones, []).outstanding).toHaveLength(10)
-    expect(guardCoverageProgress([], []).complete).toBe(false)
-    const { proofDrivers, ...legacy } = milestones[0]
-    // A milestone naming no proof drivers is proved by any surface's assertion.
-    expect(guardCoverageProgress([legacy], [{ milestone: 1, driver: 'web', checks: ['case-0'] }])).toMatchObject({ known: true, complete: false })
-    expect(guardCoverageProgress([legacy], [{ milestone: 1, driver: 'web', checks: ['case-0'] }]).authored).toHaveLength(1)
+  it('describes the outstanding milestones with their claims', () => {
+    const { outstanding } = guardCoverageProgress(milestones, [])
+    expect(describeOutstandingObligations(outstanding)).toBe('- Milestone 1: Requirement 1\n- Milestone 2: Requirement 2')
   })
 })
