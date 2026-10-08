@@ -4,6 +4,7 @@ import type { LinksFunction } from 'react-router';
 import stylesheet from './globals.css?url';
 import { initPostHog } from '@/lib/posthog';
 import { initGA } from '@/lib/ga';
+import { initRedditPixel } from '@/lib/reddit';
 
 export const links: LinksFunction = () => [
   { rel: 'stylesheet', href: stylesheet },
@@ -43,6 +44,7 @@ export default function App() {
   useEffect(() => {
     initPostHog();
     initGA();
+    initRedditPixel();
   }, []);
   return <Outlet />;
 }
