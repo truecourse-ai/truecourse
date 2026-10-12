@@ -31,7 +31,7 @@ function bookingUrl(search: string): string {
 }
 
 /** Where on the /builders page the click happened, so placements can be compared. */
-export type BookPlacement = 'header' | 'hero' | 'after-evening' | 'after-jobs' | 'pricing';
+export type BookPlacement = 'header' | 'hero' | 'after-evening' | 'after-jobs' | 'pricing' | 'need-form';
 
 /** The placement whose click opened the calendar, credited when the booking lands. */
 let openedFrom: BookPlacement | undefined;

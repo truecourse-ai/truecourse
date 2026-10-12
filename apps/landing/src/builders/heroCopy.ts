@@ -33,16 +33,6 @@ export const HEROES: HeroCopy[] = [
       'An AI CTO for professionals who build their own apps with AI, for $49 a month for early adopters. Get your evenings and weekends back while it keeps your app working.',
   },
   {
-    variant: 'fractional-cto',
-    path: '/fractional-cto',
-    title: 'Fractional CTO work, done by AI',
-    sub: AD_SUB,
-    long: true,
-    pageTitle: 'TrueCourse · Fractional CTO work, done by AI',
-    description:
-      'Fractional CTO work for apps built with AI. Your AI CTO tests every change and fixes what breaks while you sleep, for $49 a month for early adopters.',
-  },
-  {
     variant: 'part-time-cto',
     path: '/part-time-cto',
     title: 'Why a part-time CTO? AI never clocks out.',
