@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { LinksFunction, MetaFunction } from 'react-router';
 import { pageMeta } from '@/lib/seo';
@@ -11,6 +10,7 @@ import type { BookPlacement } from '@/builders/BookLink';
 import { Who } from '@/builders/Who';
 import { Check } from '@/builders/icons';
 import { BuiltWith } from '@/builders/BuiltWith';
+import { Header } from '@/builders/Header';
 import { useSectionViews } from '@/builders/useSectionViews';
 import { heroFor, useHeroCopy, useHeroScene } from '@/builders/heroCopy';
 import { MorningScene } from '@/builders/scenes/MorningScene';
@@ -90,34 +90,11 @@ const INCLUDED = [
   'Reach it by text, any time',
 ];
 
-function BuildersHeader() {
-  const [scrolled, setScrolled] = useState(false);
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 8);
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, []);
-
-  return (
-    <header className={cn('site', scrolled && 'scrolled')}>
-      <div className="wrap nav">
-        <a href="#top" className="brand">
-          <span className="mark" aria-hidden />
-          TrueCourse
-        </a>
-        <nav className="nav-links">
-          <a href="#cto">What it does</a>
-          <a href="#pricing">Pricing</a>
-          <a href="#who">Who it's for</a>
-        </nav>
-        <BookLink className="btn btn-primary btn-sm" placement="header">
-          Book a free checkup
-        </BookLink>
-      </div>
-    </header>
-  );
-}
+const NAV = [
+  { href: '#cto', label: 'What it does' },
+  { href: '#pricing', label: 'Pricing' },
+  { href: '#who', label: "Who it's for" },
+];
 
 export default function BuildersPage() {
   useSectionViews(SECTIONS);
@@ -125,7 +102,11 @@ export default function BuildersPage() {
   const scene = useHeroScene();
   return (
     <div className="builders">
-      <BuildersHeader />
+      <Header links={NAV}>
+        <BookLink className="btn btn-primary btn-sm" placement="header">
+          Book a free checkup
+        </BookLink>
+      </Header>
       <main>
         <section className="bs-hero" id="top">
           <Clouds className="hero-clouds" />

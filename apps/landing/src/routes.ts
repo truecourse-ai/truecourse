@@ -12,6 +12,7 @@ export default [
   // The AI CTO page brings its own header and footer. Each ad group has its own
   // path to it, which picks the hero's headline.
   route('builders', 'pages/BuildersPage.tsx'),
-  route('fractional-cto', 'pages/BuildersPage.tsx', { id: 'builders-fractional-cto' }),
   route('part-time-cto', 'pages/BuildersPage.tsx', { id: 'builders-part-time-cto' }),
+  // The fractional CTO ad's page, which asks what the visitor needs from a CTO.
+  route('fractional-cto', 'pages/FractionalCtoPage.tsx'),
 ] satisfies RouteConfig;

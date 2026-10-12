@@ -65,6 +65,11 @@ export function trackPageview(path: string): void {
   posthog.capture('$pageview', { $current_url: window.location.origin + path });
 }
 
+/** This visit's PostHog id, so a server-side event can be tied to it. Undefined before init. */
+export function distinctId(): string | undefined {
+  return initialized ? posthog.get_distinct_id() : undefined;
+}
+
 /**
  * Generic event capture. Safe to call before init: silently drops if PostHog
  * isn't initialized.

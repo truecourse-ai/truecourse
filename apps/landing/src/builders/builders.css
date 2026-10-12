@@ -1958,3 +1958,214 @@ section.band:has(.bs-ask) {
     gap: 2px;
   }
 }
+
+/* ---------- what you need from a CTO (the /fractional-cto hero) ---------- */
+.bs-need {
+  max-width: 520px;
+  margin-inline: auto;
+  padding: clamp(22px, 3vw, 32px);
+  border-radius: 24px;
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  box-shadow: 0 30px 70px -40px rgba(17, 24, 39, 0.35);
+  text-align: left;
+}
+.bs-need-q {
+  display: block;
+  font-size: clamp(20px, 2vw, 24px);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+.bs-need-hint {
+  margin: 4px 0 0;
+  font-size: 14.5px;
+  color: var(--fg-dim);
+}
+.bs-need-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+.bs-need-chip {
+  padding: 9px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  font: inherit;
+  font-size: 14.5px;
+  color: var(--fg);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.bs-need-chip:hover {
+  border-color: var(--accent-line);
+}
+.bs-need-chip.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+.bs-need-note,
+.bs-need-row input {
+  width: 100%;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  font: inherit;
+  font-size: 15px;
+  color: var(--fg);
+}
+.bs-need-note {
+  display: block;
+  margin-top: 14px;
+  padding: 12px 14px;
+  resize: vertical;
+}
+.bs-need-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.bs-need-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 46px;
+  padding-inline: 14px;
+}
+.bs-need-note:focus,
+.bs-need-row input:focus {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 1px;
+}
+.bs-need-row .btn {
+  justify-content: center;
+}
+.bs-need-row .btn[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+.bs-need-failed,
+.bs-need-or {
+  margin: 14px 0 0;
+  font-size: 14.5px;
+  color: var(--fg-dim);
+}
+.bs-need-failed a,
+.bs-need-call {
+  color: var(--fg);
+  text-decoration: underline;
+}
+.bs-need-done {
+  text-align: center;
+}
+.bs-need-done b {
+  font-size: 22px;
+}
+.bs-need-done p {
+  margin: 8px 0 20px;
+  color: var(--fg-dim);
+}
+@media (max-width: 480px) {
+  .bs-need-row {
+    flex-direction: column;
+  }
+}
+
+/* ---------- a human fractional CTO beside the AI CTO ---------- */
+.bs-compare {
+  max-width: 760px;
+  margin: clamp(32px, 4vw, 48px) auto 0;
+  border-radius: 24px;
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  overflow: hidden;
+}
+.bs-compare table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: clamp(15px, 1.4vw, 17px);
+}
+.bs-compare th,
+.bs-compare td {
+  padding: 18px clamp(14px, 2.4vw, 28px);
+  text-align: left;
+  border-top: 1px solid var(--line);
+}
+.bs-compare thead th {
+  border-top: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg-dim);
+}
+.bs-compare tbody th {
+  font-weight: 600;
+  color: var(--fg-dim);
+}
+.bs-compare thead th:first-child {
+  width: 22%;
+}
+.bs-compare .ai {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+.bs-compare thead .ai {
+  color: var(--accent-strong);
+}
+@media (max-width: 560px) {
+  .bs-compare thead th:first-child {
+    width: 26%;
+  }
+}
+/* The AI CTO's price, by how much CTO is picked. */
+.bs-compare th,
+.bs-compare td {
+  vertical-align: top;
+}
+.bs-tier-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 18px clamp(14px, 2.4vw, 28px);
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--line);
+  font-weight: 600;
+}
+.bs-tier {
+  display: block;
+  flex: 0 1 260px;
+  min-width: 0;
+  height: 40px;
+  padding: 0 32px 0 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--accent-line);
+  background: #fff
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23374151' stroke-width='1.6'/%3E%3C/svg%3E")
+    no-repeat right 12px center;
+  appearance: none;
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 500;
+  color: var(--fg);
+  cursor: pointer;
+}
+.bs-tier:focus {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 1px;
+}
+.bs-tier-price {
+  display: block;
+  font-size: clamp(18px, 1.8vw, 22px);
+}
+.bs-tier-covers {
+  display: block;
+  margin-top: 4px;
+  font-size: 13.5px;
+  font-weight: 400;
+  color: var(--fg-dim);
+}
