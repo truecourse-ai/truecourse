@@ -13,19 +13,19 @@ const TIERS: { id: string; label: string; price: string; covers: string }[] = [
   {
     id: 'keep-working',
     label: 'Keep my app working',
-    price: '$99 a month',
+    price: '$49 a month',
     covers: 'Tests every change, watches the app and fixes what breaks.',
   },
   {
     id: 'build',
     label: "Also build what's next",
-    price: '$499 a month',
+    price: '$199 a month',
     covers: 'All of that, plus new features, from your words to live.',
   },
   {
     id: 'full-cto',
     label: 'A full CTO',
-    price: '$1,500 a month',
+    price: '$999 a month',
     covers: 'All of that, plus tech decisions and managing developers.',
   },
 ];
