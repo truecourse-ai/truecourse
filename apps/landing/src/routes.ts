@@ -13,6 +13,8 @@ export default [
   // path to it, which picks the hero's headline.
   route('builders', 'pages/BuildersPage.tsx'),
   route('part-time-cto', 'pages/BuildersPage.tsx', { id: 'builders-part-time-cto' }),
+  // The Reddit ads' path, with a question in place of the picture.
+  route('keep-it-working', 'pages/BuildersPage.tsx', { id: 'builders-keep-it-working' }),
   // The fractional CTO ad's page, which asks what the visitor needs from a CTO.
   route('fractional-cto', 'pages/FractionalCtoPage.tsx'),
 ] satisfies RouteConfig;

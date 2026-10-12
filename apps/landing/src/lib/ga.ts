@@ -15,8 +15,8 @@ const ADS_ID = 'AW-18498468594';
 /** The Google Ads "Book appointment" conversion. */
 const ADS_BOOKING_CONVERSION = `${ADS_ID}/xLktCPT3yJQdEPL14PRE`;
 
-/** The Google Ads "CTO need form" conversion, a "Submit lead form" action. */
-const ADS_NEED_CONVERSION = `${ADS_ID}/tAVDCILx15odEPL14PRE`;
+/** The Google Ads "CTO need form" conversion, the "Submit lead form" action every hero question reports. */
+const ADS_LEAD_FORM_CONVERSION = `${ADS_ID}/tAVDCILx15odEPL14PRE`;
 
 declare global {
   interface Window {
@@ -71,8 +71,8 @@ export function trackAdsBooking(): void {
   window.gtag('event', 'conversion', { send_to: ADS_BOOKING_CONVERSION, value: 1.0, currency: 'USD' });
 }
 
-/** Reports a sent "What do you need a CTO for?" form to Google Ads as a conversion. */
-export function trackAdsNeedShared(): void {
+/** Reports a sent hero question to Google Ads as a conversion. */
+export function trackAdsLeadForm(): void {
   if (!initialized) return;
-  window.gtag('event', 'conversion', { send_to: ADS_NEED_CONVERSION, value: 1.0, currency: 'USD' });
+  window.gtag('event', 'conversion', { send_to: ADS_LEAD_FORM_CONVERSION, value: 1.0, currency: 'USD' });
 }

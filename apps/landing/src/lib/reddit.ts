@@ -1,5 +1,5 @@
 /**
- * Reddit Pixel, so Reddit Ads can credit visits and booked checkups to the ad
+ * Reddit Pixel, so Reddit Ads can credit visits, booked checkups and answered questions to the ad
  * that brought them. Pixel ids are public by design (they ship in every
  * page's snippet).
  */
@@ -48,8 +48,8 @@ export function trackRedditPageVisit(): void {
   window.rdt!('track', 'PageVisit');
 }
 
-/** Reports a booked checkup to Reddit Ads as a Lead. */
-export function trackRedditBooking(): void {
+/** Reports a lead to Reddit Ads, a booked checkup or a sent hero question. */
+export function trackRedditLead(): void {
   if (!initialized) return;
   window.rdt!('track', 'Lead');
 }

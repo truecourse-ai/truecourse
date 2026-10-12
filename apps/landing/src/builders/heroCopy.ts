@@ -6,8 +6,9 @@ import { registerProperties } from '@/lib/posthog';
  * The hero's headline, matched to the search an ad answered. Each ad group
  * links to its own path, which serves the one builders page with its own
  * headline, title and description, prerendered so the HTML already says what
- * was searched. Every PostHog event from the visit carries `hero_variant` so
- * the variants can be compared.
+ * was searched. The Reddit ads' page asks what worries the visitor about
+ * their app. Every PostHog event from the
+ * visit carries `hero_variant` so the variants can be compared.
  */
 
 export type HeroCopy = {
@@ -16,6 +17,8 @@ export type HeroCopy = {
   title: string;
   sub: string;
   long?: boolean;
+  /** Whether the hero asks what worries the visitor about their app, in place of the booking buttons and the picture. */
+  ask?: boolean;
   pageTitle: string;
   description: string;
 };
@@ -41,6 +44,17 @@ export const HEROES: HeroCopy[] = [
     pageTitle: 'TrueCourse · Why a part-time CTO? AI never clocks out.',
     description:
       'An AI CTO instead of a part-time one, for apps built with AI. It tests every change and fixes what breaks while you sleep, for $49 a month for early adopters.',
+  },
+  {
+    variant: 'keep-it-working',
+    path: '/keep-it-working',
+    title: 'Built your app with AI? Your AI CTO keeps it working.',
+    sub: 'It tests every change before it goes live and fixes what breaks, even at 2\u00a0AM.',
+    long: true,
+    ask: true,
+    pageTitle: 'TrueCourse · Built your app with AI? Your AI CTO keeps it working.',
+    description:
+      'Built your app with AI? Your AI CTO tests every change before it goes live and fixes what breaks, even at 2 AM.',
   },
 ];
 

@@ -11,6 +11,7 @@ import { Who } from '@/builders/Who';
 import { Check } from '@/builders/icons';
 import { BuiltWith } from '@/builders/BuiltWith';
 import { Header } from '@/builders/Header';
+import { AskForm, APP_WORRY } from '@/builders/AskForm';
 import { useSectionViews } from '@/builders/useSectionViews';
 import { heroFor, useHeroCopy, useHeroScene } from '@/builders/heroCopy';
 import { MorningScene } from '@/builders/scenes/MorningScene';
@@ -26,8 +27,10 @@ import stylesheet from '@/builders/builders.css?url';
 
 /**
  * The AI CTO page, for professionals who build their own apps with AI: a page of
- * its own, outside the main site's header and footer. Its one ask is a free
- * app checkup, and it records how far down each visitor reads.
+ * its own, outside the main site's header and footer. Its ask is a free app
+ * checkup, which the Reddit ads' path leads with a question about what
+ * worries the visitor about their app, and it records how far down each
+ * visitor reads.
  */
 
 export const links: LinksFunction = () => [{ rel: 'stylesheet', href: stylesheet }];
@@ -119,21 +122,23 @@ export default function BuildersPage() {
               <Reveal as="p" className="sub" delay={140} rise>
                 {hero.sub}
               </Reveal>
-              <Reveal className="bs-cta-row" delay={220} rise>
-                <BookLink className="btn btn-primary" placement="hero">
-                  Book a free app checkup
-                </BookLink>
-                <a className="btn" href="#cto">
-                  See what it does
-                </a>
-              </Reveal>
+              {!hero.ask && (
+                <Reveal className="bs-cta-row" delay={220} rise>
+                  <BookLink className="btn btn-primary" placement="hero">
+                    Book a free app checkup
+                  </BookLink>
+                  <a className="btn" href="#cto">
+                    See what it does
+                  </a>
+                </Reveal>
+              )}
               <Reveal as="p" className="bs-backing" delay={260} rise>
                 <span>Backed by</span>
                 <img src="/skydeck.svg" alt="Berkeley SkyDeck" />
               </Reveal>
             </div>
             <Reveal className="bs-hero-scene" delay={300} rise>
-              {scene === 'growth' ? <GrowthScene /> : <MorningScene />}
+              {hero.ask ? <AskForm question={APP_WORRY} /> : scene === 'growth' ? <GrowthScene /> : <MorningScene />}
             </Reveal>
           </div>
         </section>
