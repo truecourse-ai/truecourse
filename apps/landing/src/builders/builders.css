@@ -2125,8 +2125,16 @@ section.band:has(.bs-ask) {
 .bs-compare td {
   vertical-align: top;
 }
+.bs-tier-in-cell {
+  display: block;
+  margin-bottom: 10px;
+}
+.bs-tier-in-cell .bs-tier {
+  width: 100%;
+  max-width: 260px;
+}
 .bs-tier-pick {
-  display: flex;
+  display: none;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
@@ -2168,4 +2176,12 @@ section.band:has(.bs-ask) {
   font-size: 13.5px;
   font-weight: 400;
   color: var(--fg-dim);
+}
+@media (max-width: 560px) {
+  .bs-tier-pick {
+    display: flex;
+  }
+  .bs-tier-in-cell {
+    display: none;
+  }
 }

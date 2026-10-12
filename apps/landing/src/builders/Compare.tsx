@@ -5,7 +5,7 @@ import { trackEvent } from '@/lib/posthog';
 /**
  * A human fractional CTO beside the AI CTO, on what it costs, when it is
  * there and when it can start. The AI CTO's price depends on how much CTO the
- * visitor needs, picked from a dropdown; each pick is recorded as
+ * visitor needs, picked from a dropdown in its price cell; each pick is recorded as
  * `cto_tier_picked`, a second answer to what they need.
  */
 
@@ -44,6 +44,17 @@ export function Compare() {
     trackEvent('cto_tier_picked', { tier: id });
   };
 
+  // The dropdown sits in the AI CTO's price cell, or above the table on a phone, where the cell is too narrow.
+  const tierSelect = (
+    <select className="bs-tier" aria-label="How much CTO you need" value={tier.id} onChange={(e) => pick(e.target.value)}>
+      {TIERS.map((t) => (
+        <option key={t.id} value={t.id}>
+          {t.label}
+        </option>
+      ))}
+    </select>
+  );
+
   return (
     <section className="band" id="compare">
       <div className="wrap">
@@ -53,13 +64,7 @@ export function Compare() {
         <Reveal className="bs-compare">
           <label className="bs-tier-pick">
             <span>How much CTO do you need?</span>
-            <select className="bs-tier" value={tier.id} onChange={(e) => pick(e.target.value)}>
-              {TIERS.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
+            {tierSelect}
           </label>
           <table>
             <thead>
@@ -76,6 +81,7 @@ export function Compare() {
                 <th scope="row">Price</th>
                 <td>$5,000 to $15,000 a month</td>
                 <td className="ai">
+                  <span className="bs-tier-in-cell">{tierSelect}</span>
                   <span className="bs-tier-price">{tier.price}</span>
                   <span className="bs-tier-covers">{tier.covers}</span>
                 </td>
