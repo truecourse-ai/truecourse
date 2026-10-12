@@ -2,13 +2,15 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { cn } from '@/lib/cn';
 import { distinctId, trackEvent } from '@/lib/posthog';
+import { trackAdsNeedShared } from '@/lib/ga';
 import { BookLink } from '@/builders/BookLink';
 
 /**
  * The hero's question on /fractional-cto: what the visitor needs from a CTO.
  * They pick any of the needs, may add their own words, and leave an email.
  * It posts to /api/cto-need, which records the answer server-side as
- * `cto_need_shared`, tied to this visit and the ad it came from. Booking a
+ * `cto_need_shared`, tied to this visit and the ad it came from, and reports
+ * it to Google Ads as a conversion once it has gone through. Booking a
  * call stays one tap away, before and after sending.
  */
 
@@ -48,6 +50,7 @@ export function NeedForm() {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ needs, note, email, visitor: distinctId(), page: window.location.pathname, utm }),
       });
+      if (res.ok) trackAdsNeedShared();
       setState(res.ok ? 'done' : 'failed');
     } catch {
       setState('failed');
