@@ -7,7 +7,7 @@ import { Clouds } from '@/components/Clouds';
 import { Voyage } from '@/components/Voyage';
 import { BookLink, BookingCalendar } from '@/builders/BookLink';
 import { Header } from '@/builders/Header';
-import { NeedForm } from '@/builders/NeedForm';
+import { AskForm, CTO_NEED } from '@/builders/AskForm';
 import { Compare } from '@/builders/Compare';
 import { useSectionViews } from '@/builders/useSectionViews';
 import { TrackRecord, TrackStats } from '@/builders/scenes/TrackRecord';
@@ -65,7 +65,7 @@ export default function FractionalCtoPage() {
               </Reveal>
             </div>
             <Reveal className="bs-hero-scene" delay={300} rise>
-              <NeedForm />
+              <AskForm question={CTO_NEED} />
             </Reveal>
           </div>
         </section>

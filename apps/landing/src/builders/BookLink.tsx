@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 're
 import { getCalApi } from '@calcom/embed-react';
 import { trackAdsBooking } from '@/lib/ga';
 import { trackEvent } from '@/lib/posthog';
-import { trackRedditBooking } from '@/lib/reddit';
+import { trackRedditLead } from '@/lib/reddit';
 
 export const BOOKING_URL = 'https://cal.com/mushegh-gevorgyan-asax6e/your-app-checkup';
 const CAL_LINK = 'mushegh-gevorgyan-asax6e/your-app-checkup';
@@ -51,7 +51,7 @@ function loadCalendar() {
       callback: () => {
         trackEvent('checkup_booked', { placement: openedFrom, page: 'builders' });
         trackAdsBooking();
-        trackRedditBooking();
+        trackRedditLead();
       },
     });
     return cal;
@@ -114,7 +114,7 @@ export function BookingCalendar({ className }: { className?: string }) {
         callback: () => {
           trackEvent('checkup_booked', { placement: 'calendar', page: 'builders' });
           trackAdsBooking();
-          trackRedditBooking();
+          trackRedditLead();
         },
       });
       cal('inline', {

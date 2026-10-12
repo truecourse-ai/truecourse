@@ -1,25 +1,35 @@
 /**
- * Vercel serverless function: POST /api/cto-need  { needs, note?, email, visitor?, page?, utm? }
+ * Vercel serverless function: POST /api/answer  { question, picks, note?, email, visitor?, page?, utm? }
  *
- * Records what a visitor needs from a CTO, sent from the form on the
- * /fractional-cto hero, as the PostHog event `cto_need_shared` under the
- * person's email. When the page sends its PostHog id as `visitor`, the
+ * Records a visitor's answer to a hero question as that question's PostHog
+ * event, under the person's email: what they need from a CTO on
+ * /fractional-cto (`cto_need_shared`), what worries them about their app on
+ * /builders (`app_worry_shared`). When the page sends its PostHog id as `visitor`, the
  * request first identifies that visit as the same person, so the pages they
  * read and the ad they came from stay attached to them. Answers 204 on
  * success.
  *
  * Sends to the site's PostHog project; no env vars. The function imports
  * nothing, as Vercel runs each file in api/ on its own, so the project key
- * and the list of needs are written out here as well as in the page, and
- * both copies must match.
+ * and the questions' answers are written out here as well as in
+ * src/builders/AskForm.tsx, and both copies must match.
  */
 
 /** The site's PostHog project key (write-only, public) and ingestion host. */
 const POSTHOG_KEY = 'phc_ys9Ykf49KmNqAC3fhq3jugTejc4BDqyKqRS8qRoYZYew';
 const POSTHOG_HOST = 'https://us.i.posthog.com';
 
-/** The needs the form offers, by id. The same list is in src/builders/NeedForm.tsx. */
-const NEEDS = new Set(['build', 'fix', 'strategy', 'developers', 'security', 'other']);
+/** Each question's event and the answers it offers, by id. */
+const QUESTIONS: Record<string, { event: string; answers: Set<string> }> = {
+  'cto-need': {
+    event: 'cto_need_shared',
+    answers: new Set(['build', 'fix', 'strategy', 'developers', 'security', 'other']),
+  },
+  'app-worry': {
+    event: 'app_worry_shared',
+    answers: new Set(['bugs', 'night', 'stuck', 'security', 'other']),
+  },
+};
 
 /** A plain address check: something, an @, a dot in the domain, no spaces. */
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -41,12 +51,17 @@ export default async function handler(req: any, res: any): Promise<void> {
       res.status(400).json({ error: 'Invalid email' });
       return;
     }
-    const needs = Array.isArray(body?.needs)
-      ? [...new Set(body.needs.filter((n: unknown): n is string => typeof n === 'string' && NEEDS.has(n)))]
+    const question = typeof body?.question === 'string' ? QUESTIONS[body.question] : undefined;
+    if (!question) {
+      res.status(400).json({ error: 'Unknown question' });
+      return;
+    }
+    const picks = Array.isArray(body?.picks)
+      ? [...new Set(body.picks.filter((n: unknown): n is string => typeof n === 'string' && question.answers.has(n)))]
       : [];
     const note = typeof body?.note === 'string' ? body.note.trim().slice(0, MAX_NOTE) : '';
-    if (needs.length === 0 && !note) {
-      res.status(400).json({ error: 'No need given' });
+    if (picks.length === 0 && !note) {
+      res.status(400).json({ error: 'No answer given' });
       return;
     }
     const visitor = typeof body?.visitor === 'string' && body.visitor.length <= 200 ? body.visitor : undefined;
@@ -68,10 +83,10 @@ export default async function handler(req: any, res: any): Promise<void> {
       });
     }
     batch.push({
-      event: 'cto_need_shared',
+      event: question.event,
       distinct_id: email,
       timestamp: now,
-      properties: { source: 'landing', page, needs, note: note || undefined, ...utm, $set: { email } },
+      properties: { source: 'landing', page, picks, note: note || undefined, ...utm, $set: { email } },
     });
 
     let pr: Response;
@@ -82,20 +97,20 @@ export default async function handler(req: any, res: any): Promise<void> {
         body: JSON.stringify({ api_key: POSTHOG_KEY, batch }),
       });
     } catch (fetchErr) {
-      console.error('cto-need: fetch threw', fetchErr);
+      console.error('answer: fetch threw', fetchErr);
       res.status(502).json({ error: 'Could not reach PostHog' });
       return;
     }
     if (!pr.ok) {
       const text = await pr.text().catch(() => '');
-      console.error('cto-need: posthog error', pr.status, text.slice(0, 500));
+      console.error('answer: posthog error', pr.status, text.slice(0, 500));
       res.status(502).json({ error: 'Could not record the request', upstream: pr.status });
       return;
     }
 
     res.status(204).end();
   } catch (err) {
-    console.error('cto-need: unhandled error', err instanceof Error ? err.stack : err);
+    console.error('answer: unhandled error', err instanceof Error ? err.stack : err);
     try {
       res.status(500).json({ error: 'Internal error' });
     } catch {
