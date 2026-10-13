@@ -1,10 +1,10 @@
 /**
- * Vercel serverless function: POST /api/answer  { question, picks, note?, email, visitor?, page?, utm? }
+ * Vercel serverless function: POST /api/answer  { question, needs, note?, email, visitor?, page?, utm? }
  *
- * Records a visitor's answer to a hero question as that question's PostHog
- * event, under the person's email: what they need from a CTO on
- * /fractional-cto (`cto_need_shared`), what worries them about their app on
- * /builders (`app_worry_shared`). When the page sends its PostHog id as `visitor`, the
+ * Records a visitor's answer to a hero question as `cto_need_shared` under
+ * the person's email, with the question it answers: what they need from a
+ * CTO (`cto-need`) or what worries them about their app (`app-worry`).
+ * When the page sends its PostHog id as `visitor`, the
  * request first identifies that visit as the same person, so the pages they
  * read and the ad they came from stay attached to them. Answers 204 on
  * success.
@@ -19,16 +19,10 @@
 const POSTHOG_KEY = 'phc_ys9Ykf49KmNqAC3fhq3jugTejc4BDqyKqRS8qRoYZYew';
 const POSTHOG_HOST = 'https://us.i.posthog.com';
 
-/** Each question's event and the answers it offers, by id. */
-const QUESTIONS: Record<string, { event: string; answers: Set<string> }> = {
-  'cto-need': {
-    event: 'cto_need_shared',
-    answers: new Set(['build', 'fix', 'strategy', 'developers', 'security', 'other']),
-  },
-  'app-worry': {
-    event: 'app_worry_shared',
-    answers: new Set(['bugs', 'night', 'stuck', 'security', 'other']),
-  },
+/** The answers each question offers, by question id. */
+const QUESTIONS: Record<string, Set<string>> = {
+  'cto-need': new Set(['build', 'fix', 'strategy', 'developers', 'security', 'other']),
+  'app-worry': new Set(['bugs', 'night', 'stuck', 'security', 'other']),
 };
 
 /** A plain address check: something, an @, a dot in the domain, no spaces. */
@@ -51,16 +45,17 @@ export default async function handler(req: any, res: any): Promise<void> {
       res.status(400).json({ error: 'Invalid email' });
       return;
     }
-    const question = typeof body?.question === 'string' ? QUESTIONS[body.question] : undefined;
+    const question = typeof body?.question === 'string' && QUESTIONS[body.question] ? body.question : undefined;
     if (!question) {
       res.status(400).json({ error: 'Unknown question' });
       return;
     }
-    const picks = Array.isArray(body?.picks)
-      ? [...new Set(body.picks.filter((n: unknown): n is string => typeof n === 'string' && question.answers.has(n)))]
+    const answers = QUESTIONS[question]!;
+    const needs = Array.isArray(body?.needs)
+      ? [...new Set(body.needs.filter((n: unknown): n is string => typeof n === 'string' && answers.has(n)))]
       : [];
     const note = typeof body?.note === 'string' ? body.note.trim().slice(0, MAX_NOTE) : '';
-    if (picks.length === 0 && !note) {
+    if (needs.length === 0 && !note) {
       res.status(400).json({ error: 'No answer given' });
       return;
     }
@@ -83,10 +78,10 @@ export default async function handler(req: any, res: any): Promise<void> {
       });
     }
     batch.push({
-      event: question.event,
+      event: 'cto_need_shared',
       distinct_id: email,
       timestamp: now,
-      properties: { source: 'landing', page, picks, note: note || undefined, ...utm, $set: { email } },
+      properties: { source: 'landing', question, page, needs, note: note || undefined, ...utm, $set: { email } },
     });
 
     let pr: Response;

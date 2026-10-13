@@ -11,7 +11,7 @@ import type { BookPlacement } from '@/builders/BookLink';
  * A question in the hero that the visitor answers instead of booking a call
  * right away: they pick any of the answers, may add their own words, and
  * leave an email. It posts to /api/answer, which records the answer
- * server-side as the question's event, tied to this visit and the ad it came
+ * server-side as `cto_need_shared` with the question's id, tied to this visit and the ad it came
  * from; once it has gone through it counts as a lead in Google Ads and Reddit
  * Ads. Booking a call stays one tap away, before and after sending.
  */
@@ -21,8 +21,6 @@ export type Question = {
   id: 'cto-need' | 'app-worry';
   ask: string;
   answers: { id: string; label: string }[];
-  /** Fired with the first answer picked, so a started but unsent form shows up. */
-  startedEvent: string;
   /** Whether to offer a box for their own words. */
   note?: boolean;
   /** Where the "Rather talk?" link sits, for `book_checkup_clicked`. */
@@ -40,7 +38,6 @@ export const CTO_NEED: Question = {
     { id: 'security', label: 'Security and reliability' },
     { id: 'other', label: 'Something else' },
   ],
-  startedEvent: 'cto_need_started',
   note: true,
   placement: 'hero',
 };
@@ -55,7 +52,6 @@ export const APP_WORRY: Question = {
     { id: 'security', label: 'Security' },
     { id: 'other', label: 'Something else' },
   ],
-  startedEvent: 'app_worry_started',
   placement: 'hero',
 };
 
@@ -64,14 +60,15 @@ const UTM = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_conten
 type State = 'idle' | 'sending' | 'done' | 'failed';
 
 export function AskForm({ question, className }: { question: Question; className?: string }) {
-  const [picks, setPicks] = useState<string[]>([]);
+  const [needs, setNeeds] = useState<string[]>([]);
   const [note, setNote] = useState('');
   const [email, setEmail] = useState('');
   const [state, setState] = useState<State>('idle');
 
   const toggle = (id: string) => {
-    if (picks.length === 0) trackEvent(question.startedEvent, { answer: id });
-    setPicks(picks.includes(id) ? picks.filter((n) => n !== id) : [...picks, id]);
+    // The first answer picked, so a started but unsent form shows up.
+    if (needs.length === 0) trackEvent('cto_need_started', { need: id, question: question.id });
+    setNeeds(needs.includes(id) ? needs.filter((n) => n !== id) : [...needs, id]);
   };
 
   const submit = async (e: FormEvent) => {
@@ -85,7 +82,7 @@ export function AskForm({ question, className }: { question: Question; className
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           question: question.id,
-          picks,
+          needs,
           note,
           email,
           visitor: distinctId(),
@@ -115,7 +112,7 @@ export function AskForm({ question, className }: { question: Question; className
     );
   }
 
-  const ready = (picks.length > 0 || note.trim() !== '') && email.trim() !== '';
+  const ready = (needs.length > 0 || note.trim() !== '') && email.trim() !== '';
 
   return (
     <form className={cn('bs-need', className)} id="ask" onSubmit={submit}>
@@ -126,8 +123,8 @@ export function AskForm({ question, className }: { question: Question; className
           <button
             type="button"
             key={a.id}
-            className={cn('bs-need-chip', picks.includes(a.id) && 'on')}
-            aria-pressed={picks.includes(a.id)}
+            className={cn('bs-need-chip', needs.includes(a.id) && 'on')}
+            aria-pressed={needs.includes(a.id)}
             onClick={() => toggle(a.id)}
           >
             {a.label}
