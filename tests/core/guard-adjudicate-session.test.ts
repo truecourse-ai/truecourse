@@ -36,7 +36,6 @@ import {
   ADJUDICATE_CACHE_NAME,
   ADJUDICATE_PROMPT_FINGERPRINT,
   ADJUDICATE_STAGE_VERSION,
-  adjudicationLegacyCacheKey,
   adjudicationCacheKey,
   adjudicationSessionDef,
   scenarioBehaviorHash,
@@ -148,9 +147,6 @@ describe('adjudicationCacheKey', () => {
       .digest('hex')
 
     expect(adjudicationCacheKey(subject)).toBe(expected)
-    // Rewording the prompt does not re-adjudicate an unchanged failure; the old
-    // key is still readable, so nothing is re-run on the way over.
-    expect(adjudicationLegacyCacheKey(subject)).not.toBe(adjudicationCacheKey(subject))
     expect(ADJUDICATE_PROMPT_FINGERPRINT).toHaveLength(16)
   })
 

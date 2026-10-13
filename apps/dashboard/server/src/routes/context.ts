@@ -16,12 +16,14 @@
  *                                             outline; with section, that section alone
  *   GET    /api/context/documents             the rows of the Documents view, status folded
  *                                             and inclusion said, corpus or not
+ *   GET    /api/context/claims                the rows of the Claims view, folded across
+ *                                             every repository that reads each claim
  *   POST   /api/context/scan                  the workspace Document scan; 202 { jobId }
  *   GET    /api/context/staleness             has the context moved since the corpus?
  *   GET    /api/context/corpus                the workspace corpus + its decisions
  *   POST|DELETE /api/context/includes         force-include / un-include a document
  *   POST|DELETE /api/context/excludes         force-exclude / restore a document
- *   POST|DELETE /api/context/conflict-resolution   a section-scoped conflict verdict
+ *   POST|DELETE /api/context/conflict-resolution   a conflict verdict
  *
  * A source belongs to the workspace, not to a repository, so this router mounts
  * ABOVE the repository routers and behind the auth gate alone — there is no
@@ -69,6 +71,7 @@ import {
   addSource,
   editSource,
   listSources,
+  listWorkspaceClaims,
   listWorkspaceDocuments,
   pauseSource,
   previewSource,
@@ -172,8 +175,8 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   });
 
   // One document's body by its corpus ref — the address the Documents view,
-  // the claims and the scenarios all use — with its section outline, or with
-  // `?section=<anchor>` that section alone.
+  // the claims and the scenarios all use — with its outline, or with
+  // `?from=<line>&to=<line>` those lines alone.
   router.get('/doc', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
@@ -182,8 +185,11 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
         res.status(400).json({ error: 'Missing ?ref=context/<source>/<document>.' });
         return;
       }
-      const section = typeof req.query.section === 'string' ? req.query.section : undefined;
-      res.json(await readWorkspaceDocument(org, ref, section));
+      const from = Number(req.query.from);
+      const to = Number(req.query.to);
+      const lines: [number, number] | undefined =
+        Number.isInteger(from) && Number.isInteger(to) && from > 0 && to > 0 ? [from, to] : undefined;
+      res.json(await readWorkspaceDocument(org, ref, lines));
     } catch (e) {
       respond(res, next, e);
     }
@@ -218,8 +224,8 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
   });
 
   // GET — what changed between two corpus versions: the documents added,
-  // removed and re-tagged, the areas that appeared or emptied, the overlap
-  // flags that opened or closed. `?from=` and `?to=` are version ids.
+  // removed and re-tagged, the areas that appeared or emptied, the conflicts
+  // that opened or closed. `?from=` and `?to=` are version ids.
   router.get('/versions/diff', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const org = orgOf(req);
@@ -262,6 +268,15 @@ export function createContextRouter(deps: ContextRouterDeps = {}): Router {
           inclusion: req.query.inclusion === undefined ? [] : queryValues(req.query.inclusion),
         }),
       );
+    } catch (e) {
+      respond(res, next, e);
+    }
+  });
+
+  // THE Claims view: every claim a repository holds, folded across them.
+  router.get('/claims', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.json(await listWorkspaceClaims(callerOf(req)));
     } catch (e) {
       respond(res, next, e);
     }

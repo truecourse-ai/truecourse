@@ -21,7 +21,6 @@ export {
   ADJUDICATE_SYSTEM_PROMPT,
   adjudicationBriefing,
   adjudicationCacheKey,
-  adjudicationLegacyCacheKey,
   adjudicationSessionDef,
   adjudicationWorkItem,
   scenarioBehaviorHash,
@@ -46,7 +45,7 @@ export {
 } from './control.js';
 export {
   adjudicationRefusalReason,
-  claimIdentity,
+  failingClaimId,
   persistAdjudication,
   type AdjudicationRouting,
   type PersistAdjudicationResult,

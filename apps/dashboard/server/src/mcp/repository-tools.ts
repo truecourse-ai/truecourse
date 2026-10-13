@@ -13,6 +13,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { readGuardHistory } from '@truecourse/core/commands/guard-read';
 import {
   GUARD_COVERAGE_PLAIN_ORDER,
+  GuardCoveragePlainStatusSchema,
   GuardOutcomeSchema,
   guardCoveragePlainStatus,
   guardFlowPlainStatus,
@@ -51,7 +52,6 @@ function resultRow(result: GuardScenarioResult, latest: GuardLatest) {
     ...(result.flowId ? { flowId: result.flowId } : {}),
     outcome: result.outcome,
     doc: result.binds.doc,
-    section: result.binds.section,
     runId: guardResultRunId(result, latest.run),
     ...(result.failure
       ? {
@@ -85,7 +85,12 @@ function flowView(detail: GuardFlowDetail) {
     flowId: detail.flowId,
     title: detail.title,
     goal: detail.goal,
-    status: guardFlowPlainStatus({ status: detail.status, bucket: detail.bucket, findings: detail.findings.length }),
+    status: guardFlowPlainStatus({
+      status: detail.status,
+      bucket: detail.bucket,
+      findings: detail.findings.length,
+      ...(detail.test ? { test: detail.test } : {}),
+    }),
     dismissed: detail.dismissed,
     ...(detail.dismissalNote ? { dismissalNote: detail.dismissalNote } : {}),
     ...(detail.orphaned ? { orphaned: true, orphanedReason: detail.orphanedReason ?? null } : {}),
@@ -93,11 +98,6 @@ function flowView(detail: GuardFlowDetail) {
       order: m.order,
       claim: m.claimTitle,
       doc: m.doc,
-      section: m.anchor,
-      ...(m.headingText ? { heading: m.headingText } : {}),
-      ...(m.cases?.length ? { cases: m.cases.map((c) => c.claim) } : {}),
-      ...(m.drifted ? { drifted: true } : {}),
-      ...(m.live ? {} : { sectionGone: true }),
     })),
     tests: detail.surfaces.map((t) => ({
       ...(t.scenarioId ? { testId: t.scenarioId } : {}),
@@ -127,7 +127,7 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
     {
       title: 'List flows',
       description:
-        "A repository's flows. A flow is one path a user takes through the product, derived from what the documents claim, and each has tests that prove it. `status` is one of failed, blocked, never-run, succeeded, not-testable. Filter by `status` to find, say, every failing flow.",
+        "A repository's flows. A flow is one path a user takes through the product, derived from what the documents claim, and each has tests that prove it. `status` is one of failed, blocked, never-run, partially-succeeded, succeeded, not-testable. A partially-succeeded flow's test passed after using the product's name for a control the documents call something else. Filter by `status` to find, say, every failing flow.",
       inputSchema: {
         repo: repoArg,
         status: z.array(z.enum(GUARD_COVERAGE_PLAIN_ORDER)).optional(),
@@ -278,11 +278,11 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
     {
       title: 'Get claim coverage',
       description:
-        "What the repository's documents claim, and which claims a flow carries. Each claim's `coverage` is proven (a test passed), failing, planned (a flow carries it, not yet proven), gapped (deliberately in no flow, with the reason) or unplanned (in no flow, no reason). `withFlow: false` lists only the claims no flow carries.",
+        "What the repository's documents claim, and how each claim stands. A claim's `status` is one of five words: succeeded (a test proved it), failed (a test disproved it), blocked (a flow carries it but cannot run yet, with the reason), never-run (a flow carries it, nothing has executed) or not-testable (the scan judged it untestable, or someone dismissed it, or no flow carries it). `flows` are the flows that carry it. `withFlow: false` lists only the claims no flow carries.",
       inputSchema: {
         repo: repoArg,
         withFlow: z.boolean().optional().describe('true: only claims a flow carries; false: only claims none does.'),
-        coverage: z.array(z.enum(['proven', 'failing', 'planned', 'gapped', 'unplanned'])).optional(),
+        status: z.array(GuardCoveragePlainStatusSchema).optional().describe('Only claims wearing one of these words.'),
       },
       annotations: READ,
     },
@@ -291,19 +291,17 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
         const repo = await resolveRepo(caller, args.repo);
         const view = await readRepoClaims(repo.path, {
           ...(args.withFlow === undefined ? {} : { withFlow: args.withFlow }),
-          ...(args.coverage ? { coverage: args.coverage } : {}),
+          ...(args.status ? { status: args.status } : {}),
         });
         return {
           extracted: view.extracted,
           totals: view.totals,
           claims: view.claims.map((c) => ({
             id: c.id,
-            claim: c.claim,
-            title: c.title,
+            statement: c.statement,
             doc: c.doc,
-            section: c.anchor,
-            coverage: c.coverage,
-            ...(c.gapReason ? { gapReason: c.gapReason } : {}),
+            status: guardCoveragePlainStatus(c.status),
+            ...(c.reason ? { reason: c.reason } : {}),
             ...(c.dismissed ? { dismissed: true } : {}),
             flows: c.flows.map((f) => f.flowId),
           })),
@@ -316,18 +314,14 @@ export function registerRepositoryTools(server: McpServer, caller: McpCaller): v
     {
       title: 'Undo a claim dismissal',
       description:
-        'Bring back a claim someone dismissed, so the next Flow generation covers it again. Name it the way get_coverage does: its `doc`, `section` and `title`.',
-      inputSchema: { repo: repoArg, doc: z.string(), section: z.string(), title: z.string() },
+        'Bring back a claim someone dismissed, so the next Flow generation covers it again. Name it by its `id` from get_coverage.',
+      inputSchema: { repo: repoArg, claimId: z.string() },
       annotations: WRITE,
     },
     (args) =>
       run('undismiss_claim', async () => {
         const repo = await resolveRepo(caller, args.repo);
-        const decisions = await undismissClaim(repo.path, {
-          doc: args.doc,
-          anchor: args.section,
-          title: args.title,
-        });
+        const decisions = await undismissClaim(repo.path, { claimId: args.claimId });
         return { dismissedClaims: decisions.dismissedClaims };
       }),
   );

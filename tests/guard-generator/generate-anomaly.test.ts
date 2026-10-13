@@ -12,7 +12,7 @@ import {
   writeCorpus,
   raw,
   rawApi,
-  extractSessionBy,
+  claimsBy,
   runGenerate,
   interfacesOf,
   cliInterface,
@@ -74,7 +74,7 @@ describe('generateGuards — no-op recipe anomaly abort (cli)', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, cliInterface(['silent'])),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       // A real command the silent entry ignores: exit 0, no output, instant.
       flowWorkerSession: submitWorkerSessions((task) => raw(task.flowId, [{ run: ['do'], expect: { exit: 0 } }]), {
         onSubmit: () => submits++,
@@ -125,7 +125,7 @@ describe('generateGuards — no-op recipe anomaly abort (cli)', () => {
     let fidelityCalls = 0
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions((task) => raw(task.flowId, PASSING_STEPS), {
         judge: async () => (fidelityCalls++, { kind: 'faithful' }),
       }),
@@ -168,7 +168,7 @@ describe('generateGuards — dead-stub anomaly abort (api)', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r, apiInterface('GET', '/alpha'), apiInterface('POST', '/beta')),
-      extractSession: extractSessionBy({
+      claims: claimsBy({
         alpha: [{ driver: 'api', claim: 'GET /alpha answers the alpha resource', reason: 'HTTP status' }],
         beta: [{ driver: 'api', claim: 'POST /beta records a beta event', reason: 'HTTP status' }],
       }),

@@ -19,7 +19,6 @@
 import { z } from 'zod'
 import { namedEntries, wireShape } from '@truecourse/shared/llm'
 import {
-  GuardVerificationSchema,
   GuardSetupSchema,
   GuardStepObjectSchema,
   promptKeysNeedATerminal,
@@ -263,52 +262,6 @@ export const SeedProposalSchema = z
 export type SeedProposal = z.infer<typeof SeedProposalSchema>
 
 // ---------------------------------------------------------------------------
-// Claim extraction (one call per document / view)
-// ---------------------------------------------------------------------------
-
-/**
- * One testable claim the model read out of a document: a single externally-
- * observable behavior, the driver that could assert it, the section it belongs to
- * (an anchor the engine snaps against the live index), and the observable a test
- * would check.
- */
-export const ExtractedClaimSchema = z.object({
-  claim: z.string().min(1),
-  driver: z.enum(CLAIM_DRIVERS),
-  alternativeDrivers: z.array(z.enum(CLAIM_DRIVERS)).optional(),
-  verification: GuardVerificationSchema.optional(),
-  sectionAnchor: z.string().min(1),
-  reason: z.string().min(1),
-})
-export type ExtractedClaim = z.infer<typeof ExtractedClaimSchema>
-
-/** A section the model judged to state no testable behavior — a visible coverage
- *  gap with an honest reason. */
-export const UntestableNoteSchema = z.object({
-  sectionAnchor: z.string().min(1),
-  reason: z.string().min(1),
-})
-export type UntestableNote = z.infer<typeof UntestableNoteSchema>
-
-/**
- * One document's (or view's) extraction: its claims plus per-section untestable
- * notes. Either array may be omitted (a doc with only claims, or only notes), but
- * at least one MUST be a real array — a wrong-shaped object with neither is a
- * malformed reply that triggers the corrective re-ask, never a silent empty read.
- * The engine unions views and snaps anchors after parsing.
- */
-export const DocExtractionSchema = z
-  .object({
-    claims: z.array(ExtractedClaimSchema).optional(),
-    untestable: z.array(UntestableNoteSchema).optional(),
-  })
-  .refine((d) => d.claims !== undefined || d.untestable !== undefined, {
-    message: 'expected a "claims" and/or "untestable" array',
-  })
-  .transform((d) => ({ claims: d.claims ?? [], untestable: d.untestable ?? [] }))
-export type DocExtraction = z.infer<typeof DocExtractionSchema>
-
-// ---------------------------------------------------------------------------
 // Scenario authoring (batched per claim)
 // ---------------------------------------------------------------------------
 
@@ -541,17 +494,13 @@ export type FidelityReview = z.infer<typeof FidelityReviewSchema>
 // ---------------------------------------------------------------------------
 
 /**
- * One milestone as synthesis returns it: an already-extracted claim, addressed by
- * the document + section anchor it was extracted under. The engine SNAPS this
- * triple against the area's claim inventory — synthesis orders and groups claims,
- * it never authors one — so `claimTitle` is a copy of a claim's text, not new prose.
- * `order` is advisory (the engine renumbers the path 1..n).
+ * One milestone as synthesis returns it: a claim of the area's inventory, by
+ * id. The engine resolves the id against the inventory — synthesis orders and
+ * groups claims, it never authors one. `order` is advisory (the engine
+ * renumbers the path 1..n).
  */
 export const SynthesizedMilestoneSchema = z.object({
-  doc: z.string().min(1),
-  anchor: z.string().min(1),
-  claimTitle: z.string().min(1),
-  caseIds: z.array(z.string().min(1)).min(1).optional(),
+  claimId: z.string().min(1),
   order: z.number().int().positive().optional(),
   note: z.string().optional(),
 })
@@ -573,10 +522,7 @@ export type SynthesizedFlow = z.infer<typeof SynthesizedFlowSchema>
 /** A claim synthesis deliberately placed in no flow, with its reason — the
  *  coverage honesty rule's other half. */
 export const SynthesizedNoFlowClaimSchema = z.object({
-  doc: z.string().min(1),
-  anchor: z.string().min(1),
-  claimTitle: z.string().min(1),
-  caseIds: z.array(z.string().min(1)).min(1).optional(),
+  claimId: z.string().min(1),
   reason: z.string().min(1),
 })
 export type SynthesizedNoFlowClaim = z.infer<typeof SynthesizedNoFlowClaimSchema>
@@ -593,7 +539,7 @@ export type RetiredFlow = z.infer<typeof RetiredFlowSchema>
  * One area's synthesis output. Either array may be omitted (an area that composes
  * everything, or one that flows nothing), but at least one MUST be a real array —
  * a wrong-shaped object with neither is a malformed reply that triggers the
- * corrective re-ask, never a silent empty read (mirrors {@link DocExtractionSchema}).
+ * corrective re-ask, never a silent empty read.
  */
 export const FlowSynthesisSchema = z
   .object({
@@ -665,8 +611,6 @@ export const RealizationStepSchema = z.object({
   interfaceId: z.string().min(1),
   /** The flow milestone (`order`) this interface realizes. */
   milestone: z.number().int().positive(),
-  /** Explicit source case ids this action serves; required for case-bearing milestones. */
-  checks: z.array(z.string().min(1)).min(1).optional(),
   /** Optional one-liner on how the interface serves the milestone. */
   note: z.string().optional(),
 })
@@ -695,23 +639,9 @@ export const WorldClassifySchema = z
   .strict()
 export type WorldClassify = z.infer<typeof WorldClassifySchema>
 
-/**
- * The claim-diff gate's reply for ONE edited section: `cosmetic` when the
- * current text still guarantees every previously extracted claim and adds no
- * observable behavior, `changed` otherwise. Cached per (prompt, new section
- * fingerprint, prior claims), so the same edit is judged once per repo.
- */
-export const ClaimDiffSchema = z
-  .object({
-    verdict: z.enum(['cosmetic', 'changed']),
-    reason: z.string().min(1),
-  })
-  .strict()
-export type ClaimDiff = z.infer<typeof ClaimDiffSchema>
 
 export const RealizationGapSchema = z.object({
   milestone: z.number().int().positive(),
-  checks: z.array(z.string().min(1)).min(1).optional(),
   kind: z.enum(['mapping', 'capability']),
   reason: z.string().min(1),
 }).strict()
@@ -725,7 +655,7 @@ export const RealizationMatchSchema = z
     unrealizable: z.string().min(1).optional(),
   })
   .superRefine((m, ctx) => {
-    const message = 'plan/gaps and legacy unrealizable are mutually exclusive. Return {plan:[{interfaceId,milestone,checks?}],gaps:[{milestone,checks?,kind,reason}]} with at least one entry, or {unrealizable:reason} alone'
+    const message = 'plan/gaps and legacy unrealizable are mutually exclusive. Return {plan:[{interfaceId,milestone}],gaps:[{milestone,kind,reason}]} with at least one entry, or {unrealizable:reason} alone'
     if (m.unrealizable !== undefined && (m.plan !== undefined || m.gaps !== undefined)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['unrealizable'], message })
     } else if (m.unrealizable === undefined && !(m.plan?.length || m.gaps?.length)) {

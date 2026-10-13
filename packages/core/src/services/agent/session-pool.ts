@@ -91,7 +91,9 @@ import {
  * always resolve a kind back to its command:
  *
  *   spec-scan.curate-doc          spec-scan.settle-areas
- *   spec-scan.overlap             spec-scan.orchestrate
+ *   spec-scan.orchestrate
+ *   spec-scan.corpus-review       spec-scan.extract-claims
+ *   spec-scan.settle-subjects     spec-scan.compare-claims
  *   guard-setup.recipe-repair     guard-setup.dependency-catalog
  *   guard-setup.reconcile-interfaces
  *   guard-setup.seed              guard-setup.auth-proof
@@ -152,6 +154,8 @@ export interface SessionPoolOptions<TItem, TOutcome> {
   signal?: AbortSignal
   /** How long a session's model may go without finishing a turn or calling a tool; the configured default when unset. */
   turnTimeoutMs?: number
+  /** Each session's whole wall clock. The only clock a session with a computer has. */
+  timeoutMs?: number
   /** Strictly serial across items, in COMPLETION order. Writes live here. */
   fold: (item: TItem, outcome: SessionOutcome<TOutcome>, sessionId: string) => void | Promise<void>
   onProgress?: (e: SessionPoolProgress) => void
@@ -297,6 +301,7 @@ export async function runSessionPool<TItem, TOutcome>(
         : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
       turnTimeoutMs: opts.turnTimeoutMs ?? resolveTurnTimeoutMs(),
+      ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
       ...(opts.mintSessionId ? { mintSessionId: opts.mintSessionId } : {}),
       ...(opts.now ? { now: opts.now } : {}),
     }).outcome

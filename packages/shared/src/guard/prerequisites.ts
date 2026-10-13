@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { GuardScenario } from './scenario.js'
 
-/** Account requirements belong to individual cases, including their setup steps. */
+/** A scenario's requirement on a declared external account: supplied, or deliberately absent. */
 export const GuardPrerequisiteSchema = z
   .object({
     dependency: z.string().min(1),
@@ -24,13 +24,6 @@ export interface GuardPrerequisiteTarget {
   providers?: readonly { service: string; baseUrlEnvs: readonly string[] }[]
 }
 
-export function guardProviderTargets(targets: readonly GuardPrerequisiteTarget[]): GuardPrerequisiteTarget[] {
-  return targets.flatMap(target => (target.providers ?? []).map(provider => ({
-    ...target, name: provider.service, aliases: [...new Set([target.name, ...target.aliases])],
-    providers: [provider],
-  })))
-}
-
 export type GuardPrerequisiteResolution =
   | { kind: 'resolved'; target: GuardPrerequisiteTarget }
   | { kind: 'unknown' | 'ambiguous'; dependency: string }
@@ -41,38 +34,6 @@ export function resolveGuardPrerequisite(
   targets: readonly GuardPrerequisiteTarget[],
 ): GuardPrerequisiteResolution {
   const matches = targets.filter((t) => t.name === name || t.aliases.includes(name))
-  return matches.length === 1
-    ? { kind: 'resolved', target: matches[0] }
-    : { kind: matches.length ? 'ambiguous' : 'unknown', dependency: name }
-}
-
-/** The identity two spellings of one declared name share: letters and digits only. */
-export function normalizePrerequisiteName(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, '')
-}
-
-/** Every identifier a target answers to, as normalized identities. */
-export function guardPrerequisiteIdentifiers(target: GuardPrerequisiteTarget): string[] {
-  return [target.name, ...target.aliases, ...target.credentialEnv]
-    .map(normalizePrerequisiteName)
-    .filter((id) => id !== '')
-}
-
-/**
- * Generation-side resolution: the exact association first, then the normalized
- * identity over each target's name, aliases and credential variables — so
- * `CurrencyBeacon` and `currencybeacon` name the same declared dependency.
- * Two targets sharing one identity stay ambiguous, as they do exactly.
- */
-export function resolveGuardPrerequisiteNormalized(
-  name: string,
-  targets: readonly GuardPrerequisiteTarget[],
-): GuardPrerequisiteResolution {
-  const exact = resolveGuardPrerequisite(name, targets)
-  if (exact.kind === 'resolved') return exact
-  const identity = normalizePrerequisiteName(name)
-  if (identity === '') return { kind: 'unknown', dependency: name }
-  const matches = targets.filter((t) => guardPrerequisiteIdentifiers(t).includes(identity))
   return matches.length === 1
     ? { kind: 'resolved', target: matches[0] }
     : { kind: matches.length ? 'ambiguous' : 'unknown', dependency: name }

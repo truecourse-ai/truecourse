@@ -23,21 +23,21 @@ import {
   listContextBindings,
   listContextDocuments,
   listContextSources,
-  readContextDocByRef,
 } from '@truecourse/core/lib/context-store';
 import { composeContextDocumentRows, corpusDocSourceId } from '@truecourse/core/services/context';
 import {
   composeHome,
   type HomeConflictRow,
+  type HomeFlowRow,
   type HomeRepoView,
   type HomeRunRow,
   type HomeSourceRow,
 } from '@truecourse/core/services/home';
 import {
-  docCoverageWords,
+  claimWordsByDoc,
   listGuardFlows,
   readGuardCoverageHistory,
-  readGuardCoverageSources,
+  readGuardClaims,
 } from '@truecourse/core/commands/guard-read';
 import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import { getWorkspaceDecisions } from '@truecourse/core/commands/spec-in-process';
@@ -128,38 +128,30 @@ export function createHomeRouter(deps: HomeRouterDeps = {}): Router {
         ]);
       }
 
-      // One body read per document somebody reads.
-      const bodies = new Map<string, string>();
-      for (const ref of new Set([...refsByRepo.values()].flat())) {
-        const body = await readContextDocByRef(org, ref);
-        if (body !== null) bodies.set(ref, body);
-      }
-
       // One guard-state read per repository, then every document it reads
-      // composed against it, the Documents view's reading kept per SECTION —
-      // plus the repository's FLOWS, which are what the headline counts.
+      // folded from the repository's claims — the Documents view's reading kept
+      // per CLAIM — plus the repository's FLOWS, which are what the headline counts.
       const repos: HomeRepoView[] = [];
       const coverage = new Map<string, Map<string, GuardCoveragePlainStatus>>();
       for (const [repoFullName, refs] of refsByRepo) {
-        const guard = await readGuardCoverageSources(visible.get(repoFullName)!.path, undefined, {
-          externals: false,
-        });
-        const sections = new Map<string, GuardCoveragePlainStatus>();
+        const byDoc = claimWordsByDoc(await readGuardClaims(visible.get(repoFullName)!.path));
+        const claims = new Map<string, GuardCoveragePlainStatus>();
         const blockedReasons = new Map<string, readonly string[]>();
         const docWords = new Map<string, GuardCoveragePlainStatus>();
         for (const ref of new Set(refs)) {
-          const body = bodies.get(ref);
-          if (body === undefined) continue;
-          const words = docCoverageWords(ref, body, guard);
-          for (const [sectionRef, word] of words.sections) sections.set(sectionRef, word);
+          const words = byDoc.get(ref);
+          if (!words) continue;
+          for (const [claimRef, word] of words.claims) claims.set(claimRef, word);
           if (words.blockedReasons.length > 0) blockedReasons.set(ref, words.blockedReasons);
           if (words.doc) docWords.set(ref, words.doc);
         }
         coverage.set(repoFullName, docWords);
+        const flowRows = await readRepoFlows(visible.get(repoFullName)!);
         repos.push({
           repository: repoFullName,
-          sections,
-          flows: await readRepoFlows(visible.get(repoFullName)!.path),
+          claims,
+          flows: flowRows.items.map((flow) => flow.status),
+          flowRows,
           blockedReasons,
           history: await readGuardCoverageHistory(visible.get(repoFullName)!.path),
         });
@@ -169,12 +161,18 @@ export function createHomeRouter(deps: HomeRouterDeps = {}): Router {
       // drawing: the headline is the workspace's proving, not its documentation.
       for (const [repoFullName, entry] of visible) {
         if (refsByRepo.has(repoFullName)) continue;
-        const [flows, history] = await Promise.all([
-          readRepoFlows(entry.path),
+        const [flowRows, history] = await Promise.all([
+          readRepoFlows(entry),
           readGuardCoverageHistory(entry.path),
         ]);
-        if (flows.length === 0 && history.length === 0) continue;
-        repos.push({ repository: repoFullName, sections: new Map(), flows, history });
+        if (flowRows.items.length === 0 && history.length === 0) continue;
+        repos.push({
+          repository: repoFullName,
+          claims: new Map(),
+          flows: flowRows.items.map((flow) => flow.status),
+          flowRows,
+          history,
+        });
       }
 
       const documents = corpus
@@ -225,13 +223,26 @@ export function createHomeRouter(deps: HomeRouterDeps = {}): Router {
 }
 
 /**
- * ONE repository's flows today, as the words they wear on the Flows page — the
- * same read that page makes, so Home's headline and the list it opens can only
- * ever agree. A repository with nothing generated yet answers an empty list.
+ * ONE repository's flows today, each with the word it wears on the Flows page
+ * and what its test says — the same read that page makes, so Home's headline
+ * and the list it opens can only ever agree. A repository with nothing
+ * generated yet answers an empty list.
  */
-async function readRepoFlows(repoPath: string): Promise<GuardCoveragePlainStatus[]> {
-  const { flows } = await listGuardFlows(repoPath);
-  return flows.map((flow) => guardFlowPlainStatus(flow));
+async function readRepoFlows(entry: RegistryEntry): Promise<NonNullable<HomeRepoView['flowRows']>> {
+  const { flows } = await listGuardFlows(entry.path);
+  return {
+    repoId: entry.slug,
+    items: flows.map((flow): HomeFlowRow => ({
+      flowId: flow.flowId,
+      title: flow.title,
+      status: guardFlowPlainStatus(flow),
+      docs: flow.docs,
+      ...(flow.test?.documented && flow.test.observed
+        ? { finding: { documented: flow.test.documented, observed: flow.test.observed } }
+        : {}),
+      ...(flow.test?.blockedOn ? { blockedOn: flow.test.blockedOn } : {}),
+    })),
+  };
 }
 
 /**

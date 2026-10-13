@@ -28,16 +28,15 @@ import {
   type DocCandidate,
   type RepoIdentity,
 } from '@truecourse/spec-consolidator'
-import { planDocChunks } from '@truecourse/shared'
+import { windowText } from '@truecourse/shared'
 import { promptFingerprint } from '../agent/session-cache.js'
-import { LEGACY_CURATE_DOC_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import {
-  DOC_CHUNK_CHARS,
+  docWindows,
   corpusVocabTool,
   docLifecycleLines,
   instructionsBriefingBlock,
   listDocsTool,
-  readChunkTool,
+  readWindowTool,
   readDocTool,
   scanCacheKey,
   type ScanDocUniverse,
@@ -54,8 +53,8 @@ export const CURATE_DOC_SESSION_KIND = 'spec-scan.curate-doc'
 export const CURATE_DOC_CACHE_NAME = 'consolidator/curate-doc'
 
 /**
- * The three numbers. One doc is one read (the briefing carries chunk 1)
- * plus at most a couple of chunk pages or one reference lookup — five turns
+ * The three numbers. One doc is one read (the briefing carries window 1)
+ * plus at most a couple of window pages or one reference lookup — five turns
  * covers that with room for one wrong guess. No resume grant: a doc that
  * cannot be judged in five turns is judged fail-open, not re-bought.
  */
@@ -151,7 +150,7 @@ STATUS: if the doc header states a lifecycle (Status: shipped / planned / deferr
 
 # Tools — when to use them
 
-The briefing carries your doc (its first chunk; \`read_chunk\` pages the rest). Beyond your own doc:
+The briefing carries your doc (its first window; \`read_window\` pages the rest). Beyond your own doc:
 - \`read_doc\` — open ANOTHER doc ONLY to resolve an explicit reference or deferral your doc makes ("see docs/auth.md", "superseded by plan-v3") — never to browse the repository.
 - \`corpus_vocab\` — call it BEFORE minting a product or concern label: if a label already in use names the same thing, reuse that exact wording instead of a synonym.
 - \`list_docs\` — resolve a referenced doc whose exact path you do not know.
@@ -162,8 +161,8 @@ One object: { "keep": true|false, "reason": "short explanation", "subject": "thi
 
 "subject" is always reported. When it is "different-product", "keep" MUST be false and "category" MUST be "third-party". "category" is REQUIRED when keep is false and OMITTED when keep is true. The reason is shown to the user in the dashboard — be specific ("describes a different product (ServiceTitan)", "superseded by capacity-ml-plan-v3") so they can verify the call.`
 
-/** The prompt half of every curate-doc cache key — exported for the step-7
- *  estimate rework, which must probe the REAL keys. */
+/** The prompt's fingerprint, a diagnostic: the cache key folds
+ *  {@link CURATE_DOC_STAGE_VERSION} instead. */
 export const CURATE_DOC_PROMPT_FINGERPRINT = promptFingerprint(CURATE_DOC_SYSTEM_PROMPT)
 
 /**
@@ -211,44 +210,13 @@ export function curateDocCacheKey(
   input: { identity: RepoIdentity | null; doc: Pick<DocCandidate, 'path' | 'contentHash'> },
   extraParts: readonly string[] = [],
 ): string {
-  return curateDocKeyOver(
+  return scanCacheKey([
     `curate-doc-v${CURATE_DOC_STAGE_VERSION}`,
     identityFingerprint(input.identity),
-    input.doc,
-    extraParts,
-  )
-}
-
-/**
- * {@link curateDocCacheKey} under the formula that came before it: the same
- * identity while the prompt's fingerprint, not the stage version, was in the
- * key. A miss reads it. Curate-doc's cache IS the scan's skip, so without this
- * a changed key re-curates every document once. A workspace identity has no
- * older form to fall back to: its subject moved from the connected repositories
- * to the sentence the workspace states, and its documents re-judge once.
- * Delete with the legacy hash.
- */
-export function curateDocLegacyCacheKeys(
-  input: { identity: RepoIdentity | null; doc: Pick<DocCandidate, 'path' | 'contentHash'> },
-  extraParts: readonly string[] = [],
-): string[] {
-  return [
-    curateDocKeyOver(
-      LEGACY_CURATE_DOC_PROMPT_FINGERPRINT,
-      identityFingerprint(input.identity),
-      input.doc,
-      extraParts,
-    ),
-  ]
-}
-
-function curateDocKeyOver(
-  stage: string,
-  identity: string,
-  doc: Pick<DocCandidate, 'path' | 'contentHash'>,
-  extraParts: readonly string[],
-): string {
-  return scanCacheKey([stage, identity, doc.path, doc.contentHash, ...extraParts])
+    input.doc.path,
+    input.doc.contentHash,
+    ...extraParts,
+  ])
 }
 
 export interface CurateDocSessionInput {
@@ -282,7 +250,7 @@ export function curateDocSessionDef(input: CurateDocSessionInput): SessionDef<Do
     ...CURATE_DOC_SESSION,
     systemPrompt: CURATE_DOC_SYSTEM_PROMPT,
     tools: [
-      readChunkTool(input.doc),
+      readWindowTool(input.doc),
       readDocTool(input.universe),
       corpusVocabTool(input.liveVocab),
       listDocsTool(input.universe),
@@ -306,7 +274,7 @@ export function curateDocWorkItem(docPath: string): string {
  * message and the system prompt stays one fingerprint), the orchestrator's
  * standing instructions (step 6 — they also enter the cache key, via the
  * `extraParts` tail at the call site), the doc's coordinates, and the doc
- * body's first chunk.
+ * body's first window.
  */
 export function curateDocBriefing(
   doc: DocCandidate,
@@ -317,8 +285,7 @@ export function curateDocBriefing(
    *  identity, never part of the cache key (a cached verdict is never re-briefed). */
   priorAreas: readonly string[] = [],
 ): string {
-  const chunks = planDocChunks(doc.path, docBody(doc), DOC_CHUNK_CHARS)
-  const first = chunks[0]
+  const { tree, windows } = docWindows(doc)
   const lines = [
     ...instructionsBriefingBlock(instructions),
     identityBlock(identity),
@@ -331,12 +298,12 @@ export function curateDocBriefing(
       ? [`PREVIOUS AREAS (the last scan tagged this document): ${[...priorAreas].sort().join(', ')} — reuse these labels unless what the document says has moved.`]
       : []),
     '',
-    chunks.length > 1 ? `--- doc (chunk 1/${chunks.length}) ---` : '--- doc ---',
-    first?.text ?? '',
+    windows.length > 1 ? `--- doc (window 1/${windows.length}) ---` : '--- doc ---',
+    windowText(tree, windows[0]!),
     '--- end doc ---',
   ]
-  if (chunks.length > 1) {
-    lines.push('', `${chunks.length - 1} more chunk(s) — use \`read_chunk\` to page through the rest.`)
+  if (windows.length > 1) {
+    lines.push('', `${windows.length - 1} more window(s) — use \`read_window\` to page through the rest.`)
   }
   lines.push('', 'Attribute the subject first, then judge the content, then tag the areas. Produce the outcome object.')
   return lines.join('\n')

@@ -1,30 +1,10 @@
 /**
- * The guard-generate session kinds: claim extraction and flow synthesis as agent
+ * The guard-generate session kinds: flow synthesis and the flow workers as agent
  * sessions, plus the seam factory the command adapter injects into
  * `generateGuards`. The key builders and prompt fingerprints are exported for
  * the estimate, which must probe the REAL keys.
  */
 
-export {
-  EXTRACT_SESSION_KIND,
-  EXTRACT_SESSION_CACHE_NAME,
-  EXTRACT_SESSION_BUDGET,
-  EXTRACT_SESSION_SYSTEM_PROMPT,
-  EXTRACT_SESSION_PROMPT_FINGERPRINT,
-  EXTRACT_STAGE_VERSION,
-  extractSessionCacheKey,
-  extractSessionLegacyCacheKey,
-  extractSessionCacheKeyForContentHash,
-  extractSessionLegacyCacheKeyForContentHash,
-  extractDocContentHash,
-  extractSessionWorkItem,
-  extractSessionDef,
-  extractContextSchema,
-  extractSessionBriefing,
-  validateExtractDraft,
-  priorExtractionLines,
-  type ExtractSessionInput,
-} from './extract.js'
 
 export {
   FLOWS_SESSION_KIND,
@@ -38,16 +18,13 @@ export {
   FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT,
   FLOWS_EPIC_WORK_ITEM,
   flowsSessionCacheKey,
-  flowsSessionLegacyCacheKey,
   flowsEpicSessionCacheKey,
-  flowsEpicSessionLegacyCacheKey,
   flowsSessionWorkItem,
   flowsSessionDef,
   flowsEpicSessionDef,
   flowsSessionBriefing,
   flowsEpicSessionBriefing,
   flowSetRefusalReason,
-  type FlowsCheckerContext,
   type FlowsSessionInput,
   type FlowsEpicSessionInput,
 } from './flows.js'
@@ -61,9 +38,7 @@ export {
   FLOW_WORKER_WEB_SYSTEM_PROMPT,
   FLOW_WORKER_STAGE_VERSION,
   flowWorkerSystemPrompt,
-  flowWorkerPromptFingerprint,
   flowWorkerCacheKey,
-  flowWorkerLegacyCacheKeys,
   flowWorkerSessionDef,
   cacheableWorkerOutcome,
   CachedWorkerEntrySchema,
@@ -79,7 +54,6 @@ export {
   FIDELITY_SESSION_PROMPT_FINGERPRINT,
   FidelityVerdictSchema,
   fidelitySessionCacheKey,
-  fidelitySessionLegacyCacheKey,
   FIDELITY_STAGE_VERSION,
   fidelitySessionDef,
   judgeWorkerFidelity,
@@ -102,8 +76,8 @@ export {
   buildGuardDocUniverse,
   docOutlineLines,
   resolveSection,
-  renderDocChunk,
-  docChunkCount,
-  GUARD_DOC_CHUNK_CHARS,
+  renderDocWindow,
+  docWindowCount,
+  GUARD_DOC_WINDOW_CHARS,
   type GuardDocUniverse,
 } from './tools.js'

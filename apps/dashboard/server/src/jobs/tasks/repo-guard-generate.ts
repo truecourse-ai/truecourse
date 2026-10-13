@@ -18,6 +18,11 @@ import { dashboardActivity } from '../../services/dashboard-activity.service.js'
  * as a warning rather than a failure — the remedy is a resolution, not a retry.
  * A cancelled generate leaves the store exactly as it found it.
  *
+ * A product-world generate also runs every flow test the repository already
+ * has at the commit it cloned, and repairs the ones that moved. How the tests
+ * ran there is stored as a run of that commit, beside the tests themselves, so
+ * every such generate leaves one.
+ *
  * A generate that produced a scenario set chains into the BASELINE RUN — the
  * last link of onboarding — so every connected repository ends up with a run
  * on record, not just a set of scenarios. A generate that settled no flow and
@@ -44,11 +49,12 @@ import {
   buildOpenConflictsReport,
   guardGenerateInProcess,
   GUARD_GENERATE_STEPS,
+  WORLD_GENERATE_STEPS,
   OpenConflictsError,
 } from '@truecourse/core/commands/guard-in-process';
 import { loadScenarios } from '@truecourse/guard-runner';
 import type { JobDefinition, JobPayload } from '@truecourse/jobs';
-import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
+import { operatorClaudeCode, startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
 import { createUsageMeter, type UsageMeter } from '../../services/usage-meter.service.js';
 import { pullRequestScope, pullRequestWorkspaceScope } from '@truecourse/shared';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
@@ -65,6 +71,7 @@ import { materializeStoredSpec } from '../materialize-spec.js';
 import {
   markWorldStateUnknown,
   materializeStoredGuardState,
+  persistFlowTestRun,
   persistGeneratedGuard,
   readGeneratedReport,
 } from '../materialize-guard.js';
@@ -77,6 +84,11 @@ import {
   type ChainEnd,
   type OnboardingJobRequest,
 } from './onboarding.js';
+
+/** The checklist this instance's generate runs; see the setup task's `setupSteps`. */
+function generateSteps(): ReadonlyArray<{ key: string; label: string }> {
+  return operatorClaudeCode() ? WORLD_GENERATE_STEPS : GUARD_GENERATE_STEPS;
+}
 
 export const REPO_GUARD_GENERATE_TASK = 'repo.guard-generate';
 
@@ -103,8 +115,10 @@ export interface GuardGenerateJobResult {
    * `nothing-written` — the generate ran but settled no flow, and no earlier
    * scenario set stands behind it. Not a failure (the report is the record of
    * why) and not a success either: there is nothing to run, so the chain stops.
+   * `tests-written` — a product-world generate stored its flow tests. Running
+   * stored flow tests is not a link of this chain, so the chain stops here.
    */
-  status: 'ok' | 'open-conflicts' | 'nothing-written';
+  status: 'ok' | 'open-conflicts' | 'nothing-written' | 'tests-written';
   /** Scenarios authored this run (0 when nothing changed). */
   written: number;
   birthFindings: number;
@@ -140,7 +154,7 @@ export function createRepoGuardGenerateTask(
   return {
     type: REPO_GUARD_GENERATE_TASK,
     title: 'Generating scenarios',
-    steps: [{ key: 'clone', label: 'Cloning repository' }, ...GUARD_GENERATE_STEPS],
+    steps: [{ key: 'clone', label: 'Cloning repository' }, ...generateSteps()],
     org: (payload) => payload.workspaceOrgId,
     traceMeta: (payload) => ({ repoFullName: payload.repoFullName }),
 
@@ -165,7 +179,7 @@ export function createRepoGuardGenerateTask(
         const resume = ctx.payload.resumeRunId
           ? await readGuardGenerateResume(ctx.payload.repoFullName, ctx.payload.resumeRunId)
           : undefined;
-        return await dashboardActivity(ctx, 'guard-generate', GUARD_GENERATE_STEPS, async (activityRun, activityTracker) => {
+        return await dashboardActivity(ctx, 'guard-generate', generateSteps(), async (activityRun, activityTracker) => {
           const { repoFullName } = ctx.payload;
           runIds.set(ctx.jobId, activityRun.runId);
           meter.setRunId(activityRun.runId);
@@ -250,18 +264,31 @@ export function createRepoGuardGenerateTask(
             activityTracker.done('clone');
 
             let guard;
+            let flowTests: Awaited<ReturnType<typeof runGenerate>>['flowTests'];
+            let flowTestRun: Awaited<ReturnType<typeof runGenerate>>['flowTestRun'];
             // The versions this generate writes say which run wrote them and on which model.
             const driver = llm.driver();
             const provenance = { producedByRun: activityRun.runId, model: driver.attribution.model };
             try {
-              ({ guard } = await runGenerate(tree.dir, {
+              ({ guard, flowTests, flowTestRun } = await runGenerate(tree.dir, {
                 driver,
                 transportMode: llm.mode,
                 attribution: driver.attribution,
                 sessionsKey: repoFullName,
                 sessionRun: activityRun,
                 tracker: activityTracker,
-                requireExistingRecipe: true,
+                // On Claude Code the product runs from the world scripts setup
+                // left in the bundle, under the same world identity setup proved
+                // them with; otherwise from the recipe setup derived.
+                ...(llm.mode === 'claude-code'
+                  ? {
+                      productWorld: {
+                        worldKey: `${ctx.payload.workspaceOrgId}/${repoFullName}${pr ? `#${pr.number}` : ''}`,
+                        commit: commitSha,
+                        ...(tree.fetchCommit ? { fetchCommit: tree.fetchCommit } : {}),
+                      },
+                    }
+                  : { requireExistingRecipe: true }),
                 ...(resume ? { resume } : {}),
                 ...(ctx.signal ? { signal: ctx.signal } : {}),
               }));
@@ -314,14 +341,45 @@ export function createRepoGuardGenerateTask(
               throw new UserFacingError("Generation finished, but we couldn't save all its results.", { cause });
             }
 
-            // Keep successful documents and the failure report, but do not present
-            // an incomplete extraction as success or chain its baseline run.
-            if (report.extractionFailures.length > 0) {
-              const docs = report.extractionFailures.map(failure => failure.doc).join(', ');
-              activityTracker.error('extract', `Claim extraction failed for ${docs}`);
-              throw new Error(
-                `Claim extraction failed for ${docs}. Partial results were saved. Retry generation to complete coverage.`,
-              );
+
+            // A product-world generate: the flow tests and their index were
+            // stored with the set above. What it reports is the tests.
+            if (flowTests) {
+              if (flowTests.status === 'world-failed') {
+                throw new Error(`The product did not come up (${flowTests.stage}): ${firstLine(flowTests.reason)}`);
+              }
+              if (flowTests.status === 'rerun-failed') {
+                throw new Error(`The kept flow tests could not be run: ${firstLine(flowTests.reason)}`);
+              }
+              // How the tests ran at this commit, as a run of it.
+              if (flowTestRun) {
+                try {
+                  await persistFlowTestRun(ref, tree.dir, flowTestRun, provenance);
+                } catch (cause) {
+                  throw new UserFacingError("Generation finished, but we couldn't save how its tests ran.", { cause });
+                }
+              }
+              const tests = flowTests.status === 'ok' ? flowTests.tests : [];
+              const kept = tests.filter((t) => t.status !== 'blocked').length;
+              const failing = tests.filter((t) => t.status === 'failing').length;
+              const blocked = tests.length - kept;
+              const unsettled = flowTests.status === 'ok' ? flowTests.unsettled.length : 0;
+              return {
+                result: {
+                  repoFullName,
+                  status: kept > 0 ? 'tests-written' : 'nothing-written',
+                  written: kept,
+                  birthFindings: failing,
+                  noChanges: flowTests.status === 'ok' && flowTests.authored === 0,
+                  openConflicts: 0,
+                },
+                notification: {
+                  level: kept === 0 || failing > 0 ? 'warning' : 'success',
+                  title: kept === 0 ? 'No flow test was written' : failing > 0 ? 'Flow tests written, findings to review' : 'Flow tests written',
+                  body: `${kept} test${kept === 1 ? '' : 's'} for ${tests.length} flow${tests.length === 1 ? '' : 's'}: ${kept - failing} passing, ${failing} failing, ${blocked} blocked${unsettled > 0 ? `, ${unsettled} unsettled` : ''}.`,
+                  data: { repoFullName, runId: activityRun.runId, written: kept, birthFindings: failing },
+                },
+              };
             }
 
             const written = report.written.length;

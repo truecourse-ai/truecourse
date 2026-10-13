@@ -68,6 +68,18 @@ export function wasCancelled(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true && signal.reason instanceof JobCancelled;
 }
 
+/**
+ * The reason a job's signal carries when the body stopped ITSELF through
+ * {@link JobContext.fail}: it can no longer go on, and `cause` says why. The
+ * job settles `failed` on that cause, whatever the unwinding body threw.
+ */
+export class JobAbandoned extends Error {
+  constructor(cause: unknown) {
+    super('the job could not go on', { cause });
+    this.name = 'JobAbandoned';
+  }
+}
+
 export interface JobPayload {
   jobId: string;
   /**
@@ -182,6 +194,13 @@ export interface JobContext<P> {
    * thread it down so a stop doesn't leave work running headless.
    */
   signal?: AbortSignal;
+  /**
+   * Stop this job as FAILED, from wherever the body learns it cannot go on (the
+   * record it writes its run into was taken from it). Aborts `signal`, so the
+   * work unwinds the way a cancel unwinds it, and the job settles `failed` on
+   * `cause`. The first call wins.
+   */
+  fail(cause: unknown): void;
 }
 
 /**
@@ -308,6 +327,12 @@ export async function executeJob<P extends JobPayload, M>(
   };
   const tracker = new JobStepTracker([...def.steps], emit);
   let resumePointer: Record<string, unknown> | undefined;
+  // The body's signal: the caller's stop (a cancel, a shutdown) or its own `fail`.
+  const abandon = new AbortController();
+  const signal = opts.signal ? AbortSignal.any([opts.signal, abandon.signal]) : abandon.signal;
+  /** Why the body stopped itself, when it did. A stop from outside that came first stands. */
+  const abandoned = (): JobAbandoned | undefined =>
+    signal.reason instanceof JobAbandoned ? signal.reason : undefined;
   const ctx: JobContext<P> = {
     payload,
     org,
@@ -325,7 +350,8 @@ export async function executeJob<P extends JobPayload, M>(
         log.warn(`[jobs] ${def.type} ${jobId}: could not post "${notification.title}": ${(err as Error).message}`);
       }
     },
-    signal: opts.signal,
+    signal,
+    fail: (cause) => abandon.abort(new JobAbandoned(cause)),
   };
 
   let failure: unknown = null;
@@ -377,16 +403,18 @@ export async function executeJob<P extends JobPayload, M>(
 
   // Stopped by the process going down: left for the next boot's reap.
   const shutDown = (): boolean => {
-    if (!opts.signal?.aborted || wasCancelled(opts.signal)) return false;
+    if (!signal.aborted || wasCancelled(signal) || abandoned()) return false;
     log.info(`[jobs] ${def.type} ${jobId}: stopped by a shutdown, left for the next boot to recover`);
     return true;
   };
 
   try {
     const outcome = await def.run(ctx);
+    // A body that ran to its end after giving up has nothing to show for it.
+    if (abandoned()) throw abandoned();
     runResult = outcome.result;
     if (shutDown()) return;
-    if (opts.signal?.aborted) {
+    if (signal.aborted) {
       await settleCancelled();
     } else {
       // Terminal job state first (clears the client's activeJobs), then the toast.
@@ -404,9 +432,12 @@ export async function executeJob<P extends JobPayload, M>(
       await settlePaused();
     } else if (shutDown()) {
       return;
-    } else if (opts.signal?.aborted) {
+    } else if (signal.aborted && !abandoned()) {
       await settleCancelled();
     } else {
+      // A body that gave up failed on WHY it gave up, not on whatever the
+      // unwinding threw.
+      if (abandoned()) err = abandoned()!.cause;
       outcomeStatus = 'failed';
       const message = summarizeError(err);
       stampDuration();

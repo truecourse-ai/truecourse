@@ -1,11 +1,13 @@
 /**
- * Flows: every flow of every repository of the workspace, in one list.
+ * Flows: every flow of every repository of the workspace, in one place, one
+ * table per status.
  *
  * The page is REAL all the way down — it fans out over the connected registry
  * and reads each repository's stored flows — so what is asserted here is what
- * it does with those answers: the rows it draws across repositories, the
- * filters it writes into the address, the search, the flow it opens through
- * `?repo=`, and the re-read a generate landing on the socket triggers.
+ * it does with those answers: the rows it draws under each status, what a
+ * failed flow and a blocked one say, the filters it writes into the address,
+ * the search, the flow it opens through `?repo=`, and the re-read a generate
+ * landing on the socket triggers.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -79,7 +81,6 @@ function flow(over: Record<string, unknown>) {
     composedOf: [],
     manual: false,
     milestoneCount: 2,
-    sectionCount: 1,
     docs: ['docs/cli.md'],
     surfaces: [],
     findings: 0,
@@ -103,7 +104,6 @@ const CHECKOUT = flow({
   drivers: ['web'],
   status: 'blocked-on',
   bucket: 'blocked',
-  sectionCount: 0,
 });
 
 /** Two connected repositories, one flow each. */
@@ -156,10 +156,9 @@ function renderAt(path: string) {
   );
 }
 
-/** The table's data rows, in the order they render. */
+/** Every status table's data rows, in the order they render. */
 function rows() {
-  const table = screen.getByRole('table', { name: 'Flows' });
-  return within(table).getAllByRole('row').slice(1);
+  return screen.queryAllByRole('table').flatMap((table) => within(table).getAllByRole('row').slice(1));
 }
 
 beforeEach(() => {
@@ -196,27 +195,88 @@ describe('Flows, the index', () => {
     expect(rows()).toHaveLength(1);
   });
 
-  it('lists the flows of every connected repository, each naming the repository it belongs to', async () => {
+  it('lists the flows of every connected repository under the status each wears', async () => {
     const state = serve();
     renderAt('/flows');
 
     expect(await screen.findByRole('heading', { name: 'Flows' })).toBeInTheDocument();
     await waitFor(() => expect(rows()).toHaveLength(2));
 
-    const byTitle = (title: string) => rows().find((r) => within(r).queryByText(title))!;
-    const cli = byTitle('Writes a file and reads it back');
-    expect(within(cli).getByText('spiderhands/filecli')).toBeInTheDocument();
-    expect(within(cli).getByText('CLI')).toBeInTheDocument();
-    expect(within(cli).getByText('Succeeded')).toBeInTheDocument();
-    // The one section this flow binds; a flow bound to none says nothing.
-    expect(within(cli).getByText('1')).toBeInTheDocument();
+    const succeeded = screen.getByRole('table', { name: 'Succeeded flows' });
+    const cli = within(succeeded).getByText('Writes a file and reads it back').closest('tr')!;
+    // The document the flow cites, by file name.
+    expect(within(cli).getByText('cli.md')).toBeInTheDocument();
 
-    const web = byTitle('Checks out with a saved card');
-    expect(within(web).getByText('acme/web')).toBeInTheDocument();
-    expect(within(web).queryByText('0')).toBeNull();
+    const blocked = screen.getByRole('table', { name: 'Blocked flows' });
+    expect(within(blocked).getByText('Checks out with a saved card')).toBeInTheDocument();
 
     expect(state.calls).toContain(`/api/repos/${CLI.id}/guard/flows`);
     expect(state.calls).toContain(`/api/repos/${WEB.id}/guard/flows`);
+  });
+
+  it('says what a failed flow observed, and lists every blocked flow as itself', async () => {
+    const blockedOn = (flowId: string, title: string) =>
+      flow({
+        flowId,
+        title,
+        status: 'blocked-on',
+        bucket: 'blocked',
+        test: { status: 'blocked', seeded: false, blockedOn: 'CurrencyBeacon API key' },
+      });
+    serve({
+      cliFlows: [
+        flow({
+          flowId: 'edit-expense',
+          title: 'Edit expense',
+          status: 'fail',
+          test: {
+            status: 'failing',
+            seeded: true,
+            documented: 'Editing opens a separate page.',
+            observed: 'Editing opens an in-page dialog.',
+          },
+        }),
+        blockedOn('convert', 'Convert an expense'),
+        blockedOn('convert-again', 'Convert an expense twice'),
+        flow({ flowId: 'open-expense', title: 'Open an expense', test: { status: 'passing', seeded: true } }),
+      ],
+      webFlows: [],
+    });
+    renderAt('/flows');
+
+    const failed = await screen.findByRole('table', { name: 'Failed flows' });
+    const row = within(failed).getByText('Edit expense').closest('tr')!;
+    expect(within(row).getByText('Editing opens an in-page dialog.')).toBeInTheDocument();
+
+    // One row per blocked flow; what it waits on is the flow page's to say.
+    const blocked = screen.getByRole('table', { name: 'Blocked flows' });
+    expect(within(blocked).getByText('Convert an expense')).toBeInTheDocument();
+    expect(within(blocked).getByText('Convert an expense twice')).toBeInTheDocument();
+    expect(within(blocked).queryByText('CurrencyBeacon API key')).toBeNull();
+
+    const succeeded = screen.getByRole('table', { name: 'Succeeded flows' });
+    expect(within(within(succeeded).getByText('Open an expense').closest('tr')!).getByText('Seeded')).toBeInTheDocument();
+  });
+
+  it('lists a flow whose test passed after healing around a renamed control as partially succeeded', async () => {
+    serve({
+      cliFlows: [
+        flow({ flowId: 'open-expense', title: 'Open an expense', test: { status: 'passing', seeded: true } }),
+        flow({
+          flowId: 'rename-expense',
+          title: 'Rename an expense',
+          test: { status: 'passing', seeded: true, copyDrift: [{ step: 1, documented: 'Update', observed: 'Edit details' }] },
+        }),
+      ],
+      webFlows: [],
+    });
+    renderAt('/flows');
+
+    const partial = await screen.findByRole('table', { name: 'Partially succeeded flows' });
+    expect(within(partial).getByText('Rename an expense')).toBeInTheDocument();
+    const succeeded = screen.getByRole('table', { name: 'Succeeded flows' });
+    expect(within(succeeded).getByText('Open an expense')).toBeInTheDocument();
+    expect(within(succeeded).queryByText('Rename an expense')).toBeNull();
   });
 
   it('puts a filter picked through Add filter into the address', async () => {
@@ -290,6 +350,7 @@ describe('Flows, the index', () => {
     });
     renderAt('/flows');
     const user = userEvent.setup();
+    // Three succeeded rows, and a row for each blocked flow.
     await waitFor(() => expect(rows()).toHaveLength(5));
 
     await user.click(screen.getByRole('button', { name: 'Add filter' }));

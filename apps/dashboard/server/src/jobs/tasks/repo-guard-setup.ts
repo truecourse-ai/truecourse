@@ -37,10 +37,11 @@ import {
 import {
   guardSetupInProcess,
   GUARD_SETUP_STEPS,
+  WORLD_SETUP_STEPS,
   type GuardSetupOnlyStep,
 } from '@truecourse/core/commands/guard-setup';
 import type { JobDefinition, JobPayload } from '@truecourse/jobs';
-import { startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
+import { operatorClaudeCode, startWorkspaceLlm, type WorkspaceLlm } from '../../services/workspace-llm.service.js';
 import { createUsageMeter, type UsageMeter } from '../../services/usage-meter.service.js';
 import { pullRequestScope, pullRequestWorkspaceScope } from '@truecourse/shared';
 import { acquireWorkTree } from '../../services/work-tree.service.js';
@@ -66,6 +67,15 @@ import {
 } from './onboarding.js';
 
 export const REPO_GUARD_SETUP_TASK = 'repo.guard-setup';
+
+/**
+ * The checklist this instance's setup runs: a product world's one step when it
+ * runs on its operator's Claude Code, the recipe spine otherwise. The transport
+ * is fixed for the life of a process, so the list is too.
+ */
+function setupSteps(): ReadonlyArray<{ key: string; label: string }> {
+  return operatorClaudeCode() ? WORLD_SETUP_STEPS : GUARD_SETUP_STEPS;
+}
 
 /** Setup's own knobs, on top of what every onboarding job carries. */
 export interface GuardSetupJobRequest extends OnboardingJobRequest {
@@ -109,7 +119,7 @@ export function createRepoGuardSetupTask(
   return {
     type: REPO_GUARD_SETUP_TASK,
     title: 'Setting up guard',
-    steps: [{ key: 'clone', label: 'Cloning repository' }, ...GUARD_SETUP_STEPS],
+    steps: [{ key: 'clone', label: 'Cloning repository' }, ...setupSteps()],
     org: (payload) => payload.workspaceOrgId,
     traceMeta: (payload) => ({ repoFullName: payload.repoFullName }),
 
@@ -126,7 +136,7 @@ export function createRepoGuardSetupTask(
         jobId: ctx.jobId,
       });
       try {
-        return await dashboardActivity(ctx, 'guard-setup', GUARD_SETUP_STEPS, async (activityRun, activityTracker) => {
+        return await dashboardActivity(ctx, 'guard-setup', setupSteps(), async (activityRun, activityTracker) => {
           const { repoFullName, only, refresh } = ctx.payload;
           runIds.set(ctx.jobId, activityRun.runId);
           meter.setRunId(activityRun.runId);
@@ -246,6 +256,9 @@ export function createRepoGuardSetupTask(
                 eagerRun: true,
                 tracker: activityTracker,
                 ...(ctx.signal ? { signal: ctx.signal } : {}),
+                // On Claude Code a session can be handed a shell, so the product
+                // is brought up by one and operated by the scripts it leaves.
+                ...(llm.mode === 'claude-code' ? { productWorld: true } : {}),
                 ...(only ? { only } : {}),
                 // A hosted refresh IS the consent to replace the seed: the script lives
                 // in the bundle, never in a hand-edited tree, and the request said so.

@@ -3,9 +3,9 @@
  *
  * There is no section switcher: the left menu here is not a switcher between
  * products, it is the tabs of the one thing this repository has: Runs first
- * (what this repository's tests did, and when) and Pipeline
- * beside it (the three pieces of work the repository runs, each with its last
- * outcome and a way to run it again), then the setup group, Context (which
+ * (what this repository's tests did, and when) and Pipeline beside it (the
+ * three pieces of work the repository runs, each with its last outcome and a
+ * way to run it again), then the setup group, Context (which
  * workspace sources this repository reads), Interfaces, Dependencies and the
  * repository's Settings. Every tab reads the server: the runs it stored, the
  * interface catalog derived from its tree, the dependency catalog its setup
@@ -17,7 +17,7 @@
  * action, so it is the Pipeline tab's generation row.
  *
  * DOCUMENTATION IS NOT A TAB HERE any more: a source is a workspace object and
- * the corpus is the workspace's, so the documents, their coverage, their
+ * the corpus is the workspace's, so the documents, the claims they make, their
  * conflicts and the scan that curates them live on Context, and a document's
  * coverage page is '/context/doc/<ref>?repo=<id>'. This tab only says
  * which of them this repository reads. The agent's own work is not a tab

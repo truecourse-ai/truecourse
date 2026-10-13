@@ -12,16 +12,17 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { readGuardAutoResolutions, readGuardDecisions, writeGuardLatest } from '@truecourse/guard-runner'
+import { readGuardAutoResolutions, readGuardDecisions, writeGuardClaims, writeGuardLatest } from '@truecourse/guard-runner'
 import {
   autoResolutionKey,
+  type Claim,
   type GuardFlow,
   type GuardLatest,
   type GuardScenarioAdjudication,
   type GuardScenarioDiagnosis,
   type GuardScenarioResult,
 } from '@truecourse/shared'
-import { claimIdentity, persistAdjudication } from '../../packages/core/src/services/guard-adjudicate/fold'
+import { failingClaimId, persistAdjudication } from '../../packages/core/src/services/guard-adjudicate/fold'
 import type { AdjudicationItem } from '../../packages/core/src/services/guard-adjudicate/pre-pass'
 import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store'
 
@@ -30,8 +31,14 @@ let repo: string
 beforeEach(() => {
   installWorkTreeGuardStore()
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-adjudicate-routing-'))
-  // A board holding the row, so the persist half has something to patch.
+  // A board holding the row, so the persist half has something to patch, and
+  // the claim corpus the auto tier resolves a failing claim through.
   writeGuardLatest(repo, board())
+  writeGuardClaims(repo, {
+    version: 1,
+    generatedAt: '2026-01-01T00:00:00.000Z',
+    claims: [VERBOSE_CLAIM, VERBOSE_FLAG_CLAIM],
+  })
 })
 afterEach(() => {
   resetGuardStore()
@@ -42,7 +49,7 @@ function row(over: Partial<GuardScenarioResult> = {}): GuardScenarioResult {
   return {
     id: 'a',
     title: 'a title',
-    binds: { doc: 'docs/x.md', section: 'a/sec', fingerprint: 'sha256:x' },
+    binds: { doc: 'docs/x.md', sentences: ['a/sec'] },
     outcome: 'fail',
     durationMs: 1,
     failure: { step: 2, expected: 'exit 0', actual: 'exit 2 — unknown flag' },
@@ -61,14 +68,28 @@ function board(): GuardLatest {
     },
     summary: { total: 1, pass: 0, fail: 1, stale: 0, orphaned: 0, error: 0, blocked: 0 },
     scenarios: [row()],
-    sections: [],
   }
 }
 
+/** The corpus's two claims about `--verbose`: the one the diagnosis names, and the one the milestone names. */
+const corpusClaim = (id: string, statement: string): Claim => ({
+  id,
+  doc: 'docs/cli.md',
+  sentences: [`${id}/s`],
+  subject: 'the verbose flag',
+  statement,
+  areas: [],
+  testable: true,
+})
+const VERBOSE_CLAIM = corpusClaim('claim::docs/cli.md::verbose', '`relkit --verbose` prints the resolved config.')
+const VERBOSE_FLAG_CLAIM = corpusClaim('claim::docs/cli.md::verbose-flag', 'The verbose flag prints config.')
+/** A claim a flow names that the corpus no longer holds. */
+const FLAGS_CLAIM_ID = 'claim::docs/cli.md::flags'
+
 const DIAGNOSIS: GuardScenarioDiagnosis = {
   doc: 'docs/cli.md',
-  anchor: 'flags/verbose',
   title: 'the verbose flag',
+  claimId: VERBOSE_CLAIM.id,
   claim: '`relkit --verbose` prints the resolved config',
   step: 2,
   expected: 'exit 0',
@@ -82,10 +103,10 @@ const FLOW: GuardFlow = {
   goal: 'see the resolved config',
   fingerprint: 'sha256:flow',
   milestones: [
-    { order: 1, doc: 'docs/cli.md', anchor: 'flags', claimTitle: 'flags exist' },
-    { order: 2, doc: 'docs/cli.md', anchor: 'flags/verbose', claimTitle: 'the verbose flag prints config' },
+    { order: 1, doc: 'docs/cli.md', claimId: FLAGS_CLAIM_ID, claimTitle: 'flags exist', sentences: ['flags'] },
+    { order: 2, doc: 'docs/cli.md', claimId: VERBOSE_FLAG_CLAIM.id, claimTitle: 'the verbose flag prints config', sentences: [`${VERBOSE_FLAG_CLAIM.id}/s`] },
   ],
-  bindings: [{ doc: 'docs/cli.md', anchor: 'flags/verbose', fingerprint: 'sha256:x' }],
+  bindings: [{ doc: 'docs/cli.md', sentences: ['flags', `${VERBOSE_FLAG_CLAIM.id}/s`] }],
   composedOf: [],
   synthesisInputsHash: 'sha256:inputs',
 }
@@ -221,16 +242,10 @@ describe('the auto tier — a high-confidence scenario-layer defect dismisses it
       verdict,
       now: () => '2026-02-01T00:00:00.000Z',
     })
-    expect(first.routing.autoDismissed).toEqual({
-      doc: 'docs/cli.md',
-      anchor: 'flags/verbose',
-      title: '`relkit --verbose` prints the resolved config',
-    })
+    expect(first.routing.autoDismissed).toEqual({ claimId: VERBOSE_CLAIM.id })
     expect(dismissals()).toEqual([
       {
-        doc: 'docs/cli.md',
-        anchor: 'flags/verbose',
-        title: '`relkit --verbose` prints the resolved config',
+        claimId: VERBOSE_CLAIM.id,
         dismissedAt: '2026-02-01T00:00:00.000Z',
         auto: true,
         reason: 'the assertion names a `--verbose` flag the CLI never had',
@@ -238,7 +253,7 @@ describe('the auto tier — a high-confidence scenario-layer defect dismisses it
     ])
 
     // A scoped re-adjudication reaches the same verdict: the dismissal is keyed by
-    // identity, so it refreshes rather than duplicating.
+    // the claim id, so it refreshes rather than duplicating.
     await persistAdjudication({
       repoRoot: repo,
       item: item({ diagnosis: DIAGNOSIS }),
@@ -262,10 +277,18 @@ describe('the auto tier — a high-confidence scenario-layer defect dismisses it
     })
     expect(dismissals()).toEqual([])
 
-    // Nothing resolves to a claim: a dismissal without an identity keys on nothing.
+    // Nothing resolves to a claim: a dismissal without an id keys on nothing.
     await persistAdjudication({
       repoRoot: repo,
       item: item(),
+      verdict: defect({ confidence: 'high' }),
+    })
+    expect(dismissals()).toEqual([])
+
+    // The failure names a claim the corpus no longer holds: there is nothing to dismiss.
+    await persistAdjudication({
+      repoRoot: repo,
+      item: item({ row: row({ failedMilestone: 1 }), flow: FLOW }),
       verdict: defect({ confidence: 'high' }),
     })
     expect(dismissals()).toEqual([])
@@ -277,32 +300,20 @@ describe('the auto tier — a high-confidence scenario-layer defect dismisses it
       item: item({ row: row({ failedMilestone: 2 }), flow: FLOW }),
       verdict: defect({ confidence: 'high' }),
     })
-    expect(result.routing.autoDismissed).toEqual({
-      doc: 'docs/cli.md',
-      anchor: 'flags/verbose',
-      title: 'the verbose flag prints config',
-    })
+    expect(result.routing.autoDismissed).toEqual({ claimId: VERBOSE_FLAG_CLAIM.id })
     expect(dismissals()).toHaveLength(1)
-    expect(dismissals()[0].title).toBe('the verbose flag prints config')
+    expect(dismissals()[0].claimId).toBe(VERBOSE_FLAG_CLAIM.id)
   })
 })
 
-describe('claimIdentity — what a dismissal keys on', () => {
+describe('failingClaimId — what a dismissal keys on', () => {
   it('prefers the committed diagnosis, falls back to the failing milestone, else null', () => {
-    expect(claimIdentity(item({ diagnosis: DIAGNOSIS }))).toEqual({
-      doc: 'docs/cli.md',
-      anchor: 'flags/verbose',
-      title: '`relkit --verbose` prints the resolved config',
-    })
-    // A diagnosis with no `claim` is not an identity — the milestone answers.
-    const { claim: _dropped, ...noClaim } = DIAGNOSIS
-    expect(claimIdentity(item({ diagnosis: noClaim, row: row({ failedMilestone: 1 }), flow: FLOW }))).toEqual({
-      doc: 'docs/cli.md',
-      anchor: 'flags',
-      title: 'flags exist',
-    })
+    expect(failingClaimId(item({ diagnosis: DIAGNOSIS }))).toBe(VERBOSE_CLAIM.id)
+    // A diagnosis that names no claim leaves it to the milestone.
+    const { claimId: _dropped, ...noClaim } = DIAGNOSIS
+    expect(failingClaimId(item({ diagnosis: noClaim, row: row({ failedMilestone: 1 }), flow: FLOW }))).toBe(FLAGS_CLAIM_ID)
     // A milestone order the flow has no entry for resolves to nothing.
-    expect(claimIdentity(item({ row: row({ failedMilestone: 9 }), flow: FLOW }))).toBeNull()
-    expect(claimIdentity(item())).toBeNull()
+    expect(failingClaimId(item({ row: row({ failedMilestone: 9 }), flow: FLOW }))).toBeNull()
+    expect(failingClaimId(item())).toBeNull()
   })
 })

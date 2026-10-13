@@ -15,17 +15,28 @@ import type { ZodRawShape } from 'zod';
 // messages (subset of SDKMessage)
 // ---------------------------------------------------------------------------
 
-/** A user content block — text, or one base64 image the model must look at. */
+/** What a harness tool handed back, replayed to the stream as a user block. */
+export interface SdkToolResultBlock {
+  type: 'tool_result';
+  tool_use_id: string;
+  content?: string | Array<{ type: string; text?: string; [k: string]: unknown }>;
+  is_error?: boolean;
+}
+
+/** A user content block — text, one base64 image the model must look at, or
+ *  a tool result the harness replays. */
 export type SdkUserContentBlock =
   | { type: 'text'; text: string }
   | {
       type: 'image';
       source: { type: 'base64'; media_type: string; data: string };
-    };
+    }
+  | SdkToolResultBlock;
 
 export interface SdkUserMessage {
   type: 'user';
-  /** A plain string for the text-only case; blocks only when an image rides along. */
+  /** A plain string for the text-only case; blocks when an image rides along
+   *  or the harness replays tool results. */
   message: { role: 'user'; content: string | SdkUserContentBlock[] };
   parent_tool_use_id: string | null;
   session_id?: string;

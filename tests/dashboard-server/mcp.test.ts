@@ -61,7 +61,7 @@ import { resetSpecStore, saveWorkspaceSpec, setSpecStore } from '@truecourse/cor
 import { setGuardGenerateEnqueue } from '@truecourse/core/lib/guard-generate-enqueue';
 import { resetGuardStore as resetCoreGuardStore, setGuardStore, type GuardStore } from '@truecourse/core/lib/guard-store';
 import { writeGuardLatest } from '@truecourse/guard-runner';
-import type { GuardGenerateReport } from '@truecourse/shared';
+import { claimId, sentenceKey, type GuardGenerateReport } from '@truecourse/shared';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
 import { createAuth, LOCAL_ORG_ID } from '../../apps/dashboard/server/src/auth/index';
 import { createHostedMcpAuth, loadMcpOAuthConfig, type McpAuth } from '../../apps/dashboard/server/src/auth/mcp';
@@ -174,13 +174,12 @@ function failingRun(repoPath: string): void {
       {
         id: 's1',
         title: 'a refund settles',
-        binds: { doc: 'docs/refunds.md', section: 'refunds', fingerprint: 'sha256:x' },
+        binds: { doc: 'docs/refunds.md', sentences: ['refunds'] },
         outcome: 'fail',
         durationMs: 1,
         failure: { step: 2, expected: 'exit 0', actual: 'exit 1' },
       },
     ],
-    sections: [],
   });
 }
 
@@ -202,9 +201,9 @@ function writeFlow(repoPath: string): void {
           goal: 'Create and complete a task',
           fingerprint: 'sha256:41ac',
           milestones: [
-            { order: 1, doc: DOC, anchor: 'tasks/creating-tasks', claimTitle: 'Creating a task prints its id' },
+            { order: 1, doc: DOC, claimId: claimId(DOC, ['tasks/creating-tasks']), claimTitle: 'Creating a task prints its id', sentences: ['tasks/creating-tasks'] },
           ],
-          bindings: [{ doc: DOC, anchor: 'tasks/creating-tasks', fingerprint: 'sha256:c' }],
+          bindings: [{ doc: DOC, sentences: ['tasks/creating-tasks'] }],
           composedOf: [],
           synthesisInputsHash: 'sha256:inputs',
         },
@@ -422,7 +421,7 @@ describe('write tools', () => {
 
   const corpus = (): CuratedCorpus =>
     ({
-      version: 3,
+      version: 6,
       generatedAt: '2026-01-01T00:00:00Z',
       docs: [
         { ref: A, kind: 'prd', lastTouched: '', areaTags: ['p/c'], sourceId: SRC_A, sourceKind: 'repository' },
@@ -434,13 +433,13 @@ describe('write tools', () => {
           product: 'p',
           concern: 'c',
           docRefs: [A, B],
-          overlaps: [
+          conflicts: [
             {
               docs: [A, B],
               note: '24h vs 48h',
               sections: [
-                { doc: A, heading: 'Cancellation', quote: 'within 24 hours' },
-                { doc: B, heading: 'Cancellation policy', quote: 'within 48 hours' },
+                { doc: A, quote: 'within 24 hours', sentence: 's-a' },
+                { doc: B, quote: 'within 48 hours', sentence: 's-b' },
               ],
             },
           ],
@@ -484,7 +483,7 @@ describe('write tools', () => {
 
   const corpusRead = async () => (await request(app).get('/api/context/corpus').expect(200)).body;
 
-  it('reads documents, a section, a flow, its failures and coverage', async () => {
+  it('reads documents, a range of lines, a flow, its failures and coverage', async () => {
     await context.createSource(TEST_ORG, {
       id: SRC_B,
       kind: 'site',
@@ -513,8 +512,10 @@ describe('write tools', () => {
     expect(whole.sections.map((s: { heading: string }) => s.heading)).toEqual(
       expect.arrayContaining(['Cancellation policy', 'Refunds']),
     );
-    const anchor = whole.sections.find((s: { heading: string }) => s.heading === 'Cancellation policy').anchor;
-    const section = await ok(client, 'read_document', { ref: B, section: anchor });
+    // A section's text is read by its outline entry's lines.
+    const { lines } = whole.sections.find((s: { heading: string }) => s.heading === 'Cancellation policy');
+    const section = await ok(client, 'read_document', { ref: B, lines });
+    expect(section.lines).toEqual(lines);
     expect(section.content).toContain('Cancel within 48 hours.');
     expect(section.content).not.toContain('Refunds settle');
 
@@ -581,22 +582,22 @@ describe('write tools', () => {
       const { conflicts } = await ok(client, 'list_conflicts');
       expect(conflicts).toHaveLength(1);
       expect(conflicts[0]).toMatchObject({
-        a: { doc: A, heading: 'Cancellation', quote: 'within 24 hours' },
-        b: { doc: B, heading: 'Cancellation policy', quote: 'within 48 hours' },
+        a: { doc: A, quote: 'within 24 hours' },
+        b: { doc: B, quote: 'within 48 hours' },
         resolved: false,
       });
 
       const resolved = await ok(client, 'resolve_conflict', { conflictId: conflicts[0].id, verdict: 'b' });
       expect(resolved.conflict).toMatchObject({ resolved: true, resolution: { verdict: 'b' } });
-      // The same record the dashboard's verdict writes: both sections and quotes.
+      // The same record the dashboard's verdict writes: both sentences and quotes.
       expect((await corpusRead()).conflictResolutions).toEqual([
         expect.objectContaining({
           docA: A,
-          anchorA: 'Cancellation',
           quoteA: 'within 24 hours',
+          sentenceA: 's-a',
           docB: B,
-          anchorB: 'Cancellation policy',
           quoteB: 'within 48 hours',
+          sentenceB: 's-b',
           verdict: 'b',
         }),
       ]);
@@ -610,6 +611,33 @@ describe('write tools', () => {
       resetCoreGuardStore();
       installWorkTreeGuardStore();
     }
+  });
+
+  it('resolves and undoes one of several conflicts between the same two docs, by its sentences', async () => {
+    const at = (doc: string, quote: string) => ({ doc, quote, sentence: sentenceKey(quote) });
+    const points = [
+      [at(A, 'within 24 hours'), at(B, 'within 48 hours')],
+      [at(A, 'a fee of 10 dollars'), at(B, 'free of charge')],
+    ];
+    const base = corpus();
+    await saveWorkspaceSpec({ workspaceOrgId: TEST_ORG }, 'corpus', {
+      ...base,
+      areas: [{ ...base.areas[0]!, conflicts: points.map((sections, i) => ({ docs: [A, B], note: `point ${i}`, sections, areas: [] })) }],
+    } as unknown as CuratedCorpus);
+
+    const { conflicts } = await ok(client, 'list_conflicts');
+    expect(conflicts.map((c: { note: string }) => c.note).sort()).toEqual(['point 0', 'point 1']);
+    const fee = conflicts.find((c: { note: string }) => c.note === 'point 1');
+    await ok(client, 'resolve_conflict', { conflictId: fee.id, verdict: 'b' });
+    expect((await corpusRead()).conflictResolutions).toEqual([
+      expect.objectContaining({ sentenceA: points[1]![0]!.sentence, sentenceB: points[1]![1]!.sentence, verdict: 'b' }),
+    ]);
+    expect((await ok(client, 'list_conflicts')).conflicts.map((c: { note: string }) => c.note)).toEqual(['point 0']);
+
+    // The undo names the same sentences, so it removes exactly that verdict.
+    await ok(client, 'undo_conflict_resolution', { conflictId: fee.id });
+    expect((await corpusRead()).conflictResolutions).toEqual([]);
+    expect((await ok(client, 'list_conflicts')).conflicts).toHaveLength(2);
   });
 
   it('dismisses a flow and restores it', async () => {
@@ -655,15 +683,10 @@ describe('write tools', () => {
   });
 
   it('undoes a claim dismissal', async () => {
-    const claim = { doc: DOC, anchor: 'tasks/creating-tasks', title: 'Creating a task prints its id' };
+    const claim = { claimId: claimId(DOC, ['tasks/creating-tasks']) };
     await request(app).post(`/api/repos/${fixture.project.slug}/guard/dismiss`).send(claim).expect(200);
 
-    await ok(client, 'undismiss_claim', {
-      repo: fixture.project.slug,
-      doc: claim.doc,
-      section: claim.anchor,
-      title: claim.title,
-    });
+    await ok(client, 'undismiss_claim', { repo: fixture.project.slug, claimId: claim.claimId });
     const after = await request(app).get(`/api/repos/${fixture.project.slug}/guard/decisions`).expect(200);
     expect(after.body.dismissedClaims).toEqual([]);
   });

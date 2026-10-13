@@ -4,7 +4,7 @@
  * result mapping. Zero LLM dependencies; fully exercisable with hand-written scenarios.
  */
 
-export { runGuard, sourceGuardRunInputs, defaultRunConcurrency, apiBootConcurrency, runFailureMessage, orderReadBeforeWrite } from './run.js'
+export { runGuard, sourceGuardRunInputs, defaultRunConcurrency, apiBootConcurrency, runFailureMessage, orderReadBeforeWrite, buildRunId } from './run.js'
 export type { RunGuardOptions, RunGuardResult, GuardRunInputs } from './run.js'
 
 // The board — `LATEST.json` as the merged current-state view across runs.
@@ -462,32 +462,13 @@ export {
   type WebScreenAuthoringState,
 } from './interface-authoring.js'
 
-export {
-  buildDocSectionIndex,
-  extractSectionTexts,
-  splitTopLevelSections,
-  resolveBinding,
-  resolveScenarioBinds,
-  slugifyHeading,
-  normalizeSectionText,
-  fingerprintText,
-  isMarkdownDoc,
-  isOpenApiDoc,
-  deriveOpenApiSections,
-} from './section-index.js'
-export type {
-  DocSection,
-  DocSectionIndex,
-  BindingResolution,
-  ScenarioBindingVerdict,
-  SectionText,
-} from './section-index.js'
+export { resolveBinding, resolveScenarioBinds } from './binding.js'
+export type { BindingResolution, ScenarioBindingVerdict } from './binding.js'
 
 export { isInterfaceDrifted } from './interface-drift.js'
 
-export { corpusKeptDocs, indexRepoDocs, nodeRefContext } from './doc-index.js'
-export type { RepoDocIndexes } from './doc-index.js'
-export type { RefResolutionContext } from './section-index.js'
+export { corpusKeptDocs, readRepoDocTrees } from './doc-index.js'
+export type { RepoDocTrees } from './doc-index.js'
 
 export { readManifest, writeManifest, rebuildManifestFromScenarios } from './manifest.js'
 
@@ -523,7 +504,6 @@ export {
   recipeContractFingerprint,
   authoringRecipeContract,
   computePreparationFingerprint,
-  legacyPreparationFingerprint,
   preparationFingerprintComponents,
   flowRecipeSliceFingerprint,
   seedRosterFingerprint,
@@ -533,4 +513,16 @@ export {
   dependencyCatalogIdentity,
 } from './recipe-slices.js'
 export type { RecipeWritingStep } from './recipe-slices.js'
-export { type ResolvedProviderControl, resolveProviderControl, providerControlStateMaterial, scenarioProviderControlProblems, PROVIDER_CONTROL_VERSION } from './provider-control.js'
+
+export {
+  bootProductWorld,
+  buildProductWorld,
+  missingWorldScripts,
+  releaseWorldSlot,
+  reserveWorldSlot,
+  worldScriptEnv,
+} from './product-world.js'
+export type { RunningWorld, WorldBoot, WorldBootFailure, WorldRunOptions, WorldScriptResult, WorldSlot } from './product-world.js'
+
+export { FLOW_TEST_ENV, flowSpecStepTitles, flowTestEnv, keepFlowTestRun, prepareFlowTestsDir, runFlowTests } from './flow-tests.js'
+export type { FlowTestsRun, FlowTestWorld, RunFlowTestsOptions } from './flow-tests.js'

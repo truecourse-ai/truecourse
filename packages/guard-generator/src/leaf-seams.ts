@@ -14,9 +14,8 @@
  * cache and fail-open rule around a runner is the engine's.
  */
 
-import type { GuardSessionSummary } from './extract.js'
+import type { GuardSessionSummary } from './sessions.js'
 import type {
-  ClaimDiffSectionInput,
   MatchUserContext,
   RecipeDiscoveryInput,
   WorldClassifyFlowInput,
@@ -41,7 +40,6 @@ export type WorldClassifyRunner = (flows: readonly WorldClassifyFlowInput[]) => 
 
 /** The claim-diff gate — one ask per EDITED section whose doc has a prior
  *  extraction, deciding whether the edit changed any obligation. */
-export type ClaimDiffRunner = (section: ClaimDiffSectionInput) => Promise<unknown>
 
 /**
  * What the leaf kinds did across this run, read at every exit: the same

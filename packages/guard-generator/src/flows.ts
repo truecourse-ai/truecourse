@@ -1,4 +1,3 @@
-import { verificationGroup, verificationBoundaryProblems } from '@truecourse/shared'
 /**
  * Flow SYNTHESIS — the spec-side generation unit, run as `guard-generate.flows`
  * agent sessions (the per-area one-shots and their corrective re-ask were
@@ -29,22 +28,16 @@ import { verificationGroup, verificationBoundaryProblems } from '@truecourse/sha
  * for exactly that (and for the pre-flight estimate, which probes the same keys).
  */
 
-import type { GuardVerification } from '@truecourse/shared'
 import { createHash } from 'node:crypto'
-import {
-  atomicWriteJson,
-  guardFlowsPath,
-  readGuardFlowsCorpus,
-  slugifyHeading,
-} from '@truecourse/guard-runner'
+import { atomicWriteJson, guardFlowsPath, readGuardFlowsCorpus } from '@truecourse/guard-runner'
 import {
   GuardFlowsFileSchema,
+  claimIdDoc,
+  slugifyHeading,
   flowContractKey,
   flowFingerprint,
   flowMilestoneKey,
   resolveFlowIdentity,
-  isRunnableDriver,
-  type ClaimNeed,
   type GuardDriverId,
   type GuardFlow,
   type GuardFlowBinding,
@@ -59,7 +52,7 @@ import {
   type SynthesizedMilestone,
 } from './schemas.js'
 import { type FlowDigest, type OutlineEntry } from './prompts.js'
-import type { GuardSessionSummary } from './extract.js'
+import type { GuardSessionSummary } from './sessions.js'
 import type { GuardDoc } from './section-plan.js'
 import type { InterfaceDigest } from './prompts.js'
 
@@ -76,35 +69,20 @@ export const readFlowsFile = readGuardFlowsCorpus
 /** One extracted claim as synthesis consumes it. The caller has already dropped
  *  dismissed claims — synthesis never re-reads decisions. */
 export interface FlowClaimInput {
-  /** Repo-relative doc path the claim was extracted from. */
+  /** The claim's id, as the scan wrote it. */
+  id: string
+  /** Repo-relative doc path the claim is read from. */
   doc: string
-  /** The live section anchor the claim is bound to. */
-  anchor: string
-  /** The claim's text — becomes a milestone's `claimTitle` verbatim. */
+  /** The claim's statement — becomes a milestone's `claimTitle` verbatim. */
   title: string
-  /** The surface hint extraction assigned; runnable surfaces must be accounted for. */
-  driver: GuardDriverId
-  alternativeDrivers?: GuardDriverId[]
-  verification?: GuardVerification
-  /**
-   * The extraction session's structured needs for this claim, read by flow
-   * synthesis (and its `check_flows` needs-vs-catalog binding).
-   * Advisory — they steer composition, never gate it.
-   */
-  needs?: ClaimNeed[]
-  /**
-   * The prior claim's sentence this one supersedes, when a re-extraction
-   * reworded it. A committed flow's milestone still names the prior sentence
-   * and resolves to this claim through it, so the flow is amended, not retired.
-   */
-  replaces?: string
+  /** The keys of the sentences the claim is read from. */
+  sentences: readonly string[]
 }
 
-/** One document's synthesis context: its outline and its untestable sections. */
+/** One document's synthesis context: its outline. */
 export interface FlowDocInput {
   doc: string
   outline: OutlineEntry[]
-  untestable?: { anchor: string; reason: string }[]
 }
 
 /** One area's synthesis unit — the claims one LLM call composes. */
@@ -139,10 +117,6 @@ export function flowAreaKey(area: Pick<FlowSynthesisArea, 'areaId' | 'chunk'>): 
   return area.chunk === undefined ? area.areaId : `${area.areaId}#${area.chunk}`
 }
 
-/** `doc` + `anchor` key for the section-fingerprint lookup bindings resolve through. */
-export function flowSectionKey(doc: string, anchor: string): string {
-  return `${doc}\0${anchor}`
-}
 
 /**
  * A document's AREA — its first corpus area tag, or a per-document area when the
@@ -219,7 +193,7 @@ export function buildFlowAreas(docs: readonly FlowAreaDocInput[]): FlowSynthesis
       area = { areaId, claims: [], docs: [] }
       byArea.set(areaId, area)
     }
-    area.docs.push({ doc: d.doc, outline: d.outline, untestable: d.untestable })
+    area.docs.push({ doc: d.doc, outline: d.outline })
     area.claims.push(...d.claims)
   }
   return [...byArea.values()]
@@ -244,15 +218,7 @@ function normalizeText(text: string): string {
  */
 export function flowAreaClaimsMaterial(area: FlowSynthesisArea): string {
   return area.claims
-    .map((c) => {
-      const verification = c.verification ? `\0verification:${JSON.stringify(c.verification)}` : ''
-      const base = verification + `${c.doc}\0${normalizeText(c.anchor)}\0${normalizeText(c.title)}\0${c.driver}${c.alternativeDrivers?.length ? `\0alternatives:${[...new Set(c.alternativeDrivers)].sort().join(',')}` : ''}`
-      const needs = (c.needs ?? [])
-        .map((n) => `${n.kind}\0${normalizeText(n.name)}${n.detail ? `\0${normalizeText(n.detail)}` : ''}`)
-        .sort()
-        .join('')
-      return needs ? `${base}\0needs:${needs}` : base
-    })
+    .map((c) => `${c.id}\0${normalizeText(c.title)}`)
     .sort()
     .join('\n')
 }
@@ -262,8 +228,7 @@ export function flowAreaOutlinesMaterial(area: FlowSynthesisArea): string {
   return area.docs
     .map((d) => {
       const sections = d.outline.map((e) => `${e.anchor}\0${normalizeText(e.headingText)}\0${e.level}`).join('\n')
-      const untestable = (d.untestable ?? []).map((u) => `${u.anchor}\0${normalizeText(u.reason)}`).sort().join('\n')
-      return `${d.doc}\n${sections}\n${untestable}`
+      return `${d.doc}\n${sections}`
     })
     .sort()
     .join('\n--\n')
@@ -281,10 +246,6 @@ export function flowEpicDigestsMaterial(digests: readonly FlowDigest[]): string 
 // Claim inventory + milestone snapping
 // ---------------------------------------------------------------------------
 
-/** A claim's identity key — doc + anchor + normalized text (case-insensitive). */
-function claimKey(doc: string, anchor: string, title: string): string {
-  return `${doc}\0${normalizeText(anchor)}\0${normalizeText(title).toLowerCase()}`
-}
 
 /** A looser form for snapping: markup and trailing punctuation folded away. */
 function looseTitle(title: string): string {
@@ -298,67 +259,30 @@ function looseTitle(title: string): string {
 const MIN_CONTAINMENT_CHARS = 12
 
 interface ClaimIndex {
-  byKey: Map<string, FlowClaimInput>
-  byDocAnchor: Map<string, FlowClaimInput[]>
-  byDocLoose: Map<string, FlowClaimInput[]>
+  byId: Map<string, FlowClaimInput>
   all: FlowClaimInput[]
 }
 
 function buildClaimIndex(claims: readonly FlowClaimInput[]): ClaimIndex {
-  const index: ClaimIndex = { byKey: new Map(), byDocAnchor: new Map(), byDocLoose: new Map(), all: [...claims] }
-  for (const c of claims) {
-    index.byKey.set(claimKey(c.doc, c.anchor, c.title), c)
-    // The superseded sentence resolves here too, unless a live claim states it.
-    if (c.replaces !== undefined && !index.byKey.has(claimKey(c.doc, c.anchor, c.replaces))) {
-      index.byKey.set(claimKey(c.doc, c.anchor, c.replaces), c)
-    }
-    const da = flowSectionKey(c.doc, c.anchor)
-    const list = index.byDocAnchor.get(da)
-    if (list) list.push(c)
-    else index.byDocAnchor.set(da, [c])
-    const dl = `${c.doc}\0${looseTitle(c.title)}`
-    const ll = index.byDocLoose.get(dl)
-    if (ll) ll.push(c)
-    else index.byDocLoose.set(dl, [c])
-  }
-  return index
+  return { byId: new Map(claims.map((c) => [c.id, c])), all: [...claims] }
 }
 
 /**
- * Snap a model-returned claim reference onto the inventory, or reject it.
- * Precedence, tightest first: the exact identity triple; a unique loose-text match
- * inside the named section; a unique containment match inside the named section
- * (the model paraphrased or truncated); a unique loose-text match elsewhere in the
- * same document (the anchor was wrong). Anything else is REJECTED — a milestone is
- * never bound to a claim the model might not have meant.
+ * Resolve a model-returned claim reference against the inventory, or reject
+ * it: the id as written, else nothing — a milestone is never bound to a claim
+ * the model might not have meant.
  */
-function snapClaim(ref: { doc: string; anchor: string; claimTitle: string }, index: ClaimIndex): FlowClaimInput | null {
-  const exact = index.byKey.get(claimKey(ref.doc, ref.anchor, ref.claimTitle))
-  if (exact) return exact
-
-  const loose = looseTitle(ref.claimTitle)
-  const inSection = index.byDocAnchor.get(flowSectionKey(ref.doc, ref.anchor)) ?? []
-  const looseHits = inSection.filter((c) => looseTitle(c.title) === loose)
-  if (looseHits.length === 1) return looseHits[0]
-  if (loose.length >= MIN_CONTAINMENT_CHARS) {
-    const contained = inSection.filter((c) => {
-      const t = looseTitle(c.title)
-      return t.includes(loose) || loose.includes(t)
-    })
-    if (contained.length === 1) return contained[0]
-  }
-  const byDoc = index.byDocLoose.get(`${ref.doc}\0${loose}`) ?? []
-  if (byDoc.length === 1) return byDoc[0]
-  return null
+function snapClaim(ref: { claimId: string }, index: ClaimIndex): FlowClaimInput | null {
+  return index.byId.get(ref.claimId.trim()) ?? null
 }
 
 /** How a rejected reference is quoted back to the model on the re-ask. */
-function describeRef(ref: { doc: string; anchor: string; claimTitle: string }): string {
-  return `${ref.doc}#${ref.anchor} — "${normalizeText(ref.claimTitle)}"`
+function describeRef(ref: { claimId: string }): string {
+  return `claim ${ref.claimId}`
 }
 
 function describeClaim(claim: FlowClaimInput): string {
-  return `${claim.doc}#${claim.anchor} — "${normalizeText(claim.title)}"`
+  return `${claim.id} — "${normalizeText(claim.title)}"`
 }
 
 // ---------------------------------------------------------------------------
@@ -390,35 +314,21 @@ function orderMilestones(raw: { milestone: SynthesizedMilestone; claim: FlowClai
   const seen = new Set<string>()
   const milestones: GuardFlowMilestone[] = []
   for (const e of indexed) {
-    const key = flowMilestoneKey({ doc: e.claim.doc, anchor: e.claim.anchor, claimTitle: e.claim.title, caseIds: e.milestone.caseIds })
+    const key = flowMilestoneKey({ claimId: e.claim.id })
     if (seen.has(key)) continue
     seen.add(key)
     milestones.push({
       order: milestones.length + 1,
       doc: e.claim.doc,
-      anchor: e.claim.anchor,
+      claimId: e.claim.id,
       claimTitle: e.claim.title,
-      ...(e.milestone.caseIds ? { caseIds: [...e.milestone.caseIds].sort() } : {}),
-      proofDrivers: [...new Set([e.claim.driver, ...(e.claim.alternativeDrivers ?? [])])].sort(),
-      ...(e.claim.verification ? { verification: { ...e.claim.verification, ...(e.claim.verification.cases ? { cases: e.claim.verification.cases.filter(c => !e.milestone.caseIds || e.milestone.caseIds.includes(c.id)).sort((a, b) => a.id.localeCompare(b.id)) } : {}) } } : {}),
+      sentences: [...e.claim.sentences],
       ...(e.milestone.note ? { note: e.milestone.note } : {}),
     })
   }
   return milestones
 }
 
-function selectionProblem(ref: { caseIds?: string[] }, claim: FlowClaimInput): string | undefined {
-  const cases = claim.verification?.cases
-  if (!cases?.length) return ref.caseIds !== undefined ? 'a claim without cases is indivisible' : undefined
-  if (!ref.caseIds?.length) return 'explicit-case claims require a nonempty caseIds selection'
-  if (new Set(ref.caseIds).size !== ref.caseIds.length) return 'duplicate selected case IDs'
-  if (ref.caseIds.some(id => !cases.some(c => c.id === id))) return 'unknown selected case ID'
-  return undefined
-}
-function obligationKeys(claim: { doc: string; anchor: string; title: string; verification?: FlowClaimInput['verification'] }, caseIds?: string[]): string[] {
-  const key = claimKey(claim.doc, claim.anchor, claim.title)
-  return claim.verification?.cases?.length ? (caseIds ?? claim.verification.cases.map(c => c.id)).map(id => `${key}\0${id}`) : [key]
-}
 
 interface AreaValidation {
   flows: DraftFlow[]
@@ -521,13 +431,11 @@ function validateAreaSynthesis(
         unknownReferences.push(describeRef(milestone))
         continue
       }
-      const problem = selectionProblem(milestone, claim)
-      if (problem) { unknownReferences.push(`${describeRef(milestone)}: ${problem}`); continue }
       snapped.push({ milestone, claim })
     }
     const milestones = orderMilestones(snapped)
     if (milestones.length === 0) continue
-    for (const m of milestones) for (const key of obligationKeys({ ...m, title: m.claimTitle }, m.caseIds)) covered.add(key)
+    for (const m of milestones) covered.add(m.claimId)
     flows.push({
       areaId: area.areaId,
       title: normalizeText(flow.title),
@@ -542,7 +450,7 @@ function validateAreaSynthesis(
   }
 
   const assigned = new Set(covered)
-  // The prior no-flow decisions of this unit, by obligation: a re-emitted one
+  // The prior no-flow decisions of this unit, by claim: a re-emitted one
   // keeps its prior reason verbatim (a re-worded reason for an unchanged
   // decision is the reinvention the rule forbids), one now placed in a flow is
   // accounted by the milestone, and one the draft says nothing about is
@@ -550,7 +458,7 @@ function validateAreaSynthesis(
   const priorByKey = new Map<string, GuardNoFlowClaim>()
   for (const p of priorNoFlow) {
     const claim = snapClaim(p, index)
-    if (claim) priorByKey.set(obligationKeys(claim, p.caseIds).join('\n'), p)
+    if (claim) priorByKey.set(claim.id, p)
   }
   const noFlowClaims: GuardNoFlowClaim[] = []
   const seenNoFlow = new Set<string>()
@@ -560,40 +468,29 @@ function validateAreaSynthesis(
       unknownReferences.push(describeRef(entry))
       continue
     }
-    const problem = selectionProblem(entry, claim)
-    if (problem) { unknownReferences.push(`${describeRef(entry)}: ${problem}`); continue }
-    const keys = obligationKeys(claim, entry.caseIds)
-    if (keys.some(key => assigned.has(key))) unknownReferences.push(`${describeRef(entry)}: a selected obligation is both assigned and marked no-flow`)
-    for (const key of keys) covered.add(key)
-    const key = keys.join("\n")
-    if (seenNoFlow.has(key)) continue
-    seenNoFlow.add(key)
-    const kept = priorByKey.get(key)
-    noFlowClaims.push({ doc: claim.doc, anchor: claim.anchor, claimTitle: claim.title, ...(entry.caseIds ? { caseIds: [...entry.caseIds].sort() } : {}), reason: kept ? kept.reason : normalizeText(entry.reason) })
+    if (assigned.has(claim.id)) unknownReferences.push(`${describeRef(entry)}: a claim is both assigned and marked no-flow`)
+    covered.add(claim.id)
+    if (seenNoFlow.has(claim.id)) continue
+    seenNoFlow.add(claim.id)
+    const kept = priorByKey.get(claim.id)
+    noFlowClaims.push({ claimId: claim.id, reason: kept ? kept.reason : normalizeText(entry.reason) })
   }
   const unaccountedNoFlow: string[] = []
   for (const [key, p] of priorByKey) {
     if (seenNoFlow.has(key)) continue
-    if (key.split('\n').every((k) => assigned.has(k))) continue
+    if (assigned.has(key)) continue
     if (strict) {
       unaccountedNoFlow.push(`existing no-flow decision on ${describeRef(p)} is neither re-emitted in noFlowClaims nor covered by a milestone`)
     } else {
       // Lenient on replay: the decision stands as it was, and accounts for its claim.
       seenNoFlow.add(key)
-      for (const k of key.split('\n')) covered.add(k)
+      covered.add(key)
       noFlowClaims.push(p)
     }
   }
 
-  const uncoveredClaims = index.all
-    .filter(c => [c.driver, ...(c.alternativeDrivers ?? [])].some(isRunnableDriver))
-    .flatMap(c => obligationKeys(c).filter(key => !covered.has(key)).map(key => `${describeClaim(c)}${c.verification?.cases?.length ? ` / case ${key.split('\0').at(-1)}` : ''}`))
+  const uncoveredClaims = index.all.filter(c => !covered.has(c.id)).map(describeClaim)
 
-  for (const flow of flows) {
-    const groups = new Set(flow.milestones.map(m => verificationGroup(m.verification)).filter(Boolean))
-    if (groups.size > 1) unknownReferences.push(`"${flow.title}": split independent verification scopes, methods or failure conditions into separate flows`)
-    for (const m of flow.milestones) unknownReferences.push(...verificationBoundaryProblems(m.verification, false, m.proofDrivers).map(p => `"${flow.title}" milestone ${m.order}: ${p}`))
-  }
   const { retiredFlows, unaccountedFlows } = reconcileAgainstPrior(flows, data.retiredFlows ?? [], prior, unknownReferences, strict)
   return { flows, noFlowClaims, unaccountedNoFlow, retiredFlows, unknownReferences, uncoveredClaims, unaccountedFlows }
 }
@@ -608,10 +505,6 @@ function validateAreaSynthesis(
 export interface FlowSetCheckContext {
   /** The area whose claim inventory the draft must snap onto. */
   area: FlowSynthesisArea
-  /** Live {@link flowSectionKey}s — the bindability check. Omit to skip. */
-  sectionKeys?: ReadonlySet<string>
-  /** Dependency-catalog entry names — the needs-binding check. Omit to skip. */
-  catalogNames?: ReadonlySet<string>
   /** The area's EXISTING flows the draft must reconcile against. Omit when
    *  there are none (a first synthesis). */
   prior?: readonly GuardFlow[]
@@ -639,10 +532,6 @@ export interface FlowSetCheckReport {
   unaccountedNoFlow: string[]
   /** Exact behavior duplicates the fold will drop (report, don't delete). */
   subsumed: SubsumedFlow[]
-  /** Milestones whose section is outside the live index — no flow can bind them. */
-  unbindable: string[]
-  /** Claim needs naming no dependency-catalog entry (observation only). */
-  unboundNeeds: string[]
 }
 
 /** True when the report carries no refusal-class defect. */
@@ -661,32 +550,12 @@ export function checkFlowSet(data: FlowSet, ctx: FlowSetCheckContext): FlowSetCh
   const v = validateAreaSynthesis(ctx.area, data, index, '', ctx.prior ?? [], true, ctx.priorNoFlow ?? [])
   const subsumed = applySubsumption(v.flows).dropped
 
-  const unbindable: string[] = []
-  const unboundNeeds: string[] = []
-  const seenNeed = new Set<string>()
-  for (const flow of v.flows) {
-    for (const m of flow.milestones) {
-      if (ctx.sectionKeys && !ctx.sectionKeys.has(flowSectionKey(m.doc, m.anchor))) {
-        unbindable.push(`${m.doc}#${m.anchor} — "${normalizeText(m.claimTitle)}"`)
-      }
-      if (!ctx.catalogNames) continue
-      const claim = index.byKey.get(claimKey(m.doc, m.anchor, m.claimTitle))
-      for (const need of claim?.needs ?? []) {
-        if (ctx.catalogNames.has(need.name) || seenNeed.has(need.name)) continue
-        seenNeed.add(need.name)
-        unboundNeeds.push(`"${need.name}" (${need.kind}) — named by "${normalizeText(m.claimTitle)}" but in no dependency-catalog entry`)
-      }
-    }
-  }
-
   return {
     unknownReferences: v.unknownReferences,
     uncoveredClaims: v.uncoveredClaims,
     unaccountedFlows: v.unaccountedFlows,
     unaccountedNoFlow: v.unaccountedNoFlow,
     subsumed,
-    unbindable,
-    unboundNeeds,
   }
 }
 
@@ -726,24 +595,18 @@ export function checkEpicSet(
     for (const r of refs) {
       for (const m of byRef.get(r)!.milestones) {
         const source = snapClaim(m, index)
-        if (source) for (const key of obligationKeys(source, m.caseIds)) allowed.add(key)
+        if (source) allowed.add(source.id)
       }
     }
     let snapped = 0
-    const groups = new Set<string>()
     for (const milestone of epic.milestones) {
       const claim = snapClaim(milestone, index)
-      if (!claim || selectionProblem(milestone, claim) || obligationKeys(claim, milestone.caseIds).some(key => !allowed.has(key))) {
+      if (!claim || !allowed.has(claim.id)) {
         unknownReferences.push(describeRef(milestone))
         continue
       }
-      const projected = orderMilestones([{ milestone, claim }])[0]
-      const group = verificationGroup(projected.verification)
-      unknownReferences.push(...verificationBoundaryProblems(projected.verification, false, projected.proofDrivers))
-      if (group) groups.add(group)
       snapped++
     }
-    if (groups.size > 1) unknownReferences.push(`"${normalizeText(epic.title)}": an epic cannot combine independent verification scopes or failure conditions`)
     if (snapped < 2) notes.push(`"${normalizeText(epic.title)}" keeps fewer than two snapped milestones — it will be dropped`)
     drafts.push(...buildEpicDrafts({ epics: [epic] }, digests.map(digestFlow), index, '').epics)
   }
@@ -761,7 +624,7 @@ function digestFlow(d: FlowDigest): DraftFlow {
     areaId: d.areaId,
     title: d.title,
     goal: d.goal,
-    milestones: d.milestones.map((m, i) => ({ order: i + 1, doc: m.doc, anchor: m.anchor, claimTitle: m.claimTitle, ...(m.caseIds ? { caseIds: m.caseIds } : {}) })),
+    milestones: d.milestones.map((m, i) => ({ order: i + 1, doc: m.doc, claimId: m.claimId, claimTitle: m.claimTitle, sentences: m.sentences })),
     composedRefs: [],
     synthesisInputsHash: '',
   }
@@ -786,7 +649,7 @@ function digestsOf(flows: readonly DraftFlow[]): FlowDigest[] {
     areaId: f.areaId,
     title: f.title,
     goal: f.goal,
-    milestones: f.milestones.map((m) => ({ doc: m.doc, anchor: m.anchor, claimTitle: m.claimTitle, ...(m.caseIds ? { caseIds: m.caseIds } : {}) })),
+    milestones: f.milestones.map((m) => ({ doc: m.doc, claimId: m.claimId, claimTitle: m.claimTitle, sentences: m.sentences })),
   }))
 }
 
@@ -828,17 +691,15 @@ function buildEpicDrafts(
     // The milestone vocabulary of an epic is exactly its composed flows' milestones.
     const allowed = new Set<string>()
     for (const r of refs) {
-      for (const m of flows[byRef.get(r)!].milestones) for (const key of obligationKeys({ ...m, title: m.claimTitle }, m.caseIds)) allowed.add(key)
+      for (const m of flows[byRef.get(r)!].milestones) allowed.add(m.claimId)
     }
     const snapped: { milestone: SynthesizedMilestone; claim: FlowClaimInput }[] = []
     for (const milestone of epic.milestones) {
       const claim = snapClaim(milestone, index)
-      if (!claim || selectionProblem(milestone, claim) || obligationKeys(claim, milestone.caseIds).some(key => !allowed.has(key))) {
+      if (!claim || !allowed.has(claim.id)) {
         unknownReferences.push(describeRef(milestone))
         continue
       }
-      const problem = selectionProblem(milestone, claim)
-      if (problem) { unknownReferences.push(`${describeRef(milestone)}: ${problem}`); continue }
       snapped.push({ milestone, claim })
     }
     const milestones = orderMilestones(snapped)
@@ -854,12 +715,6 @@ function buildEpicDrafts(
       synthesisInputsHash: inputsKey,
       ...(epic.id ? { continues: epic.id } : {}),
     })
-  }
-  for (const flow of epics) {
-    for (const m of flow.milestones) unknownReferences.push(...verificationBoundaryProblems(m.verification, false, m.proofDrivers).map(p => `"${flow.title}" milestone ${m.order}: ${p}`))
-    if (new Set(flow.milestones.map(m => verificationGroup(m.verification)).filter(Boolean)).size > 1) {
-      unknownReferences.push(`"${flow.title}": an epic cannot combine independent verification scopes or failure conditions`)
-    }
   }
   // Unaccounted existing epics are the checker's refusal, not the fold's — see
   // `reconcileAgainstPrior`; the fold retires them with the engine's reason.
@@ -985,7 +840,7 @@ export type FlowsAreaSessionSeam = (input: {
    *  checked against beside the flows. */
   priorNoFlow?: ReadonlyMap<string, readonly GuardNoFlowClaim[]>
   grounding?: FlowsSessionGrounding
-  /** The work docs (section texts) the sessions' `read_section` reads from. */
+  /** The docs (with their sections) the sessions' `read_section` reads from. */
   docs?: readonly GuardDoc[]
   /** Ticks once per settled area (cache hits included). */
   onArea?: (areaId: string) => void
@@ -1021,10 +876,8 @@ export interface SynthesizeFlowsOptions {
   epicSession: FlowsEpicSessionSeam
   /** Interface digests + dependency catalog for the session briefings. */
   sessionGrounding?: FlowsSessionGrounding
-  /** The work docs (section texts) for the sessions' `read_section` tool. */
+  /** The docs (with their sections) for the sessions' `read_section` tool. */
   sessionDocs?: readonly GuardDoc[]
-  /** `doc`+`anchor` ({@link flowSectionKey}) → the section's live fingerprint. */
-  sectionFingerprints: ReadonlyMap<string, string>
   /** The committed flows the sessions reconcile against; defaults to `flows.json`. */
   previous?: readonly GuardFlow[]
   /** The committed no-flow decisions the sessions reconcile against; defaults
@@ -1162,24 +1015,8 @@ function partitionPriorFlows(
  * `unsettled`, while every other area's flows are reconciled.
  */
 export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<FlowSynthesisResult> {
-  const { repoRoot, sectionFingerprints } = opts
-
-  // Claims whose section has no live fingerprint cannot be bound, so they never
-  // enter synthesis — they are recorded as no-flow claims with that reason.
-  const unbindable: GuardNoFlowClaim[] = []
-  const areas: FlowSynthesisArea[] = opts.areas.map((area) => {
-    const claims = area.claims.filter((c) => {
-      if (sectionFingerprints.has(flowSectionKey(c.doc, c.anchor))) return true
-      unbindable.push({
-        doc: c.doc,
-        anchor: c.anchor,
-        claimTitle: c.title,
-        reason: 'its section is not in the live section index, so no flow can bind it',
-      })
-      return false
-    })
-    return { ...area, claims }
-  })
+  const { repoRoot } = opts
+  const areas: FlowSynthesisArea[] = [...opts.areas]
 
   const previousFile = opts.previous && opts.previousNoFlowClaims ? undefined : readFlowsFile(repoRoot)
   const previous = opts.previous ?? previousFile?.flows ?? []
@@ -1198,7 +1035,7 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
       indexByUnit.set(key, buildClaimIndex(area.claims))
     }
     for (const c of opts.previousNoFlowClaims ?? previousFile?.noFlowClaims ?? []) {
-      const unit = unitByDoc.get(c.doc)
+      const unit = unitByDoc.get(claimIdDoc(c.claimId) ?? '')
       if (unit === undefined || !snapClaim(c, indexByUnit.get(unit)!)) continue
       const list = priorNoFlowByUnit.get(unit) ?? []
       list.push(c)
@@ -1249,7 +1086,7 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
   })
 
   const unsettled: UnsettledArea[] = []
-  const noFlowClaims: GuardNoFlowClaim[] = [...unbindable]
+  const noFlowClaims: GuardNoFlowClaim[] = []
   // A committed flow of a unit that did not settle stands as it was: nothing
   // said it changed, and dropping it would orphan proven coverage on a session
   // failure. Its no-flow claims stand with it.
@@ -1269,7 +1106,7 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
     noFlowClaims.push(...outcome.noFlowClaims)
     for (const r of outcome.retiredFlows) retiredByModel.set(r.id, r.reason)
   })
-  noFlowClaims.push(...(opts.previousNoFlowClaims ?? previousFile?.noFlowClaims ?? []).filter((c) => carriedDocs.has(c.doc)))
+  noFlowClaims.push(...(opts.previousNoFlowClaims ?? previousFile?.noFlowClaims ?? []).filter((c) => carriedDocs.has(claimIdDoc(c.claimId) ?? '')))
 
   const subsumed: SubsumedFlow[] = []
   const areaPass = applySubsumption(drafts)
@@ -1331,18 +1168,17 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
   }
   if (!epicsResolved) carried.push(...prior.epics)
 
-  // Bindings + fingerprints, then identity against the committed corpus.
+  // Bindings, then identity against the committed corpus.
   const provisional = new Set<string>()
+  const liveClaims = buildClaimIndex(areas.flatMap((a) => a.claims))
   const bindingsOf = (milestones: readonly GuardFlowMilestone[]): GuardFlowBinding[] => {
-    const bindings: GuardFlowBinding[] = []
-    const seenSection = new Set<string>()
+    const byDoc = new Map<string, GuardFlowBinding>()
     for (const m of milestones) {
-      const key = flowSectionKey(m.doc, m.anchor)
-      if (seenSection.has(key)) continue
-      seenSection.add(key)
-      bindings.push({ doc: m.doc, anchor: m.anchor, fingerprint: sectionFingerprints.get(key)! })
+      const binding = byDoc.get(m.doc)
+      if (binding) binding.sentences = [...new Set([...binding.sentences, ...m.sentences])].sort()
+      else byDoc.set(m.doc, { doc: m.doc, sentences: [...new Set(m.sentences)].sort() })
     }
-    return bindings
+    return [...byDoc.values()]
   }
   const next: GuardFlow[] = drafts.map((draft) => {
     const id = freeId(slugForTitle(draft.title), provisional)
@@ -1384,10 +1220,15 @@ export async function synthesizeFlows(opts: SynthesizeFlowsOptions): Promise<Flo
       return
     }
     // KEPT: the committed flow, byte for byte — a retitle or a re-worded goal
-    // of an unchanged path is the reinvention the rule forbids. Only the
-    // bindings are re-read, and they move only when a section's text did.
+    // of an unchanged path is the reinvention the rule forbids. Only what is
+    // re-read moves: each milestone's sentences follow the live claim it names,
+    // and the bindings are rebuilt from them.
     const kept = priorById.get(v.id)!
-    next[i] = { ...kept, bindings: bindingsOf(kept.milestones) }
+    const milestones = kept.milestones.map((m) => {
+      const claim = snapClaim(m, liveClaims)
+      return claim ? { ...m, sentences: [...claim.sentences] } : m
+    })
+    next[i] = { ...kept, milestones, bindings: bindingsOf(milestones) }
     reconciliation.kept.push(v.id)
   })
   verdicts.forEach((v, i) => {

@@ -154,9 +154,15 @@ export function createContextScanTask(
             tracker: checklistTracker(ctx),
             driver: llm.driver(),
             transportMode: llm.mode,
+            // On Claude Code a session can be handed a computer, so the scan
+            // reviews its corpus over the docs on disk, and it finds conflicts
+            // by comparing facts; in API mode it pairs.
+            ...(llm.mode === 'claude-code' ? { computer: true } : {}),
             onRunStarted: (info) => {
               runIds.set(ctx.jobId, info.runId);
               meter.setRunId(info.runId);
+              // A scan whose run can no longer be recorded stops, failed.
+              info.onFailure?.((error) => ctx.fail(error));
               // A resumed scan scans again — there is no half corpus to carry
               // on from — so it opens a run of its own rather than reviving
               // this one, and names itself a rescan.

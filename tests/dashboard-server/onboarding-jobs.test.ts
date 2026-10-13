@@ -42,10 +42,13 @@ import type { JobView } from '@truecourse/shared';
 import {
   setGuardStore,
   loadGuardSetupBundle,
+  listGuardVersions,
   loadScenarios,
   readGuardBaselineCommit,
   readGuardLatest,
   readGuardResult,
+  readGuardRunCoverage,
+  readScenarioFile,
   saveGuardSetupBundle,
   saveScenarios,
   writeGuardDecisions,
@@ -69,18 +72,19 @@ import { guardSetupInProcess } from '@truecourse/core/commands/guard-setup';
 import { CreditsExhaustedError } from '@truecourse/core/lib/credits-store';
 import { OpenConflictsError } from '@truecourse/core/commands/guard-in-process';
 import {
-  buildDocSectionIndex,
   runGuard,
   guardDecisionsPath,
   guardWorldDirtyMarkerPath,
-  indexRepoDocs,
+  readRepoDocTrees,
   manifestPath,
   recipePath,
   resolveBinding,
   scenariosDir,
   writeGuardResult as writeCloneGuardResult,
 } from '@truecourse/guard-runner';
-import { GUARD_FORMAT_VERSION, type GuardGenerateReport, type GuardLatest } from '@truecourse/shared';
+import { GUARD_FORMAT_VERSION, claimId, parseDocTree, type FlowTestsFile, type GuardBinds, type GuardGenerateReport, type GuardLatest } from '@truecourse/shared';
+import { sectionBind } from '../guard-runner/helpers.js';
+import { flowTestsDir, flowTestsIndexPath, worldScriptPath } from '@truecourse/shared/work-tree';
 import { createServerJobs, type JobsMount } from '../../apps/dashboard/server/src/jobs/index';
 import { captureJobStarted } from '../../apps/dashboard/server/src/observability/posthog';
 import type { RepoGuardGenerateTaskDeps } from '../../apps/dashboard/server/src/jobs/tasks/repo-guard-generate';
@@ -210,7 +214,7 @@ const SOURCE_ID = 'repo-acme-widgets';
 const contextRef = (docPath: string): string => `context/${SOURCE_ID}/${docPath}`;
 
 /** The body every seeded document carries — one markdown section. */
-const contextDocBody = (docPath: string): string => `# ${docPath}\n`;
+const contextDocBody = (docPath: string): string => `# ${docPath}\n\nThe ${docPath} document states one thing.\n`;
 
 /**
  * The scan's output, as the store holds it now: a workspace corpus over the
@@ -760,7 +764,7 @@ describe('the guard generate job', () => {
   let seen: { recipe: boolean; decisions: string | null; manifest: boolean; priorReport: boolean }[];
 
   const RECIPE = { build: 'true', api: { serve: ['node', 'server.mjs'], healthPath: '/health' } };
-  const DISMISSED = { doc: 'docs/orgs.md', anchor: 'create', title: 'An org can be created', dismissedAt: '2026-01-01T00:00:00Z' };
+  const DISMISSED = { claimId: claimId('docs/orgs.md', ['create']), dismissedAt: '2026-01-01T00:00:00Z' };
 
   /** A valid report body for `written`, the shape the engine's result is a superset of. */
   const okReport = (written: string[]): Omit<GuardGenerateReport, 'generatedAt'> => ({
@@ -770,18 +774,13 @@ describe('the guard generate job', () => {
       id,
       title: 'create an org',
       doc: 'docs/orgs.md',
-      anchor: 'create',
       file: `.truecourse/scenarios/orgs/${id}.yaml`,
       status: 'passing',
     })),
     birthFindings: [],
-    sectionsTotal: 1,
-    sectionsChanged: 1,
-    skippedUnchanged: 0,
     coverageGaps: [],
     errors: [],
     extractionFailures: [],
-    orphaned: [],
   });
 
   const okResult = (written: string[]): Awaited<ReturnType<GenerateEngine>> =>
@@ -808,8 +807,7 @@ describe('the guard generate job', () => {
         'title: create an org',
         'binds:',
         '  - doc: docs/orgs.md',
-        '    section: create',
-        '    fingerprint: "sha256:x"',
+        '    sentences: [create]',
         'driver: cli',
         'steps:',
         '  - run: ["--help"]',
@@ -832,7 +830,7 @@ describe('the guard generate job', () => {
       birthFindings: [
         {
           doc: 'docs/orgs.md',
-          anchor: 'create',
+          claimId: claimId('docs/orgs.md', ['create']),
           scenarioId: 'a1',
           committed: true,
           evidencePath: evidence,
@@ -1036,7 +1034,7 @@ describe('the guard generate job', () => {
 
   it('materializes and persists generated results', async () => {
     await saveSetupBundle();
-    await writeGuardDecisions(REPO, { dismissedClaims: [DISMISSED], dismissedFlows: [] });
+    await writeGuardDecisions(REPO, { version: 1, dismissedClaims: [DISMISSED], dismissedFlows: [] });
 
     await jobs.enqueueGuardGenerate(request);
     await Promise.all(running);
@@ -1072,6 +1070,108 @@ describe('the guard generate job', () => {
     expect(fs.existsSync(clone)).toBe(false);
   }, 60_000);
 
+  it('stores how a product-world generate\'s tests ran at the commit as a run of it, beside the tests', async () => {
+    const STAGE_RUN = '2026-03-05T00-00-00Z_stage1';
+    const PICTURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0xfe]);
+    const moved = `.truecourse/guard/evidence/${STAGE_RUN}/export-invoices`;
+    const record = (flowId: string, commit: string): FlowTestsFile['tests'][number] => ({
+      flowId,
+      flowFingerprint: `fp-${flowId}`,
+      status: 'passing',
+      file: `${flowId}.spec.ts`,
+      summary: `the ${flowId} test`,
+      run: { ranAt: '2026-02-02T00:00:00.000Z', durationMs: 900, steps: [], commit },
+    });
+    const fetched: string[] = [];
+    setWorkTreeProvider('github', async () => {
+      fs.rmSync(clone, { recursive: true, force: true });
+      fs.cpSync(FIXTURE, clone, { recursive: true });
+      git(clone, 'init', '--initial-branch=main');
+      git(clone, 'config', 'user.name', 'Test');
+      git(clone, 'config', 'user.email', 'test@example.com');
+      git(clone, 'add', '-A');
+      git(clone, 'commit', '-m', 'one');
+      return {
+        dir: clone,
+        dispose: () => fs.rmSync(clone, { recursive: true, force: true }),
+        fetchCommit: async (commit) => {
+          fetched.push(commit);
+          return true;
+        },
+      };
+    });
+    let world: { commit?: string | null } | undefined;
+    generateImpl = async (repoRoot, options) => {
+      world = options?.productWorld;
+      // A moved test's session diffs against the commit the test was accepted on.
+      expect(await options?.productWorld?.fetchCommit?.('old111')).toBe(true);
+      const tests = [record('see-invoices', 'old111'), record('export-invoices', 'old111')];
+      fs.mkdirSync(flowTestsDir(repoRoot), { recursive: true });
+      fs.writeFileSync(flowTestsIndexPath(repoRoot), JSON.stringify({ version: 1, generatedAt: '2026-03-05T00:00:00.000Z', tests }, null, 2) + '\n');
+      for (const test of tests) fs.writeFileSync(path.join(flowTestsDir(repoRoot), test.file!), `// ${test.flowId}\n`);
+      fs.mkdirSync(path.join(repoRoot, moved), { recursive: true });
+      fs.writeFileSync(path.join(repoRoot, moved, 'step-1.png'), PICTURE);
+      writeCloneGuardResult(repoRoot, { ...okReport([]), generatedAt: '2026-03-05T00:00:00Z' });
+      const results = [
+        // Held: the rerun, with no evidence of its own.
+        { flowId: 'see-invoices', file: 'see-invoices.spec.ts', authored: 'passing' as const, outcome: 'pass' as const, run: { ranAt: '2026-03-05T00:00:00Z', durationMs: 800, steps: [], commit: world?.commit ?? undefined } },
+        // Moved, and no session settled it: the rerun disagrees with the record.
+        { flowId: 'export-invoices', file: 'export-invoices.spec.ts', authored: 'passing' as const, outcome: 'fail' as const, run: { ranAt: '2026-03-05T00:00:00Z', durationMs: 900, steps: [], error: 'no export', evidencePath: moved } },
+      ];
+      return {
+        guard: { ...okReport([]), flows: { settled: 0, total: 0 } },
+        flowTests: {
+          status: 'ok',
+          tests,
+          authored: 1,
+          unsettled: [{ flowId: 'export-invoices', reason: 'budget exhausted' }],
+          run: { runId: STAGE_RUN, ranAt: '2026-03-05T00:00:00Z', results },
+          moved: [{ flowId: 'export-invoices', reason: 'moved', signature: 'no export', settled: 'unsettled' }],
+          judged: { read: 0, flagged: 0, unavailable: 0 },
+          spent: { sessions: 1, turns: 3, tokens: 100, costUsd: 0 },
+        },
+        flowTestRun: {
+          run: { runId: STAGE_RUN, ranAt: '2026-03-05T00:00:00Z', branch: 'main', commit: world?.commit ?? null, recipeFingerprint: 'product-world' },
+          summary: { total: 2, pass: 1, fail: 1, stale: 0, orphaned: 0, error: 0, blocked: 0 },
+          scenarios: [],
+          flowTests: results,
+        },
+      } as unknown as Awaited<ReturnType<GenerateEngine>>;
+    };
+    generateLlm = { mode: 'claude-code', driver: () => forbiddenDriver('generation is stubbed in this test') };
+    await saveSetupBundle();
+
+    await jobs.enqueueGuardGenerate(request);
+    await Promise.all(running);
+
+    const [job] = await jobsOfType('repo.guard-generate');
+    expect(job?.error).toBeNull();
+    expect(job).toMatchObject({ status: 'succeeded', result: { status: 'tests-written', written: 2 } });
+    // The engine was told the commit it runs on, and how to reach an earlier one.
+    const baseline = await readGuardBaselineCommit(REPO);
+    expect(world?.commit).toBe(baseline);
+    expect(fetched).toEqual(['old111']);
+
+    // The tests are the set; how they ran here is a run of this commit.
+    expect(await readScenarioFile(REPO, '.truecourse/scenarios/tests/tests.json')).toContain('"export-invoices"');
+    const latest = await readGuardLatest(REPO);
+    expect(latest?.run).toMatchObject({ runId: STAGE_RUN, commit: baseline, origin: 'hosted' });
+    expect(latest?.flowTests?.map((t) => [t.flowId, t.authored, t.outcome])).toEqual([
+      ['see-invoices', 'passing', 'pass'],
+      ['export-invoices', 'passing', 'fail'],
+    ]);
+    // The run is a point of Home's trend: its coverage is recorded with it.
+    expect(await readGuardRunCoverage(REPO)).toMatchObject([{ runId: STAGE_RUN, claims: {} }]);
+    expect(await new PgGuardStore(db).readGuardEvidenceBytesAt(REPO, moved, 'step-1.png')).toEqual(PICTURE);
+
+    const notes = await new NotificationStore(db).listForOrg(ORG);
+    expect(notes.map((n) => [n.level, n.title, n.body])).toEqual([
+      ['success', 'Flow tests written', '2 tests for 2 flows: 2 passing, 0 failing, 0 blocked, 1 unsettled.'],
+    ]);
+    // Running stored tests is not a link of this chain.
+    expect(enqueued).toEqual(['repo.guard-generate']);
+  }, 60_000);
+
   it('chains the baseline run once the scenario set is stored', async () => {
     await saveSetupBundle();
 
@@ -1088,7 +1188,7 @@ describe('the guard generate job', () => {
     generateImpl = async (repoRoot, options) => {
       const result = await authoring(repoRoot, options);
       const report = JSON.parse(fs.readFileSync(path.join(repoRoot, '.truecourse', 'guard', 'result.json'), 'utf-8')) as GuardGenerateReport;
-      report.coverageGaps = [{ doc: 'docs/orgs.md', anchor: 'create', kind: 'no-interface', reason: output }];
+      report.coverageGaps = [{ flowId: 'create-an-org', kind: 'no-interface', reason: output }];
       report.birthFindings[0].stdout = output;
       fs.writeFileSync(path.join(repoRoot, report.birthFindings[0].evidencePath!, 'transcript.txt'), output);
       writeCloneGuardResult(repoRoot, report);
@@ -1211,8 +1311,7 @@ describe('the guard generate job', () => {
         'title: create an org',
         'binds:',
         '  - doc: docs/orgs.md',
-        '    section: create',
-        '    fingerprint: "sha256:x"',
+        '    sentences: [create]',
         'steps:',
         '  - run: ["--help"]',
         '    expect:',
@@ -1269,9 +1368,9 @@ describe('the guard generate job', () => {
     expect(enqueued).toEqual(['repo.guard-generate']);
   }, 60_000);
 
-  it('saves partial extraction results but fails the job and Activity without chaining', async () => {
+  it('saves a report naming the claims the documents no longer hold, and still chains the run', async () => {
     await saveSetupBundle();
-    const extractionFailures = [{ doc: 'docs/app.md', reason: 'outcome failed schema: invalid web verification method' }];
+    const extractionFailures = [{ doc: 'docs/app.md', reason: '"Amounts are stored as integers" is read from 1 sentence the document no longer holds' }];
     generateImpl = async (repoRoot, options) => {
       const result = await authoring(repoRoot, options);
       writeCloneGuardResult(repoRoot, {
@@ -1283,28 +1382,15 @@ describe('the guard generate job', () => {
     await jobs.enqueueGuardGenerate(request);
     await Promise.all(running);
 
+    // A claim the repository's document no longer states is reported, not a
+    // failed generate: the flows the other claims gave are real coverage.
     const [job] = await jobsOfType('repo.guard-generate');
-    expect(job).toMatchObject({ status: 'failed', error: expect.stringContaining('Claim extraction failed for docs/app.md') });
-    expect(job.error).toContain('Partial results were saved');
+    expect(job).toMatchObject({ status: 'succeeded', error: null });
     const baseline = await readGuardBaselineCommit(REPO);
     expect(baseline).toMatch(/^[0-9a-f]{40}$/);
     expect(await readGuardResult(REPO, { commitSha: baseline! })).toMatchObject({ extractionFailures });
     expect((await loadScenarios({ repoKey: REPO, commitSha: baseline! })).scenarios.map(s => s.id)).toEqual(['a1']);
-    const [run] = await listStoredSessionRuns(REPO, 'guard-generate');
-    expect(run).toMatchObject({
-      status: 'failed', error: { message: job.error },
-      display: { blocks: expect.arrayContaining([expect.objectContaining({
-        kind: 'checklist', items: expect.arrayContaining([expect.objectContaining({ key: 'extract', status: 'error' })]),
-      })]) },
-    });
-    const opened = await openStoredSessionRun(REPO, 'guard-generate', run.runId);
-    expect(opened?.record()).toMatchObject({ status: 'failed', error: { message: job.error } });
-    const notes = await new NotificationStore(db).listForOrg(ORG);
-    expect(notes).toHaveLength(1);
-    expect(notes[0]).toMatchObject({ level: 'error', title: 'Flow generation failed', body: expect.stringContaining('docs/app.md') });
-    // The moved row keeps what the started row addressed.
-    expect(notes[0]?.data).toMatchObject({ repoFullName: REPO, runId: run.runId });
-    expect(enqueued).toEqual(['repo.guard-generate']);
+    expect(enqueued).toEqual(['repo.guard-generate', 'repo.guard-run']);
     expect(disposed).toEqual([clone]);
   }, 60_000);
 
@@ -1465,19 +1551,14 @@ describe('the guard run job', () => {
         id: 'a1',
         title: 'create an org',
         doc: 'docs/orgs.md',
-        anchor: 'create',
         file: '.truecourse/scenarios/orgs/a1.yaml',
         status: 'passing',
       },
     ],
     birthFindings: [],
-    sectionsTotal: 1,
-    sectionsChanged: 1,
-    skippedUnchanged: 0,
     coverageGaps: [],
     errors: [],
     extractionFailures: [],
-    orphaned: [],
   });
 
   /** The snapshot a run leaves: one scenario, failed, with an evidence bundle. */
@@ -1488,14 +1569,13 @@ describe('the guard run job', () => {
       {
         id: 'a1',
         title: 'create an org',
-        binds: { doc: 'docs/orgs.md', section: 'create', fingerprint: 'sha256:x' },
+        binds: { doc: 'docs/orgs.md', sentences: ['create'] },
         outcome: 'fail',
         durationMs: 12,
         failure: { step: 1, expected: 'exit 0', actual: 'exit 1' },
         evidencePath,
       },
     ],
-    sections: [],
   });
 
   /** A runner that records what it saw, leaves an evidence bundle, and reports one red. */
@@ -1554,22 +1634,17 @@ describe('the guard run job', () => {
   }
 
   /** The bind a stored scenario carries — the default is inert; the binding
-   *  tests pass the document they seeded and the section it really holds. */
-  interface StoredBind {
-    doc: string;
-    section: string;
-    fingerprint: string;
-  }
-  const DEFAULT_BIND: StoredBind = { doc: 'docs/orgs.md', section: 'create', fingerprint: 'sha256:x' };
+   *  tests pass the document they seeded and the sentences it really holds. */
+  const DEFAULT_BIND: GuardBinds = { doc: 'docs/orgs.md', sentences: ['sentence:create'] };
 
   /** What generate left: a stored scenario set and its baseline report. */
-  async function storeGeneratedSet(bind: StoredBind = DEFAULT_BIND): Promise<void> {
+  async function storeGeneratedSet(bind: GuardBinds = DEFAULT_BIND): Promise<void> {
     const dir = makeTmpDir('tc-onboarding-run-set-');
     const orgs = path.join(scenariosDir(dir), 'orgs');
     fs.mkdirSync(orgs, { recursive: true });
     fs.writeFileSync(
       path.join(orgs, 'a1.yaml'),
-      ['id: a1', 'title: create an org', 'binds:', `  - doc: ${bind.doc}`, `    section: ${bind.section}`, `    fingerprint: "${bind.fingerprint}"`, 'steps:', '  - run: ["--help"]', '    expect:', '      exit: 0', ''].join('\n'),
+      ['id: a1', 'title: create an org', 'binds:', `  - doc: ${bind.doc}`, `    sentences: [${bind.sentences.map((s) => JSON.stringify(s)).join(', ')}]`, 'steps:', '  - run: ["--help"]', '    expect:', '      exit: 0', ''].join('\n'),
     );
     fs.writeFileSync(manifestPath(dir), JSON.stringify({ version: GUARD_FORMAT_VERSION, flows: [] }, null, 2) + '\n');
     const ref = { repoKey: REPO, commitSha: GEN_COMMIT };
@@ -1583,9 +1658,15 @@ describe('the guard run job', () => {
       { '.truecourse/scenarios/recipe.json': JSON.stringify(RECIPE, null, 2) + '\n' },
     );
 
+  type FlowTestsEngine = NonNullable<RepoGuardRunTaskDeps['runFlowTests']>;
+  let flowTestsImpl: FlowTestsEngine;
+
   beforeEach(async () => {
     seen = [];
     runImpl = failingRun;
+    flowTestsImpl = async () => {
+      throw new Error('a set with no flow tests never runs them');
+    };
     installWorkTree();
     jobs = createServerJobs({
       db,
@@ -1595,9 +1676,171 @@ describe('the guard run job', () => {
       guardRun: {
         startLlm: async () => testLlm,
         runGuard: (repoRoot, options) => runImpl(repoRoot, options),
+        runFlowTests: (repoRoot, options) => flowTestsImpl(repoRoot, options),
       },
     });
     await jobs.start();
+  });
+
+  describe('over a set that carries flow tests', () => {
+    const FLOW_RUN_ID = '2026-03-04T00-00-00Z_flows1';
+    const INDEX: FlowTestsFile = {
+      version: 1,
+      generatedAt: '2026-02-02T00:00:00.000Z',
+      tests: [
+        {
+          flowId: 'see-invoices',
+          flowFingerprint: 'fp-see',
+          status: 'passing',
+          file: 'see-invoices.spec.ts',
+          seed: 'see-invoices.seed.ts',
+          summary: 'The invoices page lists invoices.',
+          run: { ranAt: '2026-02-02T00:00:00.000Z', durationMs: 900, steps: [] },
+        },
+        {
+          flowId: 'export-invoices',
+          flowFingerprint: 'fp-export',
+          status: 'failing',
+          file: 'export-invoices.spec.ts',
+          summary: 'The invoices page has no export.',
+          disagreement: { documented: 'billing.md: an export', observed: 'no export control' },
+          run: { ranAt: '2026-02-02T00:00:00.000Z', durationMs: 700, steps: [] },
+        },
+      ],
+    };
+    const WORLD_SCRIPTS = {
+      '.truecourse/world/build.sh': 'echo build\n',
+      '.truecourse/world/up.sh': 'echo up\n',
+      '.truecourse/world/down.sh': 'echo down\n',
+    };
+
+    /** What a product-world generate left: a set of flow tests and nothing else. */
+    async function storeFlowTestSet(): Promise<void> {
+      const dir = makeTmpDir('tc-onboarding-flow-set-');
+      fs.mkdirSync(flowTestsDir(dir), { recursive: true });
+      fs.writeFileSync(flowTestsIndexPath(dir), JSON.stringify(INDEX, null, 2) + '\n');
+      fs.writeFileSync(path.join(flowTestsDir(dir), 'see-invoices.spec.ts'), '// see invoices\n');
+      fs.writeFileSync(path.join(flowTestsDir(dir), 'see-invoices.seed.ts'), '// its seed\n');
+      fs.writeFileSync(path.join(flowTestsDir(dir), 'export-invoices.spec.ts'), '// export invoices\n');
+      const ref = { repoKey: REPO, commitSha: GEN_COMMIT };
+      await saveScenarios(ref, scenariosDir(dir));
+      await writeGuardResult(ref, okReport());
+      await saveGuardSetupBundle({ repoKey: REPO, commitSha: 'setup-commit' }, WORLD_SCRIPTS);
+    }
+
+    /** The run of those tests: the authored-passing one now fails, the authored-failing one passes. */
+    const flowRun = (evidencePath: string): GuardLatest => ({
+      run: { runId: FLOW_RUN_ID, ranAt: '2026-03-04T00:00:00Z', branch: 'main', commit: null, recipeFingerprint: 'product-world' },
+      summary: { total: 2, pass: 1, fail: 1, stale: 0, orphaned: 0, error: 0, blocked: 0 },
+      scenarios: [],
+      flowTests: [
+        {
+          flowId: 'see-invoices',
+          file: 'see-invoices.spec.ts',
+          authored: 'passing',
+          outcome: 'fail',
+          run: {
+            ranAt: '2026-03-04T00:00:00Z',
+            durationMs: 1200,
+            steps: [{ order: 1, title: 'open invoices', outcome: 'failed', error: 'no heading' }],
+            error: 'no heading',
+            evidencePath,
+          },
+        },
+        {
+          flowId: 'export-invoices',
+          file: 'export-invoices.spec.ts',
+          authored: 'failing',
+          outcome: 'pass',
+          run: { ranAt: '2026-03-04T00:00:00Z', durationMs: 800, steps: [] },
+        },
+      ],
+    });
+
+    it('runs the stored tests instead of scenarios, and stores the run beside what authoring recorded', async () => {
+      await storeFlowTestSet();
+      const found: { files: Record<string, boolean>; worldKey?: string }[] = [];
+      flowTestsImpl = async (repoRoot, options) => {
+        found.push({
+          worldKey: options.worldKey,
+          files: Object.fromEntries(
+            [
+              flowTestsIndexPath(repoRoot),
+              path.join(flowTestsDir(repoRoot), 'see-invoices.spec.ts'),
+              path.join(flowTestsDir(repoRoot), 'see-invoices.seed.ts'),
+              path.join(flowTestsDir(repoRoot), 'export-invoices.spec.ts'),
+              worldScriptPath(repoRoot, 'build'),
+              worldScriptPath(repoRoot, 'up'),
+              worldScriptPath(repoRoot, 'down'),
+            ].map((file) => [path.relative(repoRoot, file), fs.existsSync(file)]),
+          ),
+        });
+        const evidencePath = `.truecourse/guard/evidence/${FLOW_RUN_ID}/see-invoices`;
+        fs.mkdirSync(path.join(repoRoot, evidencePath), { recursive: true });
+        fs.writeFileSync(path.join(repoRoot, evidencePath, 'step-1.png'), PNG);
+        return { status: 'ok', latest: flowRun(evidencePath) };
+      };
+
+      await jobs.enqueueGuardRun(request);
+      await Promise.all(running);
+
+      // The scenario runner was never asked; the tests found everything they need in the clone.
+      expect(seen).toEqual([]);
+      expect(found).toHaveLength(1);
+      expect(found[0]?.worldKey).toBe(`${ORG}/${REPO}`);
+      expect(Object.values(found[0]?.files ?? {})).toEqual([true, true, true, true, true, true, true]);
+
+      const [job] = await jobsOfType('repo.guard-run');
+      expect(job?.error).toBeNull();
+      expect(job).toMatchObject({
+        status: 'succeeded',
+        result: {
+          runId: FLOW_RUN_ID,
+          flowTests: { run: 2, passed: 1, failed: 1, seedFailed: 0, skipped: 0, nowFailing: 1, nowPassing: 1 },
+        },
+      });
+
+      // The run is stored as a run of its own, with each test's outcome and evidence.
+      const latest = await readGuardLatest(REPO);
+      expect(latest?.run).toMatchObject({ runId: FLOW_RUN_ID, origin: 'hosted' });
+      expect(latest?.flowTests?.map((t) => [t.flowId, t.authored, t.outcome])).toEqual([
+        ['see-invoices', 'passing', 'fail'],
+        ['export-invoices', 'failing', 'pass'],
+      ]);
+      const store = new PgGuardStore(db);
+      const dir = `.truecourse/guard/evidence/${FLOW_RUN_ID}/see-invoices`;
+      expect(await store.readGuardEvidenceBytesAt(REPO, dir, 'step-1.png')).toEqual(PNG);
+
+      // What authoring recorded is untouched: no new set, and the index is the one stored.
+      expect(await listGuardVersions(REPO, 'scenarios')).toHaveLength(1);
+      expect(await readScenarioFile(REPO, '.truecourse/scenarios/tests/tests.json')).toBe(JSON.stringify(INDEX, null, 2) + '\n');
+
+      const notes = await new NotificationStore(db).listForOrg(ORG);
+      expect(notes.map((n) => [n.level, n.title, n.body])).toEqual([
+        [
+          'warning',
+          'Flow tests ran, failures to review',
+          '1 of 2 passed, 1 failed, 0 seed failed. 1 now failing, 1 now passing against how they were written.',
+        ],
+      ]);
+    }, 60_000);
+
+    it('fails with what the world script printed when the product does not come up, and stores nothing', async () => {
+      await storeFlowTestSet();
+      flowTestsImpl = async () => ({
+        status: 'world-failed',
+        stage: 'build',
+        reason: 'world/build.sh exited 127:\npnpm: command not found',
+      });
+
+      await jobs.enqueueGuardRun(request);
+      await Promise.all(running);
+
+      const [job] = await jobsOfType('repo.guard-run');
+      expect(job).toMatchObject({ status: 'failed' });
+      expect(job?.error).toBe('The product did not come up (build): world/build.sh exited 127:\npnpm: command not found');
+      expect(await readGuardLatest(REPO)).toBeNull();
+    });
   });
 
   it('refuses a repository with no generated scenarios, and stores nothing', async () => {
@@ -1715,12 +1958,13 @@ describe('the guard run job', () => {
   // is not there, and the whole board settles orphaned without a build.
   const DOC_PATH = 'docs/orgs.md';
 
-  /** The section the seeded document really holds, as the runner derives it. */
-  function seededBind(): StoredBind {
+  /** A bind to the sentences of the seeded document's first section. */
+  function seededBind(): GuardBinds {
     const doc = contextRef(DOC_PATH);
-    const section = buildDocSectionIndex(doc, contextDocBody(DOC_PATH)).sections[0];
+    const tree = parseDocTree(doc, contextDocBody(DOC_PATH));
+    const section = tree.sections[0];
     if (!section) throw new Error(`the seeded ${doc} holds no section to bind to`);
-    return { doc, section: section.anchor, fingerprint: section.fingerprint };
+    return sectionBind(tree, section.anchor);
   }
 
   it('materializes the document the scenario binds to into the clone', async () => {
@@ -1753,13 +1997,9 @@ describe('the guard run job', () => {
     const resolved: { missing?: string[]; kind?: string } = {};
     runImpl = async (repoRoot, options) => {
       // The runner's own binding pass, over the clone the job prepared.
-      const docs = indexRepoDocs(repoRoot, [bind.doc]);
+      const docs = readRepoDocTrees(repoRoot, [bind.doc]);
       resolved.missing = [...docs.missing];
-      resolved.kind = resolveBinding(
-        docs.indexes.get(bind.doc) ?? null,
-        bind.section,
-        bind.fingerprint,
-      ).kind;
+      resolved.kind = resolveBinding(docs.trees.get(bind.doc) ?? null, bind).kind;
       return failingRun(repoRoot, options);
     };
 
@@ -1778,8 +2018,9 @@ describe('the guard run job', () => {
     const docPath = 'docs/orgs.md';
     const docRef = contextRef(docPath);
     const original = '# Widgets\n\n## Help\nThe command prints help.\n';
-    const section = buildDocSectionIndex(docRef, original).sections.find((s) => s.headingText === 'Help')!;
-    await storeGeneratedSet({ doc: docRef, section: section.anchor, fingerprint: section.fingerprint });
+    const tree = parseDocTree(docRef, original);
+    const section = tree.sections.find((s) => s.headingText === 'Help')!;
+    await storeGeneratedSet(sectionBind(tree, section.anchor));
     await seedWorkspaceSpec(document === 'missing' ? [] : [docPath]);
     if (document !== 'missing') {
       await writeContextDocuments(ORG, SOURCE_ID, {
@@ -1808,7 +2049,7 @@ describe('the guard run job', () => {
     expect(latest?.scenarios).toHaveLength(1);
     expect(latest?.scenarios[0]).toMatchObject({
       id: 'a1', outcome: expected,
-      binds: { doc: docRef, section: section.anchor, fingerprint: section.fingerprint },
+      binds: sectionBind(tree, section.anchor),
     });
     if (expected === 'pass') {
       expect(latest?.scenarios[0].evidencePath).toBeTruthy();

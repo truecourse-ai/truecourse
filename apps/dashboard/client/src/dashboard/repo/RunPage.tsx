@@ -2,7 +2,8 @@
  * One run, as its own page (`/runs/:runId`): the breadcrumb back to Runs, the
  * run's facts on one line, then its results (the list, the tab strip, the
  * opened result's detail), over the server's snapshot of the run the address
- * names.
+ * names. A run of the stored flow tests has no scenario, so its results are its
+ * tests, one per flow, each opened by its flow id.
  */
 
 import { useMemo } from 'react';
@@ -13,6 +14,8 @@ import { CHIP_CLASS, PageHeader } from '@/dashboard/ui/bits';
 import { CollapsibleAside } from '@/dashboard/ui/collapsible-aside';
 import { GuardDriftDetail } from '@/components/guard/GuardDriftDetail';
 import { GuardDriftList } from '@/components/guard/GuardDriftList';
+import { GuardFlowTestRunDetail } from '@/components/guard/GuardFlowTestRunDetail';
+import { GuardFlowTestRunList } from '@/components/guard/GuardFlowTestRunList';
 import { useGuardTabs } from '@/hooks/useGuardTabs';
 import { useGuardView } from '@/hooks/useGuardView';
 import { formatGuardDuration, formatGuardTime, guardRunRef, orderGuardDrifts } from '@/lib/guard-drifts';
@@ -23,7 +26,7 @@ import { useGuardRun } from './use-guard-run';
 
 export function RunPage({ repo, runId }: { repo: Repo; runId: string }) {
   useGuardTabJump();
-  const { openSpecSection, openGuardFlow } = useGuardView();
+  const { openSpecDoc, openGuardFlow } = useGuardView();
   const { run: shown, loading, error } = useGuardRun(repo.id, runId);
 
   const { activeId, open } = useGuardTabs('result', repo.id);
@@ -31,10 +34,15 @@ export function RunPage({ repo, runId }: { repo: Repo; runId: string }) {
   const passed = useMemo(() => (shown?.scenarios ?? []).filter((s) => s.outcome === 'pass'), [shown]);
   const byId = useMemo(() => new Map((shown?.scenarios ?? []).map((s) => [s.id, s])), [shown]);
   const active = activeId ? byId.get(activeId) ?? null : null;
+  const flowTests = shown?.flowTests ?? [];
+  const activeTest = activeId ? flowTests.find((t) => t.flowId === activeId) ?? null : null;
+  const runFlows = shown?.runFlows ?? [];
 
   const env = shown?.run;
   const verdict = shown && guardSummaryFailed(shown.summary) ? 'fail' : 'pass';
-  const totalMs = (shown?.scenarios ?? []).reduce((n, s) => n + s.durationMs, 0);
+  const totalMs =
+    (shown?.scenarios ?? []).reduce((n, s) => n + s.durationMs, 0) +
+    flowTests.reduce((n, t) => n + t.run.durationMs, 0);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -77,25 +85,45 @@ export function RunPage({ repo, runId }: { repo: Repo; runId: string }) {
       ) : (
         <div className="flex min-h-0 flex-1">
           <CollapsibleAside label="Results" defaultWidth={360}>
-            <GuardDriftList
-              key={shown.run.runId}
-              drifts={drifts}
-              passed={passed}
-              activeId={activeId}
-              onPreview={(id) => open(id, true)}
-              onPin={(id) => open(id, true)}
-            />
+            {flowTests.length > 0 ? (
+              <GuardFlowTestRunList
+                key={shown.run.runId}
+                results={flowTests}
+                runFlows={runFlows}
+                activeId={activeId}
+                onPreview={(id) => open(id, true)}
+                onPin={(id) => open(id, true)}
+              />
+            ) : (
+              <GuardDriftList
+                key={shown.run.runId}
+                drifts={drifts}
+                passed={passed}
+                activeId={activeId}
+                onPreview={(id) => open(id, true)}
+                onPin={(id) => open(id, true)}
+              />
+            )}
           </CollapsibleAside>
           <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
             <div className="relative min-h-0 flex-1 overflow-hidden">
-              {active ? (
+              {activeTest ? (
+                <GuardFlowTestRunDetail
+                  key={`${shown.run.runId} ${activeTest.flowId}`}
+                  repoId={repo.id}
+                  result={activeTest}
+                  runId={shown.run.runId}
+                  runFlow={runFlows.find((f) => f.flowId === activeTest.flowId) ?? null}
+                  onOpenFlow={openGuardFlow}
+                />
+              ) : active ? (
                 <GuardDriftDetail
                   key={`${shown.run.runId} ${active.id}`}
                   repoId={repo.id}
                   scenario={active}
                   runId={shown.run.runId}
-                  runFlow={(shown.runFlows ?? []).find((f) => f.flowId === active.flowId) ?? null}
-                  onOpenSpec={openSpecSection}
+                  runFlow={runFlows.find((f) => f.flowId === active.flowId) ?? null}
+                  onOpenSpec={openSpecDoc}
                   onOpenFlow={openGuardFlow}
                 />
               ) : (

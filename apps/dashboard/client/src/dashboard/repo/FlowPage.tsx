@@ -40,7 +40,7 @@ export function FlowPage({ repo, flowId }: { repo: Repo; flowId: string }) {
   const claims = useGuardClaims(repo.id, true, reloadKey);
   const tests = useGuardScenarios(repo.id, true, reloadKey);
   const urlTabs = useGuardFlowTabs(repo.id);
-  const { openSpecSection, openGuardInterface, openGuardExternals } = useGuardView();
+  const { openSpecDoc, openGuardInterface, openGuardExternals } = useGuardView();
 
   const flow = flows.view?.flows.find((f) => f.flowId === flowId) ?? null;
 
@@ -86,7 +86,7 @@ export function FlowPage({ repo, flowId }: { repo: Repo; flowId: string }) {
           binds={binds}
           reloadKey={flowsKey}
           decisions={decisions}
-          onOpenSpec={openSpecSection}
+          onOpenSpec={openSpecDoc}
           onOpenInterface={openGuardInterface}
           onOpenExternals={openGuardExternals}
         />

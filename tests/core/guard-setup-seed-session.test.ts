@@ -22,10 +22,8 @@ import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
 import type { SessionEvent, SessionRunInput } from '../../packages/agent-loop/src/index';
 import {
-  computeRecipeFingerprint,
   guardWorldDirtyMarkerPath,
   loadRecipe,
   recipePath,
@@ -34,15 +32,12 @@ import {
 import {
   collectProbeCandidates,
   computeSeedStepFingerprint,
-  legacyRecipeStepFingerprint,
-  legacySeedStepFingerprint,
   runGuardSetup,
   type GuardSetupOptions,
   type GuardSetupSeedSessionInput,
   type SeedDraftDatabase,
   SeedProvidesProposalSchema,
 } from '@truecourse/guard-generator';
-import { FINGERPRINT_INPUTS } from '@truecourse/guard-runner';
 import {
   buildSeedSession,
   existingSeedMachinery,
@@ -2263,41 +2258,7 @@ describe('runGuardSetup — the seed step honors confirmSeedReplace', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Root-cause cleanup: one FINGERPRINT_INPUTS list
-// ---------------------------------------------------------------------------
-
-describe('legacyRecipeStepFingerprint', () => {
-  // The recipe step's OLD subject, kept as the one check a row written before
-  // the needs got. `FINGERPRINT_INPUTS` used to be mirrored privately in two
-  // packages; it is exported now, and this pins that the legacy value really
-  // hashes THAT list — path-tagged, present files only, and never the recipe
-  // (whose own edits were never the step's subject).
-  it('is the runner’s own input list, hashed directly', () => {
-    const r = fixtureRepo();
-    writeRecipe(r);
-    fs.writeFileSync(path.join(r, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
-
-    const expected = createHash('sha256');
-    for (const rel of FINGERPRINT_INPUTS) {
-      const abs = path.join(r, rel);
-      if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) continue;
-      expected.update(rel);
-      expected.update('\0');
-      expected.update(fs.readFileSync(abs));
-      expected.update('\0');
-    }
-
-    expect(legacyRecipeStepFingerprint(r)).toBe(expected.digest('hex'));
-    // The recipe is folded by `computeRecipeFingerprint`, never here.
-    const before = legacyRecipeStepFingerprint(r);
-    writeRecipe(r, { readyTimeoutMs: 9000 });
-    expect(legacyRecipeStepFingerprint(r)).toBe(before);
-    expect(computeRecipeFingerprint(r)).not.toBe(before);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// The seed step's key, and the one it had
+// The seed step's key
 // ---------------------------------------------------------------------------
 
 describe('the seed step key', () => {
@@ -2306,11 +2267,9 @@ describe('the seed step key', () => {
     writeRecipe(r);
     const before = computeSeedStepFingerprint(r, []);
 
-    // A dependency bump moves the recipe fingerprint, so it moves the OLD key.
     // The step reads neither the manifests nor a dependency version.
     fs.writeFileSync(path.join(r, 'package.json'), JSON.stringify({ name: 'tmp', version: '9.9.9' }));
     expect(computeSeedStepFingerprint(r, [])).toBe(before);
-    expect(legacySeedStepFingerprint(r)).not.toBe(before);
 
     // A recipe edit is the contract moving, and the step re-opens on it.
     writeRecipe(r, { readyTimeoutMs: 9000 });

@@ -122,6 +122,8 @@ export interface WorkspaceContextScanOptions {
   tracker?: CurateInProcessOptions['tracker'];
   driver?: CurateInProcessOptions['driver'];
   transportMode?: CurateInProcessOptions['transportMode'];
+  /** The driver can hand a session a computer; see `CurateInProcessOptions.computer`. */
+  computer?: boolean;
   signal?: AbortSignal;
   onRunStarted?: CurateInProcessOptions['onRunStarted'];
   concurrency?: number;
@@ -202,6 +204,7 @@ export async function workspaceContextScanInProcess(
         ...(options.tracker ? { tracker: options.tracker } : {}),
         ...(options.driver ? { driver: options.driver } : {}),
         ...(options.transportMode ? { transportMode: options.transportMode } : {}),
+        ...(options.computer ? { computer: true } : {}),
         ...(options.signal ? { signal: options.signal } : {}),
         ...(options.concurrency !== undefined ? { concurrency: options.concurrency } : {}),
         onRunStarted: (info) => {
@@ -223,6 +226,7 @@ export async function workspaceContextScanInProcess(
       };
       const target = pullRequest ? { workspaceOrgId: org, scope: pullRequest.scope } : ref;
       await saveWorkspaceSpec(target, 'corpus', corpus, provenance);
+      await saveWorkspaceSpec(target, 'claims', curate.claims, provenance);
       if (!pullRequest) await saveWorkspaceSpec(ref, 'decisions', curate.decisions);
       await saveWorkspaceSpecDocs(target, snapshotBodies(corpus, materialized.bodies), provenance);
       await closeRun(org, runId, options.signal?.aborted ? 'interrupted' : 'completed');

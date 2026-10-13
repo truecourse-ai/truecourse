@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import request from 'supertest';
+import { claimId } from '@truecourse/shared';
+import { writeGuardClaims } from '@truecourse/guard-runner';
 import { type Express } from 'express';
 
 /**
@@ -76,8 +78,8 @@ describe('Guard action routes', () => {
   const writeJson = (rel: string, obj: unknown) => write(rel, JSON.stringify(obj, null, 2));
   const url = (suffix: string) => `/api/repos/${fixture.project.slug}/guard/${suffix}`;
 
-  // A corpus with one doc + the doc on disk, and NO scenarios manifest → every
-  // section is "changed", so the estimate carries stages (a non-trivial estimate).
+  // A corpus with one doc + the doc on disk, and NO scenarios manifest → the
+  // document is "changed", so the estimate carries stages (a non-trivial estimate).
   function seedCorpus(): void {
     writeJson('.truecourse/specs/corpus.json', {
       version: 3,
@@ -120,12 +122,12 @@ describe('Guard action routes', () => {
     expect(Array.isArray(res.body.estimate.stages)).toBe(true);
     expect(res.body.estimate.stages.length).toBeGreaterThan(0);
     expect(res.body.estimate.stages[0]).toMatchObject({ stage: expect.any(String), model: expect.any(String), calls: expect.any(Number) });
-    expect(res.body.estimate.subjectLabel).toMatch(/section/);
+    expect(res.body.estimate.subjectLabel).toMatch(/document/);
   });
 
   it('GET /guard/estimate has no stages when nothing changed (client skips the modal)', async () => {
     // A recipe already present (no discovery stage) + no corpus docs (no changed
-    // sections to extract/author) → every stage has zero calls → no stages.
+    // documents to extract/author) → every stage has zero calls → no stages.
     writeJson('.truecourse/scenarios/recipe.json', { build: 'echo build', entry: ['node', 'x.js'] });
     const res = await request(app).get(url('estimate')).expect(200);
     expect(res.body.estimate.stages ?? []).toEqual([]);
@@ -188,8 +190,8 @@ describe('Guard action routes', () => {
           title: 'Task lifecycle',
           goal: 'Create and complete a task',
           fingerprint: 'sha256:41ac',
-          milestones: [{ order: 1, doc: DOC, anchor: 'a', claimTitle: 'claim A' }],
-          bindings: [{ doc: DOC, anchor: 'a', fingerprint: 'sha256:a' }],
+          milestones: [{ order: 1, doc: DOC, claimId: claimId(DOC, ['a']), claimTitle: 'claim A', sentences: ['a'] }],
+          bindings: [{ doc: DOC, sentences: ['a'] }],
           composedOf: [],
           synthesisInputsHash: 'sha256:inputs',
         },
@@ -258,9 +260,9 @@ describe('Guard dismiss/undismiss routes (hosted store)', () => {
   let guardStore: PgGuardStore;
 
   const url = (suffix: string) => `/api/repos/${fixture.project.slug}/guard/${suffix}`;
-  const claimA = { doc: 'docs/cli.md', anchor: 'a', title: 'claim A' };
-  const claimB = { doc: 'docs/cli.md', anchor: 'b', title: 'claim B' };
-  const titles = (claims: Array<{ title: string }>) => claims.map((c) => c.title).sort();
+  const claimA = { claimId: 'claim::docs/cli.md::a' };
+  const claimB = { claimId: 'claim::docs/cli.md::b' };
+  const ids = (claims: Array<{ claimId: string }>) => claims.map((c) => c.claimId).sort();
 
   beforeEach(async () => {
     fixture = await setupTestFixture();
@@ -279,24 +281,24 @@ describe('Guard dismiss/undismiss routes (hosted store)', () => {
 
   it('POST /guard/dismiss writes the row and GET /guard/decisions reads it back', async () => {
     const res = await request(app).post(url('dismiss')).send(claimA).expect(200);
-    expect(titles(res.body.dismissedClaims)).toEqual(['claim A']);
+    expect(ids(res.body.dismissedClaims)).toEqual([claimA.claimId]);
     const read = await request(app).get(url('decisions')).expect(200);
-    expect(titles(read.body.dismissedClaims)).toEqual(['claim A']);
+    expect(ids(read.body.dismissedClaims)).toEqual([claimA.claimId]);
   });
 
   it('a second dismissal joins the same row', async () => {
     await request(app).post(url('dismiss')).send(claimA).expect(200);
     const res = await request(app).post(url('dismiss')).send(claimB).expect(200);
-    expect(titles(res.body.dismissedClaims)).toEqual(['claim A', 'claim B']);
+    expect(ids(res.body.dismissedClaims)).toEqual([claimA.claimId, claimB.claimId]);
   });
 
   it('POST /guard/undismiss removes only the named claim', async () => {
     await request(app).post(url('dismiss')).send(claimA).expect(200);
     await request(app).post(url('dismiss')).send(claimB).expect(200);
     const res = await request(app).post(url('undismiss')).send(claimA).expect(200);
-    expect(titles(res.body.dismissedClaims)).toEqual(['claim B']);
+    expect(ids(res.body.dismissedClaims)).toEqual([claimB.claimId]);
     const read = await request(app).get(url('decisions')).expect(200);
-    expect(titles(read.body.dismissedClaims)).toEqual(['claim B']);
+    expect(ids(read.body.dismissedClaims)).toEqual([claimB.claimId]);
   });
 
   it('POST /guard/flows/dismiss writes the flow tier of the same row', async () => {
@@ -314,8 +316,8 @@ describe('Guard dismiss/undismiss routes (hosted store)', () => {
               title: 'Task lifecycle',
               goal: 'Create and complete a task',
               fingerprint: 'sha256:41ac',
-              milestones: [{ order: 1, doc: 'docs/cli.md', anchor: 'a', claimTitle: 'claim A' }],
-              bindings: [{ doc: 'docs/cli.md', anchor: 'a', fingerprint: 'sha256:a' }],
+              milestones: [{ order: 1, doc: 'docs/cli.md', claimId: claimId('docs/cli.md', ['a']), claimTitle: 'claim A', sentences: ['a'] }],
+              bindings: [{ doc: 'docs/cli.md', sentences: ['a'] }],
               composedOf: [],
               synthesisInputsHash: 'sha256:inputs',
             },
@@ -351,43 +353,56 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
 
   const url = (suffix: string) => `/api/repos/${fixture.project.slug}/guard/${suffix}`;
 
-  // Two birth findings, each carrying its dismissible claim; dismiss keys on the
-  // claim text (the same `dismissedClaimKey` the coverage view derives "active" from).
-  const findingA = { doc: 'docs/cli.md', anchor: 'a', title: 'A scenario', claim: 'claim A' };
-  const findingB = { doc: 'docs/cli.md', anchor: 'b', title: 'B scenario', claim: 'claim B' };
+  // Two birth findings, each naming its dismissible claim; dismiss keys on that
+  // claim's id (the same join the coverage view derives "active" from).
+  const findingA = { doc: 'docs/cli.md', sentence: 'a', title: 'A scenario', claim: 'claim A' };
+  const findingB = { doc: 'docs/cli.md', sentence: 'b', title: 'B scenario', claim: 'claim B' };
+  /** The corpus's id for a finding's claim: what a dismissal names. */
+  const claimIdOf = (f: { doc: string; sentence: string }) => claimId(f.doc, [f.sentence]);
 
-  const report = (findings: Array<{ doc: string; anchor: string; title: string; claim?: string }>): GuardGenerateReport => ({
+  const report = (findings: Array<{ doc: string; sentence: string; title: string; claim?: string }>): GuardGenerateReport => ({
     generatedAt: '2026-01-01T00:00:00Z',
     status: 'ok',
-    sectionsTotal: 2,
-    sectionsChanged: 2,
-    skippedUnchanged: 0,
     noChanges: false,
     written: [],
     coverageGaps: [],
     birthFindings: findings.map((f) => ({
       doc: f.doc,
-      anchor: f.anchor,
       title: f.title,
       step: 1,
       expected: 'x',
       actual: 'y',
-      ...(f.claim ? { claim: f.claim } : {}),
+      ...(f.claim ? { claimId: claimIdOf(f), claim: f.claim } : {}),
     })),
     errors: [],
     extractionFailures: [],
-    orphaned: [],
   });
 
-  // Dismiss by the finding's CLAIM (dismiss's `title` is the extracted claim text).
-  const dismiss = (f: { doc: string; anchor: string; claim: string }) =>
-    request(app).post(url('dismiss')).send({ doc: f.doc, anchor: f.anchor, title: f.claim });
+  /** The claim corpus holding both findings' claims. */
+  const CORPUS = {
+    version: 1 as const,
+    generatedAt: '2026-01-01T00:00:00Z',
+    claims: [findingA, findingB].map((f) => ({
+      id: claimIdOf(f),
+      doc: f.doc,
+      sentences: [f.sentence],
+      subject: 'cli',
+      statement: f.claim,
+      areas: [],
+      testable: true as const,
+    })),
+  };
+  // Dismiss by the finding's CLAIM, as the corpus holds it.
+  const dismiss = (f: { doc: string; sentence: string }) =>
+    request(app).post(url('dismiss')).send({ claimId: claimIdOf(f) });
 
   beforeEach(async () => {
     installWorkTreeGuardStore();
     fixture = await setupTestFixture();
     root = fixture.repoPath;
     app = createTestApp();
+    // The claim corpus the findings resolve through.
+    writeGuardClaims(root, CORPUS);
     enqueue = vi.fn().mockResolvedValue(undefined);
     setGuardGenerateEnqueue(enqueue);
   });
@@ -411,7 +426,7 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
   });
 
   it('does not regenerate when a finding with no dismissible claim stays active', async () => {
-    // findingB has no `claim` → it can never be dismissed → always active.
+    // findingB names no claim → it can never be dismissed → always active.
     await writeGuardResult({ repoKey: root, commitSha: 'head' }, report([findingA, { ...findingB, claim: undefined }]));
     await dismiss(findingA).expect(200);
     expect(enqueue).not.toHaveBeenCalled();
@@ -419,7 +434,7 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
 
   it('does not regenerate when the report has no findings at all', async () => {
     await writeGuardResult({ repoKey: root, commitSha: 'head' }, report([]));
-    await request(app).post(url('dismiss')).send({ doc: 'docs/cli.md', anchor: 'z', title: 'stray' }).expect(200);
+    await request(app).post(url('dismiss')).send({ claimId: claimId('docs/cli.md', ['z']) }).expect(200);
     expect(enqueue).not.toHaveBeenCalled();
   });
 
@@ -428,7 +443,7 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
     await writeGuardResult({ repoKey: root, commitSha: 'head' }, report([findingA]));
     // The only finding is dismissed → the seam fires and throws, but the write is 200.
     const res = await dismiss(findingA).expect(200);
-    expect(res.body.dismissedClaims.map((c: { title: string }) => c.title)).toEqual(['claim A']);
+    expect(res.body.dismissedClaims.map((c: { claimId: string }) => c.claimId)).toEqual([claimIdOf(findingA)]);
     expect(enqueue).toHaveBeenCalledTimes(1);
   });
 
@@ -444,12 +459,14 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
   // report stored at another commit would shadow (masking the active findings).
   describe('hosted store — baseline-anchored report read', () => {
     let client: PGlite;
+    let store: PgGuardStore;
 
     beforeEach(async () => {
       client = new PGlite();
       const db = drizzle(client, { schema }) as unknown as Db;
       await migrate(db, { migrationsFolder: MIGRATIONS_DIR });
-      setGuardStore(new PgGuardStore(db));
+      store = new PgGuardStore(db);
+      setGuardStore(store);
     });
     afterEach(async () => {
       resetGuardStore();
@@ -457,8 +474,12 @@ describe('Guard dismiss → hosted auto-regenerate (repo scope)', () => {
     });
 
     it("a newer report in a pull request's scope never masks the repo's findings — the last dismissal still regenerates", async () => {
-      // The default branch's generate is the repo's anchor.
+      // The default branch's generate is the repo's anchor: its report, and the
+      // claim corpus its findings resolve through.
       await writeGuardResult({ repoKey: root, commitSha: 'basesha1111' }, report([findingA]));
+      const set = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-actions-'));
+      fs.writeFileSync(path.join(set, 'claims.json'), JSON.stringify(CORPUS));
+      await store.saveScenarios({ repoKey: root, commitSha: 'basesha1111' }, set);
       // A findings-free report stored under a pull request's scope — strictly
       // newer createdAt, so a scope-blind "newest" read would see zero findings and skip.
       await new Promise((r) => setTimeout(r, 5));

@@ -1044,6 +1044,37 @@ describe('createRunClone', () => {
     expect(fs.existsSync(clone.dir)).toBe(false);
   });
 
+  it('brings one more commit into the tree on request, with a fresh credential, and answers false when it cannot', async () => {
+    const { calls, run } = recordingGit();
+    const clone = await createRunClone(REPO, 'ghs_clone_token', {
+      workspaceOrgId: ORG,
+      defaultBranch: 'main',
+      freshToken: async () => 'ghs_later_token',
+      run,
+    });
+    calls.length = 0;
+
+    expect(await clone.fetchCommit?.('old111')).toBe(true);
+
+    const later = Buffer.from('x-access-token:ghs_later_token').toString('base64');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.cwd).toBe(clone.dir);
+    expect(calls[0]!.args.slice(-6)).toEqual(['fetch', '--quiet', '--depth', '1', 'origin', 'old111']);
+    expect(calls[0]!.args).toContain(`http.https://github.com/.extraheader=Authorization: Basic ${later}`);
+
+    // A commit the remote will not serve is not an error of the run's.
+    const failing = await createRunClone(REPO, 'ghs_clone_token', {
+      workspaceOrgId: ORG,
+      run: async (args) => {
+        if (args.includes('fetch')) throw new Error('fatal: remote error: upload-pack: not our ref');
+      },
+    });
+    expect(await failing.fetchCommit?.('gone999')).toBe(false);
+
+    clone.dispose();
+    failing.dispose();
+  });
+
   it('fetches ONE commit into an empty repository when pinned to it, with the token only on the fetch', async () => {
     const { calls, run } = recordingGit();
 

@@ -10,6 +10,7 @@
 export const CONTEXT_BASE = '/context';
 export const DOCUMENTS_BASE = `${CONTEXT_BASE}/documents`;
 export const CONFLICTS_BASE = `${CONTEXT_BASE}/conflicts`;
+export const CLAIMS_BASE = `${CONTEXT_BASE}/claims`;
 
 /** ONE source: its scope, the repositories that read it, and how it has synced. */
 export function sourceHref(sourceId: string): string {

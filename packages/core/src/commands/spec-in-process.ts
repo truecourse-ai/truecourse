@@ -6,7 +6,7 @@
  * The caller passes a `StepTracker` and we drive it through the high-level
  * phases:
  *
- *   curate         discover → tag areas → group → flag overlaps → corpus.json
+ *   curate         discover → tag areas → group → find conflicts → corpus.json
  *
  * Step keys + labels are a stable taxonomy the progress UI keys on.
  * Implementations of the actual pipelines come from
@@ -25,7 +25,7 @@ import {
   type RepoIdentity,
 } from '@truecourse/spec-consolidator';
 import type { LlmTransportMode } from '../services/llm/provider-config.js';
-import { openConflicts, resolutionDisputeKey } from '@truecourse/shared';
+import { openConflicts, resolutionConflictKey, verdictNamesOneSentence } from '@truecourse/shared';
 
 export type {
   DecisionsFile,
@@ -51,7 +51,10 @@ import {
   type DocOrigin,
 } from '../services/spec-scan/curate-doc.js';
 import { SETTLE_AREAS_SESSION_KIND } from '../services/spec-scan/settle-areas.js';
-import { OVERLAP_SESSION_KIND } from '../services/spec-scan/overlap.js';
+import { CORPUS_REVIEW_SESSION_KIND } from '../services/spec-scan/corpus-review.js';
+import { EXTRACT_CLAIMS_SESSION_KIND } from '../services/spec-scan/extract-claims.js';
+import { SETTLE_SUBJECTS_SESSION_KIND } from '../services/spec-scan/settle-subjects.js';
+import { COMPARE_CLAIMS_SESSION_KIND } from '../services/spec-scan/compare-claims.js';
 import {
   createStoredSessionRun,
   type CreateSessionRunOptions,
@@ -115,30 +118,46 @@ import { withEstimatePhase, type EstimatePhase, type StepTracker } from '../prog
 export const CURATE_STEPS = [
   { key: 'discover', label: 'Discovering docs' },
   { key: 'tag', label: 'Tagging doc areas' },
-  { key: 'overlap', label: 'Flagging overlaps' },
+  { key: 'record', label: 'Extracting claims' },
+  { key: 'subjects', label: 'Settling subjects' },
+  { key: 'compare', label: 'Comparing claims' },
+  { key: 'conflicts', label: 'Finding conflicts' },
   { key: 'verify', label: 'Verifying conflicts' },
 ] as const;
 
 /**
  * Which session kinds do each scan phase's work — declared here, beside the
  * checklist itself, and stamped onto the run record so a reader places sessions
- * under phases without a mapping of its own. `verify` is the deterministic fold
- * (re-anchoring, dedup, auto-apply): no sessions at all.
+ * under phases without a mapping of its own. The computer path's kinds are
+ * stamped only on a run that takes it. `conflicts` and `verify` are
+ * deterministic folds (filing, re-anchoring, dedup, auto-apply): no sessions
+ * at all.
  */
-const CURATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
-  discover: [SPEC_SCAN_ORCHESTRATE_SESSION_KIND],
-  tag: [CURATE_DOC_SESSION_KIND, SETTLE_AREAS_SESSION_KIND],
-  overlap: [OVERLAP_SESSION_KIND],
-  verify: [],
-};
+function curateStepSessionKinds(computer: boolean): Record<string, readonly string[]> {
+  return {
+    discover: [SPEC_SCAN_ORCHESTRATE_SESSION_KIND],
+    tag: computer
+      ? [CURATE_DOC_SESSION_KIND, CORPUS_REVIEW_SESSION_KIND, SETTLE_AREAS_SESSION_KIND]
+      : [CURATE_DOC_SESSION_KIND, SETTLE_AREAS_SESSION_KIND],
+    record: [EXTRACT_CLAIMS_SESSION_KIND],
+    subjects: [SETTLE_SUBJECTS_SESSION_KIND],
+    compare: [COMPARE_CLAIMS_SESSION_KIND],
+    conflicts: [],
+    verify: [],
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Corpus path driver — the entry point the dashboard routes call.
 // `curateInProcess` builds corpus.json via the SESSION-based scan run
 // (`services/spec-scan/run.ts`): one `spec-scan.curate-doc`
-// session per doc, at most one `spec-scan.settle-areas` session, one
-// `spec-scan.overlap` session per area. The four CURATE_STEPS keys are kept so
-// the progress UI renders unchanged.
+// session per doc (and, when the driver can hand a session a computer, a
+// `spec-scan.corpus-review` after curation), at most one
+// `spec-scan.settle-areas` session, then the conflict steps: one
+// `spec-scan.extract-claims` (claim extraction) per doc window, the
+// `spec-scan.settle-subjects` sessions and one `spec-scan.compare-claims` per
+// batch of claims, under the
+// CURATE_STEPS the progress UI renders.
 // ---------------------------------------------------------------------------
 
 export interface SpecCurateInProcessResult {
@@ -156,7 +175,7 @@ export interface SpecCurateInProcessResult {
   /**
    * Set when a single-step run (`only`) stopped before assembly — the step ran,
    * corpus.json is untouched. Absent on a completed scan (including
-   * `only: 'overlap'`, which runs through the corpus write).
+   * `only: 'conflicts'`, which runs through the corpus write).
    */
   stoppedAfter?: ScanStep;
   /** The sessions-store scratch dir this run used, under the runtime directory —
@@ -179,11 +198,11 @@ export interface CurateInProcessOptions {
    */
   decisions?: DecisionsFile;
   /**
-   * The corpus the last scan wrote, for the areas and the overlaps to reconcile
-   * against: its flagged overlaps are briefed to the overlap sessions so a
-   * dispute keeps its identity across scans. The workspace scan passes the
-   * stored version (its scratch tree holds none); omit and the run reads
-   * `corpus.json` from the tree for the areas, and briefs no prior overlaps.
+   * The corpus the last scan wrote, for the areas and the conflicts to reconcile
+   * against: its conflicts are briefed to the conflicts sessions so a conflict
+   * keeps its identity across scans. The workspace scan passes the stored
+   * version (its scratch tree holds none); omit and the run reads `corpus.json`
+   * from the tree for the areas, and briefs no prior conflicts.
    */
   previousCorpus?: CuratedCorpus | null;
   /**
@@ -224,12 +243,18 @@ export interface CurateInProcessOptions {
    * Single-step mode (`only`): run only this step's
    * sessions — prior steps replay from their durable artifacts (a missing one
    * throws {@link ScanStepNotReadyError}), later steps never start, and
-   * corpus.json is written only by the final step (`overlap`). The estimate
+   * corpus.json is written only by the final step (`conflicts`). The estimate
    * gate prices only the chosen step.
    */
   only?: ScanStep;
-  /** Skip the overlap sessions (the workspace corpus sync passes this). */
-  disableOverlapDetection?: boolean;
+  /** Skip the conflicts step (the workspace corpus sync passes this). */
+  disableConflictDetection?: boolean;
+  /**
+   * The driver can hand a session a computer (Claude Code), as the caller that
+   * chose it knows: the scan reviews the kept corpus as a whole over the docs
+   * on disk. See `SpecScanSessionsOptions.computer`.
+   */
+  computer?: boolean;
   /**
    * Apply none of the judge's high-confidence recommendations: the decisions
    * this scan settles are not stored (a pull request's scan).
@@ -305,7 +330,8 @@ export interface CurateInProcessOptions {
  * The four step keys survive from the one-shot pipeline so the progress UI
  * renders unchanged; what each covers moved: `discover` =
  * discovery + prefilter, `tag` = the curate-doc pool + the settle session,
- * `overlap` = the per-area overlap sessions, `verify` = the deterministic
+ * `record`, `subjects` and `compare` = the claim sessions, `conflicts` = the
+ * conflicts they found, filed, `verify` = the deterministic
  * fold (pointer re-anchoring, cross-area dedup, confidence auto-apply).
  */
 export async function curateInProcess(
@@ -332,6 +358,8 @@ export async function curateInProcess(
         identity: options.repoIdentity,
         ...(options.driver?.attribution.model ? { sessionModel: options.driver.attribution.model } : {}),
         only: options.only,
+        ...(options.computer ? { computer: true } : {}),
+        ...(options.previousCorpus !== undefined ? { previousCorpus: options.previousCorpus } : {}),
       }),
     );
     if ((estimate.stages?.length ?? 0) > 0) {
@@ -348,15 +376,21 @@ export async function curateInProcess(
     gitRef,
     ...(options.pullRequest ? { pullRequest: options.pullRequest } : {}),
   });
-  options.onRunStarted?.({ command: 'spec-scan', runId: run.runId, dir: run.dir });
+  options.onRunStarted?.({
+    command: 'spec-scan',
+    runId: run.runId,
+    dir: run.dir,
+    ...(run.onFailure ? { onFailure: run.onFailure } : {}),
+  });
   // Mirror the step checklist into the run record as the run's own display:
   // the dashboard can only see what run.json carries, and the early phases
   // (discover/tag) have no sessions to show progress through.
+  const stepKinds = curateStepSessionKinds(options.computer === true);
   const untap = tracker?.tap((p) => {
     if (!p.steps) return;
     run.setChecklist(
       p.steps.map((step) => {
-        const kinds = CURATE_STEP_SESSION_KINDS[step.key];
+        const kinds = stepKinds[step.key];
         return kinds ? { ...step, sessionKinds: [...kinds] } : step;
       }),
     );
@@ -400,37 +434,21 @@ export async function curateInProcess(
     return configured.driver;
   };
 
-  let tagStarted = false;
-  let overlapStarted = false;
-  let verifyStarted = false;
-  // The overlap step counts two different things: the collision CLUSTERS it
-  // reviews, and the AREAS of the whole corpus. Both lines name their own.
-  let overlapClusters = 0;
-  const ensureTag = (): void => {
-    if (tagStarted) return;
-    tracker?.done('discover');
-    tracker?.start('tag');
-    tagStarted = true;
+  // The checklist's steps in run order: each phase starts its step the first
+  // time it reports, closing every step before it.
+  const order: readonly string[] = CURATE_STEPS.map((step) => step.key);
+  let current = -1;
+  const advance = (key: string): void => {
+    const to = order.indexOf(key);
+    if (to <= current) return;
+    for (let i = Math.max(current, 0); i < to; i++) tracker?.done(order[i]!);
+    tracker?.start(key);
+    current = to;
   };
-  const ensureOverlap = (): void => {
-    ensureTag();
-    if (overlapStarted) return;
-    tracker?.done('tag');
-    tracker?.start('overlap');
-    overlapStarted = true;
-  };
-  // The verify step is now the deterministic fold: pointer re-anchoring,
-  // cross-area dedup, and the confidence auto-apply.
-  const ensureVerify = (): void => {
-    ensureOverlap();
-    if (verifyStarted) return;
-    tracker?.done('overlap');
-    tracker?.start('verify');
-    verifyStarted = true;
-  };
+  let compareBatches = 0;
 
   try {
-    tracker?.start('discover');
+    advance('discover');
     let result: Awaited<ReturnType<typeof runSpecScanSessions>>;
     try {
       result = await runSpecScanSessions({
@@ -443,10 +461,11 @@ export async function curateInProcess(
         repoIdentity: options.repoIdentity,
         skipGit: options.skipGit,
         skipCorpusWrite: options.skipCorpusWrite,
-        disableOverlapDetection: options.disableOverlapDetection,
+        disableConflictDetection: options.disableConflictDetection,
+        ...(options.computer ? { computer: true } : {}),
         disableScopeOrchestration: options.disableScopeOrchestration,
         ...(options.previousCorpus
-          ? { priorOverlaps: options.previousCorpus.areas.flatMap((area) => area.overlaps) }
+          ? { priorConflicts: options.previousCorpus.areas.flatMap((area) => area.conflicts) }
           : {}),
         ...(options.skipAutoApply ? { skipAutoApply: true } : {}),
         ...(options.scopeSources ? { scopeSources: options.scopeSources } : {}),
@@ -474,27 +493,32 @@ export async function curateInProcess(
           if (event.type === 'question-asked') options.onQuestion?.(workItem, event.question);
         },
         onCurateProgress: (done, total) => {
-          ensureTag();
+          advance('tag');
           if (total > 0) tracker?.detail('tag', `${done}/${total} docs`);
         },
         onSettle: (state) => {
-          ensureTag();
+          advance('tag');
           if (state !== 'skipped') tracker?.detail('tag', `vocabulary ${state === 'cached' ? 'settled (cached)' : state === 'ran' ? 'settled' : 'settlement failed — labels kept as-is'}`);
         },
-        onOverlapProgress: (done, total) => {
-          ensureOverlap();
-          overlapClusters = total;
+        onRecordProgress: (done, total) => {
+          advance('record');
+          tracker?.detail('record', total > 0 ? `${done}/${total} window${total === 1 ? '' : 's'} to record` : 'no windows to record');
+        },
+        onSubjectsProgress: (done, total) => {
+          advance('subjects');
           tracker?.detail(
-            'overlap',
-            total > 0
-              ? `${done}/${total} cluster${total === 1 ? '' : 's'} to review`
-              : 'no clusters to review',
+            'subjects',
+            total > 0 ? `${done}/${total} list${total === 1 ? '' : 's'} of subject names to settle` : 'no subject names to settle',
           );
+        },
+        onCompareProgress: (done, total) => {
+          advance('compare');
+          compareBatches = total;
+          tracker?.detail('compare', total > 0 ? `${done}/${total} batch${total === 1 ? '' : 'es'} of claims to compare` : 'no claims to compare');
         },
       });
     } catch (e) {
-      const active = verifyStarted ? 'verify' : overlapStarted ? 'overlap' : tagStarted ? 'tag' : 'discover';
-      tracker?.error(active, (e as Error).message);
+      tracker?.error(order[Math.max(current, 0)]!, (e as Error).message);
       // A cancelled scan is not a failed one: it stopped because the caller
       // said so, which is the same word the boot sweep gives a run whose
       // process died under it.
@@ -508,20 +532,30 @@ export async function curateInProcess(
       // Single-step run: close only the steps that actually opened. A caller
       // may hand the tracker a reduced checklist, so the later keys don't
       // exist (and StepTracker no-ops on unknown keys anyway).
-      const note = `stopped after ${result.stoppedAfter}`;
-      if (tagStarted) tracker?.done('tag', note);
-      else tracker?.done('discover', note);
+      tracker?.done(order[Math.max(current, 0)]!, `stopped after ${result.stoppedAfter}`);
     } else {
-      ensureVerify();
+      advance('verify');
       // The tag step's line is its outcome, not the last thing it was doing.
       tracker?.detail(
         'tag',
         `${result.stats.docsKept} kept · ${result.stats.docsScanned - result.stats.docsKept} skipped · ${result.stats.areaCount} areas`,
       );
-      tracker?.done(
-        'overlap',
-        `${result.stats.areaCount} areas · ${overlapClusters} cluster${overlapClusters === 1 ? '' : 's'} reviewed · ${result.stats.overlapFlags} overlaps`,
-      );
+      if (result.claimLedgers) {
+        const claims = result.claimLedgers.reduce((n, ledger) => n + ledger.claims.length, 0);
+        tracker?.detail('record', `${result.claimLedgers.length} docs read · ${claims} claims`);
+      }
+      const comparison = result.corpus.comparison;
+      if (comparison) {
+        tracker?.detail(
+          'subjects',
+          `${comparison.subjectNames} name${comparison.subjectNames === 1 ? '' : 's'} · ${comparison.settledSubjects} subject${comparison.settledSubjects === 1 ? '' : 's'}`,
+        );
+        tracker?.detail(
+          'compare',
+          `${compareBatches} batch${compareBatches === 1 ? '' : 'es'} compared${comparison.unplacedClaims > 0 ? ` · ${comparison.unplacedClaims} claims unplaced` : ''}`,
+        );
+      }
+      tracker?.done('conflicts', `${result.stats.areaCount} areas · ${result.stats.conflictCount} conflicts`);
       tracker?.done(
         'verify',
         result.stats.autoResolvedConflicts.length > 0
@@ -595,7 +629,7 @@ export async function syncWorkspaceCorpusInProcess(options: {
   tracker?: StepTracker;
   // --- test seams (mirror curateInProcess(); production passes none) --------
   driver?: CurateInProcessOptions['driver'];
-  disableOverlapDetection?: boolean;
+  disableConflictDetection?: boolean;
 }): Promise<WorkspaceCorpusSyncResult> {
   const ref: WorkspaceRef = { workspaceOrgId: options.workspaceOrgId };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-ws-corpus-'));
@@ -614,13 +648,14 @@ export async function syncWorkspaceCorpusInProcess(options: {
       tracker: options.tracker,
       skipGit: true,
       driver: options.driver,
-      disableOverlapDetection: options.disableOverlapDetection,
+      disableConflictDetection: options.disableConflictDetection,
       // The scratch tree is transient — a scope session here would re-spend on
       // every sync and its verdicts die with the tree.
       disableScopeOrchestration: true,
     });
-    // Persist the curated corpus under workspace scope (the dashboard reads it).
+    // Persist the curated corpus and its claims under workspace scope (the dashboard reads them).
     await saveWorkspaceSpec(ref, 'corpus', curateResult.corpus);
+    await saveWorkspaceSpec(ref, 'claims', curateResult.claims);
     return { areaCount: curateResult.stats.areaCount };
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -655,7 +690,7 @@ export function corpusContentSha(corpus: CuratedCorpus | null): string {
 
 /** An empty decisions document (all lists empty) — the "no resolutions yet" base. */
 export const EMPTY_DECISIONS: DecisionsFile = {
-  version: 2,
+  version: 3,
   manualIncludes: [],
   manualExcludes: [],
   manualAreas: [],
@@ -691,11 +726,11 @@ export function mergeDecisions(base: DecisionsFile, overlay: DecisionsFile): Dec
     ...(overlay.manualAreas ?? []),
   ];
 
-  // Conflict verdicts: the overlay wins per dispute identity (same unordered pair
-  // + same section anchors), other base verdicts survive.
-  const overlayResKeys = new Set((overlay.conflictResolutions ?? []).map(resolutionDisputeKey));
+  // Conflict verdicts: the overlay wins per conflict identity (the same two
+  // sentences), other base verdicts survive.
+  const overlayResKeys = new Set((overlay.conflictResolutions ?? []).map(resolutionConflictKey));
   const conflictResolutions = [
-    ...(base.conflictResolutions ?? []).filter((r) => !overlayResKeys.has(resolutionDisputeKey(r))),
+    ...(base.conflictResolutions ?? []).filter((r) => !overlayResKeys.has(resolutionConflictKey(r))),
     ...(overlay.conflictResolutions ?? []),
   ];
 
@@ -709,7 +744,7 @@ export function mergeDecisions(base: DecisionsFile, overlay: DecisionsFile): Dec
   const instructions = uniqueStrings([...(base.instructions ?? []), ...(overlay.instructions ?? [])]);
 
   return {
-    version: 2,
+    version: 3,
     manualIncludes,
     manualExcludes,
     manualAreas,
@@ -756,7 +791,7 @@ function applyAddManualInclude(existing: DecisionsFile, docPath: string): Decisi
   const excludes = existing.manualExcludes ?? [];
   if (includes.includes(docPath) && !excludes.includes(docPath)) return existing;
   return {
-    version: 2,
+    version: 3,
     manualIncludes: includes.includes(docPath) ? includes : [...includes, docPath],
     manualExcludes: excludes.filter((p) => p !== docPath),
     manualAreas: existing.manualAreas ?? [],
@@ -767,7 +802,7 @@ function applyAddManualInclude(existing: DecisionsFile, docPath: string): Decisi
 
 function applyRemoveManualInclude(existing: DecisionsFile, docPath: string): DecisionsFile {
   return {
-    version: 2,
+    version: 3,
     manualIncludes: (existing.manualIncludes ?? []).filter((p) => p !== docPath),
     manualExcludes: existing.manualExcludes ?? [],
     manualAreas: existing.manualAreas ?? [],
@@ -781,7 +816,7 @@ function applyAddManualExclude(existing: DecisionsFile, docPath: string): Decisi
   const excludes = existing.manualExcludes ?? [];
   if (excludes.includes(docPath) && !includes.includes(docPath)) return existing;
   return {
-    version: 2,
+    version: 3,
     manualIncludes: includes.filter((p) => p !== docPath),
     manualExcludes: excludes.includes(docPath) ? excludes : [...excludes, docPath],
     manualAreas: existing.manualAreas ?? [],
@@ -792,7 +827,7 @@ function applyAddManualExclude(existing: DecisionsFile, docPath: string): Decisi
 
 function applyRemoveManualExclude(existing: DecisionsFile, docPath: string): DecisionsFile {
   return {
-    version: 2,
+    version: 3,
     manualIncludes: existing.manualIncludes ?? [],
     manualExcludes: (existing.manualExcludes ?? []).filter((p) => p !== docPath),
     manualAreas: existing.manualAreas ?? [],
@@ -801,18 +836,22 @@ function applyRemoveManualExclude(existing: DecisionsFile, docPath: string): Dec
   };
 }
 
-// Section-scoped conflict verdicts. One verdict per dispute identity —
-// recording a verdict for a dispute already resolved replaces it (a side verdict
+// Conflict verdicts. One verdict per conflict identity —
+// recording a verdict for a conflict already resolved replaces it (a side verdict
 // overwrites a prior dismissal and vice versa).
 
+/** What names one conflict: its two docs and their two sentences. */
+export type ConflictIdentity = Pick<ConflictResolution, 'docA' | 'sentenceA' | 'docB' | 'sentenceB'>;
+
 function applyAddConflictResolution(existing: DecisionsFile, input: ConflictResolution): DecisionsFile {
-  if (input.docA === input.docB) {
-    throw new Error('addConflictResolution: docA and docB must be different docs');
+  // Two docs, or two sentences of one doc (a contradiction inside it).
+  if (verdictNamesOneSentence(input)) {
+    throw new Error('addConflictResolution: the two sides name one sentence');
   }
-  const key = resolutionDisputeKey(input);
-  const dedup = (existing.conflictResolutions ?? []).filter((r) => resolutionDisputeKey(r) !== key);
+  const key = resolutionConflictKey(input);
+  const dedup = (existing.conflictResolutions ?? []).filter((r) => resolutionConflictKey(r) !== key);
   return {
-    version: 2,
+    version: 3,
     manualIncludes: existing.manualIncludes ?? [],
     manualExcludes: existing.manualExcludes ?? [],
     manualAreas: existing.manualAreas ?? [],
@@ -823,15 +862,15 @@ function applyAddConflictResolution(existing: DecisionsFile, input: ConflictReso
 
 function applyRemoveConflictResolution(
   existing: DecisionsFile,
-  input: { docA: string; anchorA: string | null; docB: string; anchorB: string | null },
+  input: ConflictIdentity,
 ): DecisionsFile {
-  const key = resolutionDisputeKey(input);
+  const key = resolutionConflictKey(input);
   return {
-    version: 2,
+    version: 3,
     manualIncludes: existing.manualIncludes ?? [],
     manualExcludes: existing.manualExcludes ?? [],
     manualAreas: existing.manualAreas ?? [],
-    conflictResolutions: (existing.conflictResolutions ?? []).filter((r) => resolutionDisputeKey(r) !== key),
+    conflictResolutions: (existing.conflictResolutions ?? []).filter((r) => resolutionConflictKey(r) !== key),
     ...carriedV2Fields(existing),
   };
 }
@@ -893,7 +932,7 @@ export async function addWorkspaceConflictResolution(
 
 export async function removeWorkspaceConflictResolution(
   org: string,
-  input: { docA: string; anchorA: string | null; docB: string; anchorB: string | null },
+  input: ConflictIdentity,
 ): Promise<DecisionsFile> {
   const next = applyRemoveConflictResolution(await loadWorkspaceDecisions(org), input);
   await storeWorkspaceDecisions(org, next);

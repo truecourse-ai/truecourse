@@ -131,7 +131,7 @@ export function runAgentLoop<TOutcome>(input: AgentLoopInput<TOutcome>): AgentLo
 
 /**
  * BUDGET VISIBILITY + THE WRAP-UP WINDOW (decision 2026-08-21, from the first
- * documenso field run: 12 of 26 overlap sessions read to the wall and lost
+ * documenso field run: 12 of 26 conflicts sessions read to the wall and lost
  * everything — silent grants give a session no way to pace itself, and a
  * budget-exhausted failure that discards 45 turns of reading is not the "real
  * result" promised). Two mechanics, both shell-owned:
@@ -387,7 +387,7 @@ function startSession<TOutcome>(
       kind: def.kind,
       workItem,
       systemPrompt: def.systemPrompt,
-      toolNames: def.tools.map((t) => t.name),
+      toolNames: [...def.tools.map((t) => t.name), ...(def.computer?.tools ?? [])],
       ...(input.resume ? { resumeOf: input.resume.of } : {}),
       llm: driver.attribution,
       ...(display ? { display } : {}),
@@ -413,7 +413,10 @@ function startSession<TOutcome>(
       stoppedFor = detail;
       onAbort();
     };
-    const stallMs = input.stallTimeoutMs;
+    // A session with a computer runs its commands inside the backend, where
+    // neither clock can see them: a ten-minute build would read as a stall and
+    // as a turn that never ends. Such a session is bounded by its wall clock.
+    const stallMs = def.computer ? undefined : input.stallTimeoutMs;
     if (stallMs) {
       rearmStall = () => {
         clearTimeout(stallTimer);
@@ -427,7 +430,7 @@ function startSession<TOutcome>(
       const ceilingMs = input.timeoutMs;
       ceilingTimer = setTimeout(() => stopFor(`timed out after ${ceilingMs}ms`), ceilingMs);
     }
-    const turnMs = input.turnTimeoutMs;
+    const turnMs = def.computer ? undefined : input.turnTimeoutMs;
     if (turnMs) {
       rearmTurn = () => {
         clearTimeout(turnTimer);

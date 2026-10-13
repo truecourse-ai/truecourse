@@ -25,7 +25,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
-import { getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import {
   loadRecipe,
   resolveEntry,
@@ -50,7 +50,6 @@ import {
   type RouteManifestApp,
 } from '@truecourse/guard-runner'
 import { isCreditsExhausted, type DatastoreUrlRef, type GuardDriverId } from '@truecourse/shared'
-import { LEGACY_RECIPE_PROMPT_FINGERPRINT } from './legacy-prompt-fingerprints.js'
 import { RecipeProposalSchema, type RecipeProposal } from './schemas.js'
 import {
   type RecipeAppInventoryEntry,
@@ -368,7 +367,7 @@ export interface DiscoverRecipeOptions {
    * the failed proposal, the engine's verdict, and the deterministic evidence,
    * and fold-verifies whatever comes back with `verifyProposal` REGARDLESS of
    * what the session's transcript claims — the gate of record stays here. The
-   * seam owns its own caching (`guard/recipe`, same name+key as the legacy
+   * seam owns its own caching (`guard/recipe`, same name+key as the one-shot
    * path, via the session cache); discovery's own cache read/write is bypassed
    * so the entry is written exactly once. Absent ⇒ today's one-shot behavior,
    * byte for byte (hosted `guard generate` and the test seams ride that path).
@@ -384,10 +383,10 @@ export interface DiscoverRecipeOptions {
 export const RECIPE_STAGE_VERSION = 1
 
 /**
- * The `guard/recipe` cache key — `sha256(prompt fp :: discovery-input fp)`, plus
- * the compose PROJECT when the caller named one. Exported so the repair session
- * keeps the exact key: a proposal the one-shot era settled stays a hit in the
- * session era.
+ * The `guard/recipe` cache key — `sha256(stage version :: discovery-input fp)`,
+ * plus the compose PROJECT when the caller named one. Exported so the repair
+ * session keeps the exact key: a proposal the one-shot path settled is a hit for
+ * the session and the other way round.
  *
  * The project is part of the key because it is part of the ANSWER: a cached
  * recipe carries the `-p` it was authored with, and replaying another
@@ -397,12 +396,6 @@ export const RECIPE_STAGE_VERSION = 1
  */
 export function recipeCacheKey(inputsFingerprint: string, composeProject?: string): string {
   return recipeKeyOver(`recipe-v${RECIPE_STAGE_VERSION}`, inputsFingerprint, composeProject)
-}
-
-/** {@link recipeCacheKey} as it was computed while the prompt was in it — the key
- *  a miss falls back to. Delete with the legacy hash. */
-export function recipeLegacyCacheKey(inputsFingerprint: string, composeProject?: string): string {
-  return recipeKeyOver(LEGACY_RECIPE_PROMPT_FINGERPRINT, inputsFingerprint, composeProject)
 }
 
 function recipeKeyOver(stage: string, inputsFingerprint: string, composeProject?: string): string {
@@ -417,9 +410,7 @@ function recipeKeyOver(stage: string, inputsFingerprint: string, composeProject?
  * outcome settled against one boot failure says nothing about a different one.
  *
  * It shares the `guard/recipe` cache NAME with the derivation key and can never
- * collide with it (the stage label differs), and it reads no older key: a
- * repair of an existing recipe is new work, so nothing was ever stored under a
- * key that could describe it.
+ * collide with it (the stage label differs).
  */
 export function recipeRepairCacheKey(args: {
   contractFingerprint: string
@@ -635,12 +626,7 @@ export async function discoverRecipe(
   // The LLM proposal is cached on the discovery-input fingerprint — unchanged
   // inputs reuse the prior proposal, but verification always re-runs.
   let proposal: RecipeProposal | null = null
-  const cached = await getCacheEntryOrLegacy(
-    repoRoot,
-    RECIPE_CACHE_NAME,
-    recipeCacheKey(inputsFingerprint, composeProject),
-    recipeLegacyCacheKey(inputsFingerprint, composeProject),
-  )
+  const cached = await getCacheEntry(repoRoot, RECIPE_CACHE_NAME, recipeCacheKey(inputsFingerprint, composeProject))
   if (cached) {
     const parsed = RecipeProposalSchema.safeParse(cached)
     if (parsed.success) proposal = parsed.data

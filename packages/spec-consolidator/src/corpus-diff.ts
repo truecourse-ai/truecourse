@@ -1,7 +1,7 @@
 /**
  * The diff between two versions of a workspace corpus: the documents that
  * came and went, the ones re-tagged into other areas, the areas that appeared
- * or emptied, and the overlap flags that opened or closed. Pure — a version
+ * or emptied, and the conflicts that opened or closed. Pure — a version
  * view is the two stored corpora and this.
  */
 
@@ -22,11 +22,11 @@ function areasByDoc(corpus: CuratedCorpus | null): Map<string, string[]> {
   return byDoc;
 }
 
-/** Every overlap flag as its document pair, order-free. */
-function overlapPairs(corpus: CuratedCorpus | null): Set<string> {
+/** Every conflict as its document pair, order-free. */
+function conflictPairs(corpus: CuratedCorpus | null): Set<string> {
   const pairs = new Set<string>();
   for (const area of corpus?.areas ?? []) {
-    for (const overlap of area.overlaps) pairs.add([...overlap.docs].sort().join('\0'));
+    for (const conflict of area.conflicts) pairs.add([...conflict.docs].sort().join('\0'));
   }
   return pairs;
 }
@@ -50,8 +50,8 @@ export function diffCorpora(prior: CuratedCorpus | null, next: CuratedCorpus | n
 
   const areasBefore = new Set((prior?.areas ?? []).map((a) => a.id));
   const areasAfter = new Set((next?.areas ?? []).map((a) => a.id));
-  const pairsBefore = overlapPairs(prior);
-  const pairsAfter = overlapPairs(next);
+  const pairsBefore = conflictPairs(prior);
+  const pairsAfter = conflictPairs(next);
 
   return {
     docs: {

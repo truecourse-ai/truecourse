@@ -1,7 +1,7 @@
 /**
  * The pure comparison behind a pull request check: one delta per flow from the
  * base's and the head's flow summaries, the conflicts a head creates beyond
- * the workspace's own, and the sections a head moved with the flows bound to
+ * the workspace's own, and the documents a head moved under the flows bound to
  * them.
  */
 import { describe, it, expect } from 'vitest';
@@ -9,9 +9,9 @@ import type { GuardManifest } from '@truecourse/shared';
 import {
   compareFlows,
   conflictsCreated,
-  sectionsMoved,
+  docsMoved,
 } from '../../packages/core/src/services/pr-check/compare';
-import { buildCorpusConflicts } from '../../packages/shared/src/spec/overlap-resolution';
+import { buildCorpusConflicts, sentenceKey } from '../../packages/shared/src/spec/conflict-resolution';
 
 describe('compareFlows', () => {
   it.each([
@@ -28,6 +28,12 @@ describe('compareFlows', () => {
     ['succeeded', 'blocked', 'newly-blocked'],
     ['blocked', 'blocked', 'unchanged'],
     ['succeeded', 'succeeded', 'unchanged'],
+    // Partially succeeded is proven: a renamed control moves nothing, and it counts wherever succeeded does.
+    ['succeeded', 'partially-succeeded', 'unchanged'],
+    ['failed', 'partially-succeeded', 'fixed'],
+    ['partially-succeeded', 'blocked', 'newly-blocked'],
+    ['blocked', 'partially-succeeded', 'newly-covered'],
+    ['partially-succeeded', 'failed', 'new-failure'],
     // Coverage the head gained: a flow that could not run, or had no scenario, now passes.
     ['never-run', 'succeeded', 'newly-covered'],
     ['blocked', 'succeeded', 'newly-covered'],
@@ -53,88 +59,107 @@ describe('compareFlows', () => {
 });
 
 describe('conflictsCreated', () => {
-  const dispute = (a: string, b: string, headingA: string | null, headingB: string | null) => ({
+  /** A conflict between one sentence of each doc, each sentence opening with the topic given. */
+  const conflict = (a: string, b: string, topicA: string, topicB: string) => ({
     docs: [a, b] as [string, string],
     note: `${a} vs ${b}`,
     sections: [
-      { doc: a, heading: headingA, quote: 'x' },
-      { doc: b, heading: headingB, quote: 'y' },
+      { doc: a, quote: `${topicA} says x`, sentence: sentenceKey(`${topicA} says x`) },
+      { doc: b, quote: `${topicB} says y`, sentence: sentenceKey(`${topicB} says y`) },
     ],
   });
-  const corpus = (...overlaps: ReturnType<typeof dispute>[]) => ({ areas: [{ id: 'core/auth', overlaps }] });
+  const corpus = (...conflicts: ReturnType<typeof conflict>[]) => ({ areas: [{ id: 'core/auth', conflicts }] });
 
-  it('keeps only the head’s open conflicts the workspace does not already carry, by dispute identity', () => {
-    const shared = dispute('a.md', 'b.md', 'Login', 'Sessions');
-    const fresh = dispute('a.md', 'c.md', 'Login', 'Tokens');
+  it('keeps only the head’s open conflicts the workspace does not already carry, by conflict identity', () => {
+    const shared = conflict('a.md', 'b.md', 'Login', 'Sessions');
+    const fresh = conflict('a.md', 'c.md', 'Login', 'Tokens');
     const prConflicts = buildCorpusConflicts(corpus(shared, fresh), {}).filter((c) => !c.resolved);
-    // The workspace's copy of the shared dispute quotes it differently and
-    // lists the docs the other way round: same identity all the same.
+    // The workspace's copy of the shared conflict windows the quotes differently
+    // and lists the docs the other way round: same identity all the same.
     const workspace = corpus({
-      ...dispute('b.md', 'a.md', 'Sessions', 'Login'),
+      ...conflict('b.md', 'a.md', 'Sessions', 'Login'),
       sections: [
-        { doc: 'b.md', heading: 'Sessions', quote: 'other words' },
-        { doc: 'a.md', heading: 'Login', quote: 'more words' },
+        { doc: 'b.md', quote: 'other words', sentence: sentenceKey('Sessions says y') },
+        { doc: 'a.md', quote: 'more words', sentence: sentenceKey('Login says x') },
       ],
     });
     expect(conflictsCreated(workspace, prConflicts, {}).map((c) => c.b)).toEqual(['c.md']);
   });
 
-  it('a dispute the workspace resolved is created anew when the head flags it under other anchors', () => {
+  it('a conflict the workspace resolved is created anew when the head states it in other sentences', () => {
     const decisions = {
       conflictResolutions: [
-        { docA: 'a.md', anchorA: 'Login', docB: 'b.md', anchorB: 'Sessions', verdict: 'a' as const },
+        { docA: 'a.md', sentenceA: sentenceKey('Login says x'), docB: 'b.md', sentenceB: sentenceKey('Sessions says y'), verdict: 'a' as const },
       ],
     };
-    const workspace = corpus(dispute('a.md', 'b.md', 'Login', 'Sessions'));
-    // The head moved the disagreement into another section: a new identity,
-    // which the old verdict does not cover.
-    const head = corpus(dispute('a.md', 'b.md', 'Login', 'Cookies'));
+    const workspace = corpus(conflict('a.md', 'b.md', 'Login', 'Sessions'));
+    // The head reworded one side of the disagreement: a new identity, which
+    // the old verdict does not cover.
+    const head = corpus(conflict('a.md', 'b.md', 'Login', 'Cookies'));
     const prConflicts = buildCorpusConflicts(head, decisions).filter((c) => !c.resolved);
     expect(prConflicts).toHaveLength(1);
     expect(conflictsCreated(workspace, prConflicts, decisions)).toHaveLength(1);
-    // The same anchors as the workspace's, resolved there: not open, not created.
+    // The same sentences as the workspace's, resolved there: not open, not created.
     const same = buildCorpusConflicts(workspace, decisions).filter((c) => !c.resolved);
     expect(conflictsCreated(workspace, same, decisions)).toEqual([]);
   });
 
+  it('a new disagreement between two docs the workspace already conflicts on another point is created', () => {
+    const between = (quoteA: string, quoteB: string) => ({
+      docs: ['a.md', 'b.md'] as [string, string],
+      note: `${quoteA} vs ${quoteB}`,
+      sections: [
+        { doc: 'a.md', quote: quoteA, sentence: sentenceKey(quoteA) },
+        { doc: 'b.md', quote: quoteB, sentence: sentenceKey(quoteB) },
+      ],
+    });
+    const ttl = between('Tokens last an hour.', 'Tokens last a day.');
+    const lockout = between('Five failures lock the account.', 'Accounts never lock.');
+    const prConflicts = buildCorpusConflicts(corpus(ttl, lockout), {});
+    expect(conflictsCreated(corpus(ttl), prConflicts, {}).map((c) => c.note)).toEqual([lockout.note]);
+  });
+
   it('treats no workspace corpus as carrying nothing', () => {
-    const prConflicts = buildCorpusConflicts(corpus(dispute('a.md', 'b.md', 'L', 'S')), {});
+    const prConflicts = buildCorpusConflicts(corpus(conflict('a.md', 'b.md', 'L', 'S')), {});
     expect(conflictsCreated(null, prConflicts, {})).toHaveLength(1);
   });
 });
 
-describe('sectionsMoved', () => {
-  const manifest = (flows: Array<{ id: string; bindings: Array<[string, string, string]> }>): GuardManifest =>
-    ({
-      flows: flows.map((f) => ({
-        flowId: f.id,
-        flowFingerprint: 'fp',
-        bindings: f.bindings.map(([doc, anchor, fingerprint]) => ({ doc, anchor, fingerprint })),
-        scenarios: [],
-        interfaces: [],
-        generationInputsHash: null,
-      })),
-    }) as unknown as GuardManifest;
+describe('docsMoved', () => {
+  /** A manifest whose flows bind `[doc, ...sentence texts]` per binding. */
+  const manifest = (flows: Array<{ id: string; bindings: Array<[string, ...string[]]> }>): GuardManifest => ({
+    flows: flows.map((f) => ({
+      flowId: f.id,
+      flowFingerprint: 'fp',
+      bindings: f.bindings.map(([doc, ...texts]) => ({ doc, sentences: texts.map((t) => sentenceKey(t)) })),
+      scenarios: [],
+      interfaces: [],
+      generationInputsHash: null,
+      gaps: [],
+      retiredScenarios: [],
+    })),
+  });
 
-  it('names the sections whose fingerprint moved, with every flow bound to each', () => {
+  it('names the documents where a head flow binds sentences the base never bound there, with every such flow', () => {
     const base = manifest([
-      { id: 'f1', bindings: [['docs/a.md', 'login', 'sha:1'], ['docs/a.md', 'logout', 'sha:2']] },
-      // A base flow that still binds the section at an older fingerprint: the
-      // head's is one the base held, so nothing moved by the order flows come in.
-      { id: 'f0', bindings: [['docs/a.md', 'logout', 'sha:9']] },
-      { id: 'f2', bindings: [['docs/a.md', 'login', 'sha:1']] },
+      { id: 'f1', bindings: [['docs/a.md', 'Log in with a password.'], ['docs/c.md', 'Log out anywhere.']] },
+      // A base flow that binds the document at other sentences: the head's set
+      // is one the base held, so nothing moved by the order flows come in.
+      { id: 'f0', bindings: [['docs/c.md', 'Sessions last a day.']] },
+      { id: 'f2', bindings: [['docs/a.md', 'Log in with a password.']] },
     ]);
     const head = manifest([
-      { id: 'f1', bindings: [['docs/a.md', 'login', 'sha:9'], ['docs/a.md', 'logout', 'sha:2']] },
-      { id: 'f2', bindings: [['docs/a.md', 'login', 'sha:9']] },
-      // A section the base never bound is new, not moved.
-      { id: 'f3', bindings: [['docs/b.md', 'intro', 'sha:5']] },
+      { id: 'f1', bindings: [['docs/a.md', 'Log in with a passkey.'], ['docs/c.md', 'Log out anywhere.']] },
+      { id: 'f2', bindings: [['docs/a.md', 'Log in with a passkey.']] },
+      { id: 'f4', bindings: [['docs/c.md', 'Sessions last a day.']] },
+      // A document the base never bound is new, not moved.
+      { id: 'f3', bindings: [['docs/b.md', 'Welcome.']] },
     ]);
-    expect(sectionsMoved(base, head)).toEqual([{ doc: 'docs/a.md', anchor: 'login', flowIds: ['f1', 'f2'] }]);
+    expect(docsMoved(base, head)).toEqual([{ doc: 'docs/a.md', flowIds: ['f1', 'f2'] }]);
   });
 
   it('answers nothing without both manifests', () => {
-    expect(sectionsMoved(null, manifest([{ id: 'f', bindings: [['d', 'a', 'x']] }]))).toEqual([]);
-    expect(sectionsMoved(manifest([{ id: 'f', bindings: [['d', 'a', 'x']] }]), null)).toEqual([]);
+    expect(docsMoved(null, manifest([{ id: 'f', bindings: [['d', 'x']] }]))).toEqual([]);
+    expect(docsMoved(manifest([{ id: 'f', bindings: [['d', 'x']] }]), null)).toEqual([]);
   });
 });

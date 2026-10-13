@@ -1,5 +1,5 @@
 /**
- * The WORKSPACE's tools: its repositories, its documents and their sections,
+ * The WORKSPACE's tools: its repositories, its documents,
  * the conflicts between them, its documentation sources, and the decisions a
  * person makes about all of those.
  *
@@ -12,11 +12,13 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
   CONTEXT_SOURCE_KINDS,
+  conflictSides,
   type ContextDocumentRow,
   type ContextSource,
   type ContextSourceView,
   type CorpusConflict,
-  type OverlapLike,
+  type ConflictLike,
+  type ConflictSideLike,
 } from '@truecourse/shared';
 import {
   addSource,
@@ -75,23 +77,20 @@ function sourceRow(source: ContextSource | ContextSourceView) {
   };
 }
 
-/** One conflict with both of its sides. */
-function conflictRow(conflict: CorpusConflict<OverlapLike & { review?: unknown }>) {
-  const side = (doc: string) => {
-    const section = (conflict.overlap.sections ?? []).find((s) => s.doc === doc);
-    return {
-      doc,
-      heading: section?.heading ?? null,
-      ...(section?.quote ? { quote: section.quote } : {}),
-    };
-  };
+/** One conflict with both of its sides (inside one doc, its two sentences in order). */
+function conflictRow(conflict: CorpusConflict<ConflictLike & { review?: unknown }>) {
+  const [[sectionA], [sectionB]] = conflictSides(conflict.a, conflict.b, conflict.sections);
+  const side = (doc: string, section: ConflictSideLike | undefined) => ({
+    doc,
+    ...(section?.quote ? { quote: section.quote } : {}),
+  });
   return {
     id: conflict.id,
     area: conflict.area,
     note: conflict.note,
-    a: side(conflict.a),
-    b: side(conflict.b),
-    ...(conflict.overlap.review ? { review: conflict.overlap.review } : {}),
+    a: side(conflict.a, sectionA),
+    b: side(conflict.b, sectionB),
+    ...(conflict.review ? { review: conflict.review } : {}),
     resolved: conflict.resolved,
     ...(conflict.resolution
       ? {
@@ -173,15 +172,15 @@ export function registerWorkspaceTools(server: McpServer, caller: McpCaller): vo
     {
       title: 'Read a document',
       description:
-        "One document's text, by its `ref` from list_documents. Without `section`, the whole document plus its section outline (each section's `anchor`, heading and lines). With `section` (an anchor from that outline, or from a flow milestone), only that section's text — a section runs from its heading to the next heading of the same or higher level.",
+        "One document's text, by its `ref` from list_documents. Without `lines`, the whole document plus its outline (each heading with its level and the lines under it). With `lines` (first and last, 1-based, inclusive — an outline entry's), only those lines.",
       inputSchema: {
         ref: z.string().describe('The document ref, `context/<source>/<path>`.'),
-        section: z.string().optional().describe('A section anchor, to read that section alone.'),
+        lines: z.tuple([z.number().int().positive(), z.number().int().positive()]).optional().describe('First and last line to read, 1-based and inclusive.'),
       },
       annotations: READ,
     },
     (args) =>
-      run('read_document', () => readWorkspaceDocument(org, args.ref, args.section)),
+      run('read_document', () => readWorkspaceDocument(org, args.ref, args.lines)),
   );
 
   server.registerTool(

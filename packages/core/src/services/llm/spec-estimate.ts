@@ -22,15 +22,17 @@ import {
   applySubjectAttribution,
   discoverDocs,
   prefilterDocs,
+  readCorpus,
   readCorpusDecisions,
   readRepoIdentityInput,
   resolveRepoIdentity,
   groupByArea,
   type AreaTag,
+  type CuratedCorpus,
   type DocAreaTags,
   type DocCandidate,
 } from '@truecourse/spec-consolidator';
-import { getCacheEntryOrLegacy } from '@truecourse/llm';
+import { getCacheEntry } from '@truecourse/llm';
 import type { z } from 'zod';
 import { WRAP_UP_TURNS, type SessionBudget } from '@truecourse/agent-loop';
 import {
@@ -41,7 +43,6 @@ import {
   DocVerdictSchema,
   curateDocBriefing,
   curateDocCacheKey,
-  curateDocLegacyCacheKeys,
   type DocVerdict,
 } from '../spec-scan/curate-doc.js';
 import {
@@ -55,22 +56,9 @@ import {
   collectAreaVocab,
   settleAreasBriefing,
   settleAreasCacheKey,
-  settleAreasLegacyCacheKey,
   settleAreasGate,
   type AreaSettlement,
 } from '../spec-scan/settle-areas.js';
-import {
-  OVERLAP_SESSION_BUDGET,
-  OVERLAP_SESSION_CACHE_NAME,
-  OVERLAP_SESSION_KIND,
-  OVERLAP_SESSION_SYSTEM_PROMPT,
-  OverlapOutcomeSchema,
-  deriveOverlapWorkItems,
-  overlapBriefing,
-  overlapSessionCacheKey,
-  overlapSessionLegacyCacheKey,
-  type OverlapWorkItem,
-} from '../spec-scan/overlap.js';
 import {
   ORCHESTRATE_BUDGET,
   ORCHESTRATE_SYSTEM_PROMPT,
@@ -81,48 +69,95 @@ import {
   scopeCoverage,
 } from '../spec-scan/orchestrate.js';
 import { buildScanUniverse, instructionsFingerprint } from '../spec-scan/tools.js';
+import { corpusFingerprint } from '../spec-scan/corpus-dir.js';
+import {
+  CORPUS_REVIEW_BUDGET,
+  CORPUS_REVIEW_CACHE_NAME,
+  CORPUS_REVIEW_SESSION_KIND,
+  CORPUS_REVIEW_SYSTEM_PROMPT,
+  CorpusReviewOutcomeSchema,
+  applyCorpusReview,
+  corpusReviewBriefing,
+  corpusReviewCacheKey,
+  planCorpusReviewShards,
+  type CorpusReviewOutcome,
+} from '../spec-scan/corpus-review.js';
+import {
+  ClaimLedgerSchema,
+  EXTRACT_CLAIMS_BUDGET,
+  EXTRACT_CLAIMS_CACHE_NAME,
+  EXTRACT_CLAIMS_SESSION_KIND,
+  EXTRACT_CLAIMS_SYSTEM_PROMPT,
+  docClaimLedger,
+  claimAreaIds,
+  extractClaimsBriefing,
+  extractClaimsCacheKey,
+  extractClaimsItems,
+  recordWindows,
+  RECORD_WINDOW_CHARS,
+  type ClaimAreaContext,
+  type ClaimLedger,
+  type ExtractClaimsItem,
+} from '../spec-scan/extract-claims.js';
+import {
+  SETTLE_SUBJECTS_BUDGET,
+  SETTLE_SUBJECTS_CACHE_NAME,
+  SETTLE_SUBJECTS_NAMES,
+  SETTLE_SUBJECTS_SESSION_KIND,
+  SETTLE_SUBJECTS_SYSTEM_PROMPT,
+  SubjectSettlementSchema,
+  collectSubjectNames,
+  planSubjectParts,
+  settleSubjectsBriefing,
+  settleSubjectsCacheKey,
+  settledSubjects,
+  subjectMerges,
+  type SubjectPart,
+} from '../spec-scan/settle-subjects.js';
+import {
+  COMPARE_BATCH_CLAIMS,
+  COMPARE_CLAIMS_BUDGET,
+  COMPARE_CLAIMS_CACHE_NAME,
+  COMPARE_CLAIMS_SESSION_KIND,
+  COMPARE_CLAIMS_SYSTEM_PROMPT,
+  ClaimComparisonSchema,
+  compareClaimsBriefing,
+  compareClaimsCacheKey,
+  planCompareBatches,
+  type CompareItem,
+} from '../spec-scan/compare-claims.js';
 import type { ScanStep } from '../spec-scan/run.js';
 import {
   planGuardWork,
-  bindClaimPrerequisites,
-  partitionFlowPrerequisites,
-  flowInvocationGaps,
   buildServerRouteIndex,
   bindRealizationServer,
-  flowPrerequisiteStateMaterial,
-  flowPrerequisiteShapeFingerprint,
   flowWorkerKeyFingerprints,
   proposeRecipe,
   recipeCacheKey,
-  recipeLegacyCacheKey,
   RECIPE_CACHE_NAME,
   RecipeProposalSchema,
   SEED_CACHE_NAME,
   settledSteps,
   stepSettled,
   interfacesFingerprint,
-  legacyInterfacesFingerprint,
   computeSeedStepFingerprint,
   engineSeedRedraftDue,
   recordedSchemaFiles,
-  legacySeedStepFingerprint,
-  authFingerprint,
-  collectWorkDocs,
-  snapExtraction,
+  claimAreaInputs,
+  placeClaims,
+  readSpecClaims,
+  readSuppressedClaims,
   readCorpusAreaTags,
   buildFlowAreas,
   buildSurfaceCatalogs,
   buildWebAuthorCatalog,
   catalogReadMaterial,
   readCachedMatch,
-  matchProviderControls,
   realizationAssignmentFingerprint,
-  partitionPlanPreparations,
   readFlowsFile,
-  sectionInputsKey,
-  legacyFlowGenerationInputsHash,
   flowGenerationInputComponents,
   flowSettleVerdict,
+  type FlowGenerationInputParts,
   flowAreaIdForDoc,
   webAuthorKeyMaterial,
   workerCacheKey,
@@ -138,26 +173,16 @@ import {
   type SurfaceCatalog,
 } from '@truecourse/guard-generator';
 import {
-  EXTRACT_SESSION_BUDGET,
-  EXTRACT_SESSION_CACHE_NAME,
-  EXTRACT_SESSION_KIND,
-  EXTRACT_SESSION_SYSTEM_PROMPT,
-  extractSessionBriefing,
-  extractContextSchema,
-  extractSessionCacheKey,
-  extractSessionLegacyCacheKey,
   FLOWS_SESSION_BUDGET,
   FLOWS_SESSION_CACHE_NAME,
   FLOWS_SESSION_KIND,
   FLOWS_SESSION_SYSTEM_PROMPT,
   flowsSessionCacheKey,
-  flowsSessionLegacyCacheKey,
   FLOW_WORKER_BUDGET,
   FLOW_WORKER_CACHE_NAME,
   FLOW_WORKER_CLI_SYSTEM_PROMPT,
   FLOW_WORKER_SESSION_KIND,
   flowWorkerSystemPrompt,
-  flowWorkerPromptFingerprint,
   FLOW_WORKER_STAGE_VERSION,
   CachedWorkerEntrySchema,
   FIDELITY_SESSION_BUDGET,
@@ -167,25 +192,20 @@ import {
 import {
   driverRecipeKey,
   isRunnableDriver,
-  flowDriversToMatch,
-  GUARD_REVIEW_POLICY_VERSION, scenarioFullFlowDefect,
+  scenarioFullFlowDefect,
   runnableDriverIds,
   violatesSettleInvariant,
   type GuardSetupTaxonomyKey,
-  dismissedClaimKey,
-  ExtractOutcomeSchema,
   type GuardDriverId,
   type GuardFlow,
 } from '@truecourse/shared';
 import {
   computeRecipeFingerprint,
-  legacyPreparationFingerprint,
   flowRecipeSliceFingerprint,
   flowRosterFingerprint,
   flowPreparationFingerprint,
   seedRosterFingerprint,
   preparationsFingerprint,
-  resolvePrerequisites,
   buildRouteManifest,
   loadDependencyCatalog,
   loadRecipe,
@@ -242,7 +262,6 @@ import type { PriceTable } from './model-prices.js';
 
 // Heuristic assumptions, surfaced as ranges where they bite.
 const KEEP_RATE = 0.9; // fraction of curated docs a session keeps (approximation path)
-const AVG_AREA_SIZE = 4; // docs per area (sizes the changed-docs share of overlap areas)
 
 // Human-readable labels for the confirm UI — users don't know the internal stage ids.
 const STAGE_LABELS: Record<string, string> = {
@@ -250,7 +269,10 @@ const STAGE_LABELS: Record<string, string> = {
   [SPEC_SCAN_ORCHESTRATE_SESSION_KIND]: 'Settling scan scope',
   [CURATE_DOC_SESSION_KIND]: 'Curating docs',
   [SETTLE_AREAS_SESSION_KIND]: 'Settling areas',
-  [OVERLAP_SESSION_KIND]: 'Flagging overlaps',
+  [CORPUS_REVIEW_SESSION_KIND]: 'Reviewing the corpus',
+  [EXTRACT_CLAIMS_SESSION_KIND]: 'Extracting claims',
+  [SETTLE_SUBJECTS_SESSION_KIND]: 'Settling subjects',
+  [COMPARE_CLAIMS_SESSION_KIND]: 'Comparing claims',
   // guard setup (session kinds)
   [RECIPE_REPAIR_SESSION_KIND]: 'Repairing the recipe',
   [DEPENDENCY_CATALOG_SESSION_KIND]: 'Classifying dependencies',
@@ -263,7 +285,6 @@ const STAGE_LABELS: Record<string, string> = {
   // guard generate — the pooled kinds, and the two one-TURN ones
   guardRecipe: 'Discovering recipe',
   guardMatch: 'Matching flows',
-  [EXTRACT_SESSION_KIND]: 'Extracting claims',
   [FLOWS_SESSION_KIND]: 'Synthesizing flows',
   [FLOW_WORKER_SESSION_KIND]: 'Working flows',
   [FIDELITY_SESSION_KIND]: 'Reviewing fidelity',
@@ -279,7 +300,10 @@ const EXPECTED_TURNS: Record<string, number> = {
   [SPEC_SCAN_ORCHESTRATE_SESSION_KIND]: 6,
   [CURATE_DOC_SESSION_KIND]: 2,
   [SETTLE_AREAS_SESSION_KIND]: 4,
-  [OVERLAP_SESSION_KIND]: 8,
+  [CORPUS_REVIEW_SESSION_KIND]: 15,
+  [EXTRACT_CLAIMS_SESSION_KIND]: 4, // a draft, a check, a correction, the outcome
+  [SETTLE_SUBJECTS_SESSION_KIND]: 3, // a draft checked, a correction, the outcome
+  [COMPARE_CLAIMS_SESSION_KIND]: 8, // a draft, a few batched reads, a check, a correction, the outcome
   // guard setup — provisional, to re-ground on transcript data.
   [RECIPE_REPAIR_SESSION_KIND]: 8,
   [DEPENDENCY_CATALOG_SESSION_KIND]: 6,
@@ -291,7 +315,6 @@ const EXPECTED_TURNS: Record<string, number> = {
   [PREPARATION_SESSION_KIND]: 12,
   // guard generate — PROVISIONAL, to re-ground on transcript
   // data once a few session-era generates have run.
-  [EXTRACT_SESSION_KIND]: 3,
   [FLOWS_SESSION_KIND]: 4,
   [FLOW_WORKER_SESSION_KIND]: 8,
   [FIDELITY_SESSION_KIND]: 1,
@@ -306,7 +329,10 @@ const SESSION_OUTPUT_TOKENS: Record<string, number> = {
   [SPEC_SCAN_ORCHESTRATE_SESSION_KIND]: 300,
   [CURATE_DOC_SESSION_KIND]: 120,
   [SETTLE_AREAS_SESSION_KIND]: 250,
-  [OVERLAP_SESSION_KIND]: 400,
+  [CORPUS_REVIEW_SESSION_KIND]: 300,
+  [EXTRACT_CLAIMS_SESSION_KIND]: 2_500, // the draft checked and the outcome each carry the whole ledger
+  [SETTLE_SUBJECTS_SESSION_KIND]: 5_000, // the draft checked and the outcome each name every id of the list
+  [COMPARE_CLAIMS_SESSION_KIND]: 1_600, // every id once in each draft and the outcome, a review per conflict
   // guard setup — provisional.
   [RECIPE_REPAIR_SESSION_KIND]: 300,
   [DEPENDENCY_CATALOG_SESSION_KIND]: 500,
@@ -317,13 +343,18 @@ const SESSION_OUTPUT_TOKENS: Record<string, number> = {
   'guard-setup.preparation-observations': 2_000,
   [PREPARATION_SESSION_KIND]: 5_000, // Multiple seed/verification scripts form the final outcome.
   // guard generate — provisional.
-  [EXTRACT_SESSION_KIND]: 1500, // the outcome carries a doc's whole claim set
   [FLOWS_SESSION_KIND]: 1200, // an area's flows + no-flow reasons
   [FLOW_WORKER_SESSION_KIND]: 700, // ~one scenario YAML per run/submit turn
   [FIDELITY_SESSION_KIND]: 60, // a verdict + a one-sentence mismatch
 };
-/** Cold-cache fallback for an overlap briefing's size (outlines, no bodies). */
-const OVERLAP_BRIEFING_FALLBACK_CHARS = 8_000;
+/**
+ * Claims a sentence states on average, for the windows not yet extracted:
+ * measured on a 72-doc corpus, 3,390 claims over 5,121 sentences.
+ */
+const CLAIMS_PER_UNIT = 0.66;
+/** Briefing characters per subject name and per claim, when no list or batch is known. */
+const SUBJECT_NAME_LINE_CHARS = 110;
+const CLAIM_LINE_CHARS = 180;
 
 /** One session kind's work, rolled into the `StageCallEstimate` shape the
  *  dashboard already renders. `calls` = expected TURNS (items × expected
@@ -367,11 +398,8 @@ async function probeSessionCache<T>(
   cacheName: string,
   key: string,
   schema: z.ZodType<T>,
-  /** The keys this kind computed before its formula changed — probed the same
-   *  way the run reads them, so an estimate never quotes work a hit will skip. */
-  ...legacyKeys: readonly string[]
 ): Promise<T | null> {
-  const raw = await getCacheEntryOrLegacy(repoRoot, cacheName, key, ...legacyKeys).catch(() => null);
+  const raw = await getCacheEntry(repoRoot, cacheName, key).catch(() => null);
   if (raw === null) return null;
   const parsed = schema.safeParse(raw);
   return parsed.success ? parsed.data : null;
@@ -401,7 +429,19 @@ const mean = (ns: number[]): number =>
 export async function estimateScanTokens(
   repoRoot: string,
   prices?: PriceTable | null,
-  opts: { identity?: RepoIdentity | null; sessionModel?: string; only?: ScanStep } = {},
+  opts: {
+    identity?: RepoIdentity | null;
+    sessionModel?: string;
+    only?: ScanStep;
+    /** The run's computer path: a corpus review after curation. */
+    computer?: boolean;
+    /**
+     * The corpus the last scan wrote, as the run is given it: each doc's prior
+     * tags decide which areas its claims are filed under. Absent, the tree's
+     * `corpus.json` is read, as the run reads it.
+     */
+    previousCorpus?: CuratedCorpus | null;
+  } = {},
 ): Promise<LlmEstimate> {
   const model = sessionModel(opts.sessionModel);
 
@@ -449,7 +489,6 @@ export async function estimateScanTokens(
       CURATE_DOC_CACHE_NAME,
       curateDocCacheKey({ identity, doc }, instructionParts),
       DocVerdictSchema,
-      ...curateDocLegacyCacheKeys({ identity, doc }, instructionParts),
     );
     if (cached) cachedVerdicts.set(doc.path, cached);
     else curateMissDocs.push(doc);
@@ -471,6 +510,51 @@ export async function estimateScanTokens(
     });
     if (attributed.include || manualSet.has(path)) keptTags.set(path, v.areas);
   }
+
+  // ---- corpus review (computer path): probe per shard -----------------------
+  // Exact when every verdict is cached: the kept set, and so every shard key,
+  // is known, and cached drops leave the kept set below. A changed doc moves
+  // the kept set, which re-keys every shard: a range around the planned count.
+  const review = { items: 0, min: 0, max: 0, briefingChars: 0, settled: true };
+  if (opts.computer && (keptTags.size > 0 || missCount > 0)) {
+    const kept = curateItems.filter((d) => keptTags.has(d.path));
+    const areasByDoc = new Map(
+      kept.map((d) => [d.path, canonicalDocTags(keptTags.get(d.path) ?? []).map((t) => `${t.product}/${t.concern}`)]),
+    );
+    const shards = planCorpusReviewShards(kept, areasByDoc);
+    const briefingOf = (shard: (typeof shards)[number]): number =>
+      corpusReviewBriefing({ shard, keptCount: kept.length, root: repoRoot, areasByDoc, instructions }).length;
+    if (missCount === 0) {
+      const keptSet = corpusFingerprint(kept);
+      const reviewed: CorpusReviewOutcome[] = [];
+      const missing: typeof shards = [];
+      for (const shard of shards) {
+        const cached = await probeSessionCache(
+          repoRoot,
+          CORPUS_REVIEW_CACHE_NAME,
+          corpusReviewCacheKey(shard, keptSet, instructionParts),
+          CorpusReviewOutcomeSchema,
+        );
+        if (cached) reviewed.push(cached);
+        else missing.push(shard);
+      }
+      Object.assign(review, {
+        items: missing.length,
+        min: missing.length,
+        max: missing.length,
+        briefingChars: mean(missing.map(briefingOf)),
+        settled: missing.length === 0,
+      });
+      if (review.settled) {
+        const applied = applyCorpusReview(reviewed, new Set(kept.map((d) => d.path)), manualSet);
+        for (const drop of applied.drops) keptTags.delete(drop.ref);
+      }
+    } else {
+      const items = Math.max(1, shards.length);
+      Object.assign(review, { items, min: 0, max: items + 1, briefingChars: mean(shards.map(briefingOf)), settled: false });
+    }
+  }
+
   const canonicalByPath = new Map<string, AreaTag[]>(
     [...keptTags].map(([path, tags]) => [path, canonicalDocTags(tags)]),
   );
@@ -489,7 +573,6 @@ export async function estimateScanTokens(
         SETTLE_AREAS_CACHE_NAME,
         settleAreasCacheKey(vocab, instructionParts),
         AreaSettlementSchema,
-        settleAreasLegacyCacheKey(vocab, instructionParts),
       );
       settleItems = settlement ? 0 : 1;
       settleMin = settleItems;
@@ -503,12 +586,7 @@ export async function estimateScanTokens(
     settleMax = 1;
   }
 
-  // ---- overlap: group from cached tags, probe per-cluster keys --------------
-  // Exactly the run's derivation whenever everything upstream is cached (the
-  // settlement applied, the same grouper, the same collision pairing and
-  // clustering via deriveOverlapWorkItems, the same key builder); with
-  // upstream misses the probed part still holds and the changed docs' share is
-  // added as a range.
+  // ---- the areas, as the run groups them from the cached tags ---------------
   const applied = settlement ? applySettlement(settlement, vocab) : null;
   const vocabMap = applied?.vocab ?? { products: {}, concerns: {} };
   if (applied) {
@@ -526,33 +604,179 @@ export async function estimateScanTokens(
     keptDocs.map((d) => [d.path, { tags: canonicalByPath.get(d.path) ?? [] }]),
   );
   const grouped = groupByArea(keptDocs, groupTags, decisions.manualAreas ?? [], vocabMap);
-  const overlapItems: OverlapWorkItem[] = deriveOverlapWorkItems(grouped.areas, keptDocs, vocabMap);
-  const overlapMissItems: OverlapWorkItem[] = [];
-  for (const item of overlapItems) {
-    const cached = await probeSessionCache(
-      repoRoot,
-      OVERLAP_SESSION_CACHE_NAME,
-      overlapSessionCacheKey(item, instructionParts),
-      OverlapOutcomeSchema,
-      overlapSessionLegacyCacheKey(item, instructionParts),
+  // The upstream is settled when every doc verdict is cached AND the settlement
+  // is either cached or not needed: only then are the areas the run's areas.
+  const upstreamSettled = missCount === 0 && (settlement !== null || !gate);
+
+  // ---- the claims path: extract per window, then subjects and batches -------
+  // A window's key folds its own doc and that doc's raw tags alone, so the
+  // probed extraction misses are exact for every doc whose verdict is cached; a
+  // changed doc's windows are planned off its body, the share curation keeps
+  // expected. Settling subjects and comparing batches read every extracted
+  // claim: with every window cached and the upstream settled they are planned
+  // and probed exactly as the run plans them, and otherwise they cannot be
+  // planned before the extraction runs, so they are sized as a range from the
+  // claims known and those the unextracted sentences are expected to state.
+  const claimStages = async (): Promise<StageCallEstimate[]> => {
+    const known: ExtractClaimsItem[] = keptDocs.flatMap((d) => extractClaimsItems(d, keptTags.get(d.path) ?? []));
+    const cachedLedgers = new Map<ExtractClaimsItem, ClaimLedger>();
+    const missing: ExtractClaimsItem[] = [];
+    for (const item of known) {
+      const cached = await probeSessionCache(
+        repoRoot,
+        EXTRACT_CLAIMS_CACHE_NAME,
+        extractClaimsCacheKey(item, instructionParts),
+        ClaimLedgerSchema,
+      );
+      if (cached) cachedLedgers.set(item, cached);
+      else missing.push(item);
+    }
+    const exact = missCount === 0 && review.settled;
+    const changedWindows = curateMissDocs.map((d) => recordWindows(d));
+    const changedWindowCount = changedWindows.reduce((n, w) => n + w.windows.length, 0);
+    const recordItems = missing.length + Math.round(changedWindowCount * KEEP_RATE);
+    const record = sessionKindStage({
+      kind: EXTRACT_CLAIMS_SESSION_KIND,
+      model,
+      items: recordItems,
+      minItems: missing.length,
+      maxItems: missing.length + changedWindowCount,
+      budget: EXTRACT_CLAIMS_BUDGET,
+      systemPromptChars: EXTRACT_CLAIMS_SYSTEM_PROMPT.length,
+      briefingChars:
+        mean(missing.map((item) => extractClaimsBriefing(item, instructions).length)) ||
+        (recordItems > 0 ? Math.round(RECORD_WINDOW_CHARS / 2) : 0),
+      bound: exact
+        ? `${missing.length} of ${known.length} doc window${known.length === 1 ? '' : 's'} changed`
+        : `~${recordItems} doc windows: the changed docs' windows and those of the docs curation keeps`,
+    });
+
+    // The claims the cached windows hold, filed under areas as the run files them.
+    const previous = opts.previousCorpus === undefined ? readCorpus(repoRoot) : opts.previousCorpus;
+    const corpusAreaTags = new Map(grouped.docs.map((d) => [d.ref, d.areaTags]));
+    const claimAreas: ClaimAreaContext = {
+      rawTags: keptTags,
+      priorTags: new Map(previous?.docs.map((d) => [d.ref, d.areaTags]) ?? []),
+      reassignments: applied?.reassignments ?? new Map(),
+      vocab: vocabMap,
+      pinned: new Map((decisions.manualAreas ?? []).map((m) => [m.doc, corpusAreaTags.get(m.doc) ?? []])),
+    };
+    const windowsByDoc = new Map<string, ExtractClaimsItem[]>();
+    for (const item of known) windowsByDoc.set(item.doc.path, [...(windowsByDoc.get(item.doc.path) ?? []), item]);
+    const claims = [...windowsByDoc].flatMap(
+      ([ref, items]) =>
+        docClaimLedger({
+          doc: ref,
+          sentences: items[0]!.sentences,
+          areas: items[0]!.areas,
+          windows: items.map((item) => ({ window: item.window, ledger: cachedLedgers.get(item) ?? null })),
+          canonicalAreas: (raw) => claimAreaIds(claimAreas, ref, raw),
+        }).claims,
     );
-    if (!cached) overlapMissItems.push(item);
-  }
-  // Exact only when the whole upstream is settled: every doc verdict cached AND
-  // the settlement either cached or not needed. A pending settlement can
-  // reshape the areas, so its presence downgrades the overlap count to a range.
-  const overlapExact = missCount === 0 && (settlement !== null || !gate);
-  // Comparison clusters the CHANGED docs will land in — unknowable before
-  // their sessions run; sized by the mean-area heuristic and carried as a range.
-  const changedClusters = missCount > 0 ? Math.ceil(Math.round(missCount * KEEP_RATE) / AVG_AREA_SIZE) : 0;
-  const overlapExpectedItems = overlapMissItems.length + changedClusters;
-  // A fully settled upstream with zero misses is a KNOWN no-op — the ceiling
-  // drops to zero so the stage vanishes and a warmed cache yields an EMPTY
-  // estimate (confirm skipped). An unsettled upstream keeps the honest
-  // ceiling: a fresh settlement can re-key every cluster.
-  const overlapIdle = overlapExpectedItems === 0 && overlapExact;
-  const overlapMaxItems = overlapIdle ? 0 : overlapItems.length + changedClusters;
-  const clustersTotal = overlapItems.length + changedClusters;
+
+    if (exact && upstreamSettled && missing.length === 0) {
+      const names = collectSubjectNames(claims);
+      const parts = planSubjectParts(names);
+      const merges = new Map<string, string>();
+      const settleMissing: SubjectPart[] = [];
+      for (const part of parts) {
+        const cached = await probeSessionCache(
+          repoRoot,
+          SETTLE_SUBJECTS_CACHE_NAME,
+          settleSubjectsCacheKey(part, instructionParts),
+          SubjectSettlementSchema,
+        );
+        if (cached) for (const [key, subject] of subjectMerges(part, cached)) merges.set(key, subject);
+        else settleMissing.push(part);
+      }
+      const settle = sessionKindStage({
+        kind: SETTLE_SUBJECTS_SESSION_KIND,
+        model,
+        items: settleMissing.length,
+        budget: SETTLE_SUBJECTS_BUDGET,
+        systemPromptChars: SETTLE_SUBJECTS_SYSTEM_PROMPT.length,
+        briefingChars: mean(settleMissing.map((part) => settleSubjectsBriefing(part, instructions).length)),
+        bound: `${settleMissing.length} of ${parts.length} list${parts.length === 1 ? '' : 's'} of subject names changed`,
+      });
+      if (settleMissing.length > 0) {
+        // A settlement still to run decides the subjects, and with them every
+        // batch's order and its subject batches: the area batches as the names
+        // are written stand in for the count.
+        const areaBatches = planCompareBatches(claims, (f) => f.subject).batches.filter((b) => b.kind === 'area').length;
+        return [record, settle, compareRange(areaBatches, 'the subjects settle')];
+      }
+      const subjectOf = settledSubjects(claims, names, merges);
+      const docsByRef = new Map(keptDocs.map((d) => [d.path, d]));
+      const items: CompareItem[] = planCompareBatches(claims, (f) => subjectOf.get(f) ?? f.subject).batches.map((batch) => ({
+        batch,
+        docs: new Map(batch.claims.flatMap((bf) => {
+          const doc = docsByRef.get(bf.claim.doc);
+          return doc ? [[bf.claim.doc, doc] as const] : [];
+        })),
+      }));
+      const compareMissing: CompareItem[] = [];
+      for (const item of items) {
+        const cached = await probeSessionCache(
+          repoRoot,
+          COMPARE_CLAIMS_CACHE_NAME,
+          compareClaimsCacheKey(item, instructionParts),
+          ClaimComparisonSchema,
+        );
+        if (!cached) compareMissing.push(item);
+      }
+      const compare = sessionKindStage({
+        kind: COMPARE_CLAIMS_SESSION_KIND,
+        model,
+        items: compareMissing.length,
+        budget: COMPARE_CLAIMS_BUDGET,
+        systemPromptChars: COMPARE_CLAIMS_SYSTEM_PROMPT.length,
+        briefingChars: mean(compareMissing.map((item) => compareClaimsBriefing(item, instructions).length)),
+        bound: `${compareMissing.length} of ${items.length} batch${items.length === 1 ? '' : 'es'} of claims changed`,
+      });
+      return [record, settle, compare];
+    }
+
+    // Not every window is extracted yet: size what follows from the claims known
+    // and those the unrecorded sentences are expected to state.
+    const unrecordedUnits =
+      missing.reduce((n, item) => n + item.window.to - item.window.from + 1, 0) +
+      changedWindows.reduce((n, w) => n + w.sentences.length, 0) * KEEP_RATE;
+    const expectedClaims = claims.length + Math.round(unrecordedUnits * CLAIMS_PER_UNIT);
+    const slotsPerClaim = claims.length > 0 ? claims.reduce((n, f) => n + f.areas.length, 0) / claims.length : 1;
+    const settleParts = expectedClaims > 1 ? Math.ceil(expectedClaims / SETTLE_SUBJECTS_NAMES) : 0;
+    const settle = sessionKindStage({
+      kind: SETTLE_SUBJECTS_SESSION_KIND,
+      model,
+      items: Math.min(1, settleParts),
+      minItems: 0,
+      maxItems: settleParts,
+      budget: SETTLE_SUBJECTS_BUDGET,
+      systemPromptChars: SETTLE_SUBJECTS_SYSTEM_PROMPT.length,
+      briefingChars: Math.min(expectedClaims, SETTLE_SUBJECTS_NAMES) * SUBJECT_NAME_LINE_CHARS,
+      bound: 'the subject names are known once every changed doc is recorded',
+    });
+    const areaBatches = Math.ceil((expectedClaims * slotsPerClaim) / COMPARE_BATCH_CLAIMS);
+    return [record, settle, compareRange(areaBatches, 'the changed docs are recorded and their subjects settle')];
+  };
+
+  /**
+   * The compare stage before its batches can be planned: the area batches
+   * expected, and up to as many subject batches again (a claim sits in at most
+   * one subject batch), none of them known to be cached.
+   */
+  const compareRange = (areaBatches: number, until: string): StageCallEstimate =>
+    sessionKindStage({
+      kind: COMPARE_CLAIMS_SESSION_KIND,
+      model,
+      items: areaBatches,
+      minItems: 0,
+      maxItems: 2 * areaBatches,
+      budget: COMPARE_CLAIMS_BUDGET,
+      systemPromptChars: COMPARE_CLAIMS_SYSTEM_PROMPT.length,
+      briefingChars: COMPARE_BATCH_CLAIMS * CLAIM_LINE_CHARS,
+      bound: `~${areaBatches} batch${areaBatches === 1 ? '' : 'es'} of claims: they are planned once ${until}`,
+    });
+
 
   // ---- roll-up ---------------------------------------------------------------
   const stages: StageCallEstimate[] = [
@@ -575,6 +799,20 @@ export async function estimateScanTokens(
       briefingChars: mean(curateMissDocs.map((d) => curateDocBriefing(d, identity, instructions).length)),
       bound: 'keys fold the standing instructions — editing one re-scans every doc',
     }),
+    ...(opts.computer
+      ? [
+          sessionKindStage({
+            kind: CORPUS_REVIEW_SESSION_KIND,
+            model,
+            items: review.items,
+            minItems: review.min,
+            maxItems: review.max,
+            budget: CORPUS_REVIEW_BUDGET,
+            systemPromptChars: CORPUS_REVIEW_SYSTEM_PROMPT.length,
+            briefingChars: review.briefingChars,
+          }),
+        ]
+      : []),
     sessionKindStage({
       kind: SETTLE_AREAS_SESSION_KIND,
       model,
@@ -586,33 +824,19 @@ export async function estimateScanTokens(
       briefingChars:
         settleItems > 0 ? settleAreasBriefing(vocab, buildScanUniverse(docs), instructions).length : 0,
     }),
-    sessionKindStage({
-      kind: OVERLAP_SESSION_KIND,
-      model,
-      items: overlapExpectedItems,
-      minItems: overlapMissItems.length,
-      maxItems: overlapMaxItems,
-      budget: OVERLAP_SESSION_BUDGET,
-      systemPromptChars: OVERLAP_SESSION_SYSTEM_PROMPT.length,
-      briefingChars:
-        mean(overlapMissItems.map((i) => overlapBriefing(i, instructions).length)) ||
-        (overlapExpectedItems > 0 ? OVERLAP_BRIEFING_FALLBACK_CHARS : 0),
-      bound: overlapExact
-        ? `${overlapMissItems.length} of ${Math.max(clustersTotal, overlapMissItems.length)} comparison${clustersTotal === 1 ? '' : 's'} changed`
-        : `~${overlapExpectedItems} of ~${clustersTotal} comparison${clustersTotal === 1 ? '' : 's'} changed (changed docs may reshape clusters)`,
-    }),
+    ...(await claimStages()),
   ];
 
   const changedDocs = missCount;
   // Single-step mode prices only the chosen step — prior steps replay from
   // cache (a miss fails the run loudly, never spends), later ones don't start.
-  const SCAN_STEP_KIND: Record<ScanStep, string> = {
-    orchestrate: SPEC_SCAN_ORCHESTRATE_SESSION_KIND,
-    curate: CURATE_DOC_SESSION_KIND,
-    settle: SETTLE_AREAS_SESSION_KIND,
-    overlap: OVERLAP_SESSION_KIND,
+  const SCAN_STEP_KINDS: Record<ScanStep, readonly string[]> = {
+    orchestrate: [SPEC_SCAN_ORCHESTRATE_SESSION_KIND],
+    curate: [CURATE_DOC_SESSION_KIND, CORPUS_REVIEW_SESSION_KIND],
+    settle: [SETTLE_AREAS_SESSION_KIND],
+    conflicts: [EXTRACT_CLAIMS_SESSION_KIND, SETTLE_SUBJECTS_SESSION_KIND, COMPARE_CLAIMS_SESSION_KIND],
   };
-  const included = opts.only ? stages.filter((s) => s.stage === SCAN_STEP_KIND[opts.only!]) : stages;
+  const included = opts.only ? stages.filter((s) => SCAN_STEP_KINDS[opts.only!].includes(s.stage)) : stages;
   return estimateStageTokens(
     withLabels(included),
     changedSubject(curateItems.length, changedDocs, 'doc'),
@@ -647,155 +871,76 @@ const GUARD_MATCH_OUTPUT_TOKENS = 300; // ~a plan over a handful of milestones
 // A worker briefing carries every milestone's section text once; sections
 // average this much when the corpus isn't readable offline.
 const GUARD_MILESTONES_PER_FLOW = 3; // rough milestones a synthesized flow carries
-// Cold-cache fallback for an extract-session briefing (outline + first chunk).
-const GUARD_EXTRACT_BRIEFING_FALLBACK_CHARS = 14_000;
 
-/** The extract + flows SESSION stages' planned work — see {@link planGuardSessionStages}. */
+/** The flows SESSION stage's planned work — see {@link planGuardSessionStages}. */
 interface GuardSessionWorkPlan {
-  /** Cache-missing `guard-generate.extract` sessions (one per doc). Exact —
-   *  probed against the run's own `guard/extract-session` keys. */
-  extractItems: number;
-  /** Docs in the universe (the extract pool's denominator). */
-  extractDocs: number;
-  /** Mean briefing chars across the extract misses (0 when none). */
-  extractBriefingChars: number;
-  /** Per-area `guard-generate.flows` sessions (exact when `exact`; one per
-   *  changed area otherwise). */
+  /** Per-area `guard-generate.flows` sessions whose cache entry misses. */
   areaCalls: number;
   /** Epic-session ceiling: 1 when more than one area can yield flows, else 0. */
   epicCalls: number;
   /** Average briefing chars one area session carries. */
   areaChars: number;
-  /** Source-obligation count for the pre-synthesis estimate (0 when unknown); not a guaranteed flow ceiling. */
+  /** Source-obligation count for the pre-synthesis estimate; not a guaranteed flow ceiling. */
   maxFlows: number;
-  /** True when the claim inventory was knowable offline (every extract-session
-   *  entry cached) and the REAL flows keys were probed. */
+  /** Always true: the claim inventory is the scan's, known offline, so the REAL flows keys are probed. */
   exact: boolean;
 }
 
 /**
- * Plan the extract + flows SESSION stages. Extraction is exact by
- * construction: one session per doc, probed
- * against the run's own `guard/extract-session` cache with the run's own key
- * builder. Flow synthesis is exact whenever EVERY doc's extraction is cached:
- * the claim inventory is then known offline, so this reconstructs the SAME
- * filtered claim set the run feeds synthesis (snap → dismissals → runnable →
- * driver-prepared), groups the SAME areas, and probes the SAME `guard/flows`
- * session keys. A doc not yet extracted degrades the flows count to one call
- * per area with a changed section — what a cold run pays.
+ * Plan the flows SESSION stage. The claim inventory is what the scan read,
+ * materialized as `specs/claims.json`, so this reconstructs the SAME filtered
+ * claim set the run feeds synthesis (placed in the live documents, dismissals
+ * dropped, testable only), groups the SAME areas, and probes the SAME
+ * `guard/flows` session keys.
  */
 async function planGuardSessionStages(repoRoot: string, plan: GuardWorkPlan): Promise<GuardSessionWorkPlan> {
-  // A generate with no changed section returns before any stage runs, so zero
-  // sessions is exact — not an under-count.
-  if (plan.work.length === 0) {
-    return { extractItems: 0, extractDocs: 0, extractBriefingChars: 0, areaCalls: 0, epicCalls: 0, areaChars: 0, maxFlows: 0, exact: true };
+  // A generate over no documents runs no stage, so zero sessions is exact.
+  if (plan.docs.length === 0) {
+    return { areaCalls: 0, epicCalls: 0, areaChars: 0, maxFlows: 0, exact: true };
   }
-  const areaTags = readCorpusAreaTags(repoRoot);
-  const recipe = loadRecipe(repoRoot, recipePath(repoRoot))?.recipe;
-  const prerequisites = resolvePrerequisites(repoRoot, recipe?.api?.externals);
   // An area's synthesis reads ALL its claims, so the estimate needs every document
-  // of the universe — not only the ones with a changed section.
-  const docs = collectWorkDocs(repoRoot, { ...plan, work: plan.sections });
-
-  // The run's own claim gates, reproduced so the flows keys hash the same
-  // inventory: dismissed claims drop, only runnable claims on a PREPARED driver
-  // enter synthesis (see the extraction fold in `generateGuards`).
-  const dismissed = new Set(
-    readGuardDecisions(repoRoot).dismissedClaims.map((d) => dismissedClaimKey(d.doc, d.anchor, d.title)),
+  // of the universe.
+  const docs = plan.docs;
+  const dismissals = new Map(
+    readGuardDecisions(repoRoot).dismissedClaims.map((d) => [d.claimId, d] as const),
   );
-  const preparedSet = new Set(preparedSurfaces(repoRoot));
+  const docByPath = new Map(docs.map((d) => [d.doc, d]));
+  const claims = placeClaims(
+    (readSpecClaims(repoRoot)?.claims ?? []).filter((c) => docByPath.has(c.doc)),
+    (doc) => docByPath.get(doc)?.tree ?? null,
+  ).live;
+  const { inputs } = claimAreaInputs({
+    docs,
+    claims,
+    dismissals,
+    suppressed: new Set(readSuppressedClaims(repoRoot).map((s) => `${s.doc}\0${s.sentence}`)),
+  });
 
-  let extractItems = 0;
-  const missBriefingChars: number[] = [];
-  const inputs: FlowAreaDocInput[] = [];
-  let inventoryKnown = true;
-  for (const doc of docs) {
+  const areas = buildFlowAreas(inputs);
+  let areaCalls = 0;
+  for (const area of areas) {
     const cached = await probeSessionCache(
       repoRoot,
-      EXTRACT_SESSION_CACHE_NAME,
-      extractSessionCacheKey(doc, prerequisites.targets),
-      extractContextSchema(prerequisites.targets),
-      extractSessionLegacyCacheKey(doc, prerequisites.targets),
+      FLOWS_SESSION_CACHE_NAME,
+      flowsSessionCacheKey(area),
+      FlowSetSchema,
     );
-    if (!cached) {
-      extractItems++;
-      missBriefingChars.push(extractSessionBriefing(doc, prerequisites.targets).length);
-      inventoryKnown = false;
-      continue;
-    }
-    // The fold re-snap, exactly as the seam applies it — the cache holds the
-    // raw outcome (model anchors), never a pre-snapped one.
-    const snapped = snapExtraction(cached, doc.sections);
-    const live: FlowClaimInput[] = [];
-    for (const c of snapped.claims) {
-      if (dismissed.has(dismissedClaimKey(doc.doc, c.sectionAnchor, c.claim))) continue;
-      if (![c.driver, ...(c.alternativeDrivers ?? [])].some((driver) => isRunnableDriver(driver) && preparedSet.has(driver))) continue;
-      live.push({
-        doc: doc.doc,
-        anchor: c.sectionAnchor,
-        title: c.claim,
-        ...(c.verification ? { verification: bindClaimPrerequisites(c.verification, c.needs ?? [], prerequisites.targets) } : {}),
-        driver: c.driver,
-        ...(c.alternativeDrivers ? { alternativeDrivers: c.alternativeDrivers } : {}),
-        ...(c.needs && c.needs.length > 0 ? { needs: c.needs } : {}),
-      });
-    }
-    inputs.push({
-      doc: doc.doc,
-      areaTags: areaTags.get(doc.doc) ?? [],
-      outline: doc.sections.map((s) => ({ anchor: s.anchor, headingText: s.headingText, level: s.level })),
-      untestable: snapped.untestable.map((u) => ({ anchor: u.sectionAnchor, reason: u.reason })),
-      claims: live,
-    });
+    if (!cached) areaCalls++;
   }
-  const extractBriefingChars =
-    mean(missBriefingChars) || (extractItems > 0 ? GUARD_EXTRACT_BRIEFING_FALLBACK_CHARS : 0);
-
-  if (inventoryKnown) {
-    const areas = buildFlowAreas(inputs);
-    let areaCalls = 0;
-    for (const area of areas) {
-      const cached = await probeSessionCache(
-        repoRoot,
-        FLOWS_SESSION_CACHE_NAME,
-        flowsSessionCacheKey(area),
-        FlowSetSchema,
-        flowsSessionLegacyCacheKey(area),
-      );
-      if (!cached) areaCalls++;
-    }
-    const areasWithClaims = areas.filter((a) => a.claims.length > 0).length;
-    const chars = areas.map(
-      (a) =>
-        a.claims.reduce((n, c) => n + c.doc.length + c.anchor.length + c.title.length + 40, 0) +
-        a.docs.reduce((n, d) => n + d.outline.reduce((m, e) => m + e.anchor.length + e.headingText.length + 6, 0), 0),
-    );
-    return {
-      extractItems,
-      extractDocs: docs.length,
-      extractBriefingChars,
-      areaCalls,
-      // The epic key hashes the area sessions' OUTPUT digests — unknowable
-      // offline — so the epic session is always quoted as its 0..1 ceiling.
-      epicCalls: areasWithClaims > 1 ? 1 : 0,
-      areaChars: chars.length ? Math.round(chars.reduce((n, c) => n + c, 0) / chars.length) : 0,
-      maxFlows: areas.reduce((n, a) => n + a.claims.reduce((count, claim) => count + Math.max(claim.verification?.cases?.length ?? 1, 1), 0), 0),
-      exact: true,
-    };
-  }
-
-  const areaOf = (doc: string) => flowAreaIdForDoc(doc, areaTags.get(doc) ?? []);
-  const changedAreas = new Set(plan.work.map((s) => areaOf(s.doc)));
-  const allAreas = new Set(plan.sections.map((s) => areaOf(s.doc)));
+  const areasWithClaims = areas.filter((a) => a.claims.length > 0).length;
+  const chars = areas.map(
+    (a) =>
+      a.claims.reduce((n, c) => n + c.id.length + c.doc.length + c.title.length + 40, 0) +
+      a.docs.reduce((n, d) => n + d.outline.reduce((m, e) => m + e.anchor.length + e.headingText.length + 6, 0), 0),
+  );
   return {
-    extractItems,
-    extractDocs: docs.length,
-    extractBriefingChars,
-    areaCalls: changedAreas.size,
-    epicCalls: allAreas.size > 1 ? 1 : 0,
-    areaChars: GUARD_FLOWS_AREA_CHARS,
-    maxFlows: 0,
-    exact: false,
+    areaCalls,
+    // The epic key hashes the area sessions' OUTPUT digests — unknowable
+    // offline — so the epic session is always quoted as its 0..1 ceiling.
+    epicCalls: areasWithClaims > 1 ? 1 : 0,
+    areaChars: chars.length ? Math.round(chars.reduce((n, c) => n + c, 0) / chars.length) : 0,
+    maxFlows: areas.reduce((n, a) => n + a.claims.length, 0),
+    exact: true,
   };
 }
 
@@ -841,14 +986,11 @@ async function planGuardRealizationStages(
   flowStage: GuardSessionWorkPlan,
 ): Promise<GuardRealizationPlan> {
   const surfaces = preparedSurfaces(repoRoot);
-  let availablePreparations: ReturnType<typeof preparationCatalog> = [];
   let recipe: Recipe | undefined;
   try {
     recipe = loadRecipe(repoRoot, recipePath(repoRoot))?.recipe;
-    if (recipe) availablePreparations = preparationCatalog(recipe, repoRoot);
   } catch { /* Invalid recipes are repaired before runtime matching. */ }
 
-  const prerequisites = resolvePrerequisites(repoRoot, recipe?.api?.externals);
   // The recipe material every flow's key folds, computed once for the run.
   const slices = new Map<GuardDriverId, string>();
   const recipeSliceOf = (surface: GuardDriverId): string => {
@@ -881,9 +1023,6 @@ async function planGuardRealizationStages(
   if (settled && catalogs) {
     const serverIndex = recipe ? buildServerRouteIndex(buildRouteManifest(repoRoot), recipe) : undefined;
     const flows: GuardFlow[] = committed.flows;
-    const sectionKeyOf = new Map(
-      plan.sections.map((s) => [`${s.doc} ${s.anchor}`, sectionInputsKey(s)]),
-    );
     const priorByFlow = new Map((readGuardManifest(repoRoot)?.flows ?? []).map((f) => [f.flowId, f]));
     const committedScenarios = new Map(loadScenarios(repoRoot).scenarios.map(s => [s.id, s]));
     // The run's own web authoring catalog, built the same way, so this prices
@@ -900,27 +1039,17 @@ async function planGuardRealizationStages(
       // the interfaces it grounds on are what its inputs hash folds, so an uncached
       // pair is the only unknown — and it is counted as both a match call and a
       // worker session.
-      const interfaceFingerprints: string[] = [];
-      // The two prerequisite materials the run folds: the shape every current
-      // key carries, and the resolved state the retired ones did.
-      const prerequisiteShape = flowPrerequisiteShapeFingerprint(flow, prerequisites.targets, recipe);
-      const prerequisiteMaterial = flowPrerequisiteStateMaterial(flow, prerequisites.targets, recipe);
       const plannedPairs: {
         surface: GuardDriverId;
         assignment: string;
         interfaces: string[];
-        webCatalog?: string;
-        /** The bag the worker key folds now, and the one it folded before —
-         *  both built by the engine, so this probes the run's own keys. */
+        /** The bag the worker key folds, built by the engine, so this probes
+         *  the run's own key. */
         fingerprints: string[];
-        legacyFingerprints: string[];
       }[] = [];
       let unknown = false;
       for (const catalog of matchable) {
-        if (!flowDriversToMatch(flow).includes(catalog.surface)) continue;
-        const eligibleFlow = recipe ? partitionFlowPrerequisites(flow, catalog.surface, prerequisites.targets, recipe).flow : flow;
-        if (!eligibleFlow.milestones.length) continue;
-        const cached = await readCachedMatch(repoRoot, eligibleFlow, catalog, undefined, recipe ? matchProviderControls(eligibleFlow, catalog.surface, prerequisites.targets, recipe) : []);
+        const cached = await readCachedMatch(repoRoot, flow, catalog);
         if (!cached) {
           matchCalls++;
           unknown = true;
@@ -930,78 +1059,52 @@ async function planGuardRealizationStages(
         if (recipe && serverIndex && catalog.surface === 'api') {
           const bound = bindRealizationServer(cached.plan, serverIndex);
           if (bound.kind === 'missing-server' || bound.kind === 'spans') continue;
-          if (flowInvocationGaps(flow, catalog.surface, recipe, bound.kind === 'bound' ? bound.server : undefined).length) continue;
         }
-        const preparedPlan = partitionPlanPreparations(flow, cached.plan, availablePreparations).plan;
-        if (!preparedPlan || !completeRealization(flow, preparedPlan)) continue;
-        const assignment = realizationAssignmentFingerprint(preparedPlan);
-        const interfaces = preparedPlan.interfaces.map((j) => j.fingerprint);
-        const webCatalog = catalog.surface === 'web' ? catalog.fingerprint : undefined;
+        if (!completeRealization(flow, cached.plan)) continue;
+        const assignment = realizationAssignmentFingerprint(cached.plan);
+        const interfaces = cached.plan.interfaces.map((j) => j.fingerprint);
         const webAuthor = catalog.surface === 'web' && authorCatalog
-          ? webAuthorKeyMaterial(authorCatalog, preparedPlan.interfaces, flow, catalogResources)
+          ? webAuthorKeyMaterial(authorCatalog, cached.plan.interfaces, flow, catalogResources)
           : undefined;
         plannedPairs.push({
           surface: catalog.surface,
           assignment,
           interfaces,
-          webCatalog,
-          ...flowWorkerKeyFingerprints({
-            prerequisiteShape,
-            legacyPrerequisiteMaterial: prerequisiteMaterial,
+          fingerprints: flowWorkerKeyFingerprints({
             assignment,
             interfaces,
-            ...(webAuthor && webCatalog ? { web: { handed: webAuthor, catalog: webCatalog } } : {}),
+            ...(webAuthor !== undefined ? { webHanded: webAuthor } : {}),
           }),
         });
-
       }
       const previousDrivers = priorByFlow.get(flow.id)?.scenarios.flatMap(s => s.drivers ?? []) ?? [];
       plannedPairs.sort((a, b) => Number(previousDrivers.includes(b.surface)) - Number(previousDrivers.includes(a.surface)) || a.surface.localeCompare(b.surface));
       plannedPairs.splice(1);
-      // The LEGACY SETTLE bag, which is its own formula: the whole catalog on
-      // web, and the resolved state exactly once.
-      interfaceFingerprints.push(...plannedPairs.flatMap(p => [p.assignment, ...p.interfaces, ...(p.webCatalog ? [p.webCatalog] : [])]));
-      interfaceFingerprints.push(prerequisiteMaterial);
-      const sectionKeys = flow.bindings.map((b) => sectionKeyOf.get(`${b.doc} ${b.anchor}`) ?? b.fingerprint);
       const prior = priorByFlow.get(flow.id);
       const priorScenarios = (prior?.scenarios ?? []).flatMap((s) => committedScenarios.get(s.id) ?? []);
       const chosenSurface = plannedPairs[0]?.surface ?? 'cli';
-      // The run's own settle compare, over the same components it computes.
-      const settle = flowSettleVerdict({
-        prior,
-        components: flowGenerationInputComponents({
-          flowFingerprint: flow.fingerprint,
-          sectionKeys,
-          assignmentFingerprints: plannedPairs.map((p) => p.assignment),
-          interfaceFingerprints: plannedPairs.flatMap((p) => p.interfaces),
-          ...(plannedPairs[0]?.webCatalog
-            ? {
-                webCatalogFingerprint: plannedPairs[0].webCatalog,
-                webCatalogReads: authorCatalog ? catalogReadMaterial(authorCatalog, prior?.catalogReads ?? []) : [],
-              }
-            : {}),
-          hasScenario: priorScenarios.length > 0,
-          prerequisiteMaterial,
-          prerequisiteShape,
-          recipeSlice: recipeSliceOf(chosenSurface),
-          roster: flowRosterFingerprint(recipe ?? null, priorScenarios),
-          preparation: flowPreparationFingerprint(repoRoot, recipe ?? null, priorScenarios),
-        }),
-        legacyHash: legacyFlowGenerationInputsHash({
-          flowFingerprint: flow.fingerprint,
-          sectionKeys,
-          interfaceFingerprints,
-          recipeFingerprint: plan.recipeFingerprint,
-        }),
-      });
+      // The run's own settle inputs: the named components the compare reads.
+      const inputParts: FlowGenerationInputParts = {
+        flowFingerprint: flow.fingerprint,
+        assignmentFingerprints: plannedPairs.map((p) => p.assignment),
+        interfaceFingerprints: plannedPairs.flatMap((p) => p.interfaces),
+        ...(plannedPairs[0]?.surface === 'web'
+          ? { webCatalogReads: authorCatalog ? catalogReadMaterial(authorCatalog, prior?.catalogReads ?? []) : [] }
+          : {}),
+        hasScenario: priorScenarios.length > 0,
+        recipeSlice: recipeSliceOf(chosenSurface),
+        roster: flowRosterFingerprint(recipe ?? null, priorScenarios),
+        preparation: flowPreparationFingerprint(repoRoot, recipe ?? null, priorScenarios),
+      };
+      const settle = flowSettleVerdict({ prior, components: flowGenerationInputComponents(inputParts) });
       // Same work selection the run makes: a settled entry that leaves a planned
       // surface unaccounted for is WORK, whatever its components say.
       const changed =
         unknown || !settle.settled || (prior !== undefined && violatesSettleInvariant(prior)) ||
         (prior?.scenarios.length ?? 0) > 1 || (prior?.scenarios ?? []).some(s => {
           const scenario = committedScenarios.get(s.id);
-          return s.reviewed === false || !scenario || s.reviewPolicyVersion !== GUARD_REVIEW_POLICY_VERSION || s.reviewedScenarioFingerprint !== scenarioReviewFingerprint(scenario) ||
-            !!scenarioFullFlowDefect(flow.milestones, scenario.steps, s.caseEvidence ?? []);
+          return s.reviewed === false || !scenario || s.reviewedScenarioFingerprint !== scenarioReviewFingerprint(scenario) ||
+            !!scenarioFullFlowDefect(flow.milestones, scenario.steps);
         });
       if (!changed) continue;
       if (unknown) {
@@ -1012,13 +1115,12 @@ async function planGuardRealizationStages(
       // hit (a settled one still pays a deterministic confirmation run — free in
       // token terms); a miss is one session.
       for (const pair of plannedPairs) {
-        // The run's own key, over the run's own material — and the old key
-        // beside it, so an entry the run will serve is never priced as work.
+        // The run's own key, over the run's own material, so an entry the run
+        // will serve is never priced as work.
         const key = workerCacheKey(
           `flow-worker-v${FLOW_WORKER_STAGE_VERSION}`,
           flow,
           pair.surface,
-          sectionKeys,
           pair.fingerprints,
           workerRecipeMaterial({
             recipeSlice: recipeSliceOf(pair.surface),
@@ -1026,21 +1128,7 @@ async function planGuardRealizationStages(
             preparations: preparationsOffer,
           }),
         );
-        const hit = await probeSessionCache(
-          repoRoot,
-          FLOW_WORKER_CACHE_NAME,
-          key,
-          CachedWorkerEntrySchema,
-          // The key every surface wore while the prompt was in it.
-          workerCacheKey(
-            flowWorkerPromptFingerprint(pair.surface),
-            flow,
-            pair.surface,
-            sectionKeys,
-            pair.legacyFingerprints,
-            plan.recipeFingerprint,
-          ),
-        );
+        const hit = await probeSessionCache(repoRoot, FLOW_WORKER_CACHE_NAME, key, CachedWorkerEntrySchema);
         if (!hit) workerItems++;
       }
     }
@@ -1066,7 +1154,7 @@ async function planGuardRealizationStages(
   const boundFlows =
     flowStage.maxFlows > 0
       ? flowStage.maxFlows
-      : Math.ceil(plan.sections.length * GUARD_CLI_CLAIMS_PER_SECTION_MAX);
+      : Math.ceil(plan.docs.reduce((n, d) => n + d.sections.length, 0) * GUARD_CLI_CLAIMS_PER_SECTION_MAX);
   const perFlow = Math.max(surfaces.length, 1);
   return {
     matchCalls: boundFlows * perFlow,
@@ -1177,9 +1265,9 @@ export async function estimateGuardSetup(
     recipe = undefined; // a broken recipe is re-derived, so it costs the session
   }
   const settled = settledSteps(repoRoot, refresh);
-  /** The run's own gate, step by step: named inputs when the row has them. */
-  const holds = (key: GuardSetupTaxonomyKey, legacyFingerprint: string): boolean =>
-    stepSettled(repoRoot, key, settled(key), legacyFingerprint, { schemaFiles: recordedSchemaFiles(repoRoot) });
+  /** The run's own gate, step by step: the row's named inputs. */
+  const holds = (key: GuardSetupTaxonomyKey): boolean =>
+    stepSettled(repoRoot, key, settled(key), { schemaFiles: recordedSchemaFiles(repoRoot) });
 
   // ---- recipe repair: loop only on the failure path -------------------------
   // Zero whenever a recipe exists (discovery reuses it) or the settled proposal
@@ -1194,7 +1282,6 @@ export async function estimateGuardSetup(
       RECIPE_CACHE_NAME,
       recipeCacheKey(computeRecipeFingerprint(repoRoot)),
       RecipeProposalSchema,
-      recipeLegacyCacheKey(computeRecipeFingerprint(repoRoot)),
     );
     repairMax = cached ? 0 : 1;
     repairItems = cached ? 0 : proposeRecipe(repoRoot).ok ? 0 : 1;
@@ -1221,7 +1308,7 @@ export async function estimateGuardSetup(
           recipe,
           recordedSchemaFiles(repoRoot),
         )));
-  const seedSettled = recipe !== undefined && holds('seed', legacySeedStepFingerprint(repoRoot));
+  const seedSettled = recipe !== undefined && holds('seed');
   let seedItems = 0;
   let seedMax = 0;
   if (seedGateOpen && !seedSettled) {
@@ -1252,7 +1339,7 @@ export async function estimateGuardSetup(
   // authored from source alone, and reads the live fragment first.
   const liveAvailable = await canObserveLiveScreens(recipe);
   const interfacesSettled =
-    !replace && authoredCatalog !== null && holds('interfaces', legacyInterfacesFingerprint(repoRoot)) &&
+    !replace && authoredCatalog !== null && holds('interfaces') &&
     !authoringViewsMoved(repoRoot, authoredCatalog) &&
     webScreensNeedingAuthoring({
       derived: derivedCatalog,
@@ -1299,7 +1386,7 @@ export async function estimateGuardSetup(
   // ---- private preparations: one authoring session per changed recipe --------
   // A profile is not evidence that this setup step already settled. The runtime
   // skips only its current recorded fingerprint; old setups must run this step.
-  const preparationSettled = recipe !== undefined && holds('preparations', legacyPreparationFingerprint(repoRoot)) &&
+  const preparationSettled = recipe !== undefined && holds('preparations') &&
     preparationCatalog(recipe, repoRoot).length === Object.keys(recipe.preparations ?? {}).length;
   const preparationItems = preparationSettled ? 0 : 1;
   // Upstream recipe/seed work can move the fingerprint before this step starts.
@@ -1312,7 +1399,7 @@ export async function estimateGuardSetup(
   const authRuns =
     suppliedEntries > 0 &&
     recipe?.entry !== undefined &&
-    !holds('auth', authFingerprint(repoRoot));
+    !holds('auth');
   const authItems = authRuns ? suppliedEntries : 0;
 
   const setupStage = (input: {
@@ -1448,10 +1535,10 @@ export async function estimateGuardTokens(
 ): Promise<LlmEstimate> {
   const model = sessionModel(opts.sessionModel);
   const plan = planGuardWork(repoRoot);
-  const work = plan.work;
+  const sections = plan.docs.flatMap((d) => d.sections);
 
-  const avgSectionChars = plan.sections.length
-    ? Math.round(plan.sections.reduce((n, s) => n + (s.fullText || s.ownText).length, 0) / plan.sections.length)
+  const avgSectionChars = sections.length
+    ? Math.round(sections.reduce((n, s) => n + (s.fullText || s.ownText).length, 0) / sections.length)
     : 0;
 
   // The session planners share the run's own cache names + key builders, so the
@@ -1475,20 +1562,9 @@ export async function estimateGuardTokens(
       avgInputTokens: tokensFromChars(RECIPE_SYSTEM_PROMPT.length, 2000),
       avgOutputTokens: 120,
     },
-    // Claim extraction: one `guard-generate.extract` session per doc whose
-    // per-doc `guard/extract-session` entry misses — exact (the run's own keys).
-    sessionKindStage({
-      kind: EXTRACT_SESSION_KIND,
-      model,
-      items: sessions.extractItems,
-      budget: EXTRACT_SESSION_BUDGET,
-      systemPromptChars: EXTRACT_SESSION_SYSTEM_PROMPT.length,
-      briefingChars: sessions.extractBriefingChars,
-      bound: `${sessions.extractItems} of ${sessions.extractDocs} doc${sessions.extractDocs === 1 ? '' : 's'} changed`,
-    }),
     // Flow synthesis: one session per area whose claim inventory changed, plus
     // at most one epic session (its key hashes the areas' OUTPUT digests, so it
-    // is always a 0..1 range). Exact whenever the extract-session cache is warm.
+    // is always a 0..1 range). Exact: the claim inventory is the scan's.
     sessionKindStage({
       kind: FLOWS_SESSION_KIND,
       model,
@@ -1562,12 +1638,11 @@ export async function estimateGuardTokens(
   const included = opts.only
     ? stages.filter((s) => GENERATE_STEP_STAGES[opts.only!].includes(s.stage))
     : stages;
-  return estimateStageTokens(withLabels(included), changedSubject(plan.sections.length, work.length, 'section'), prices);
+  return estimateStageTokens(withLabels(included), changedSubject(plan.docs.length, plan.changedDocs.size, 'document'), prices);
 }
 
 /** Which priced stages each `only` step actually runs. */
 const GENERATE_STEP_STAGES: Record<GenerateStep, readonly string[]> = {
-  extract: [EXTRACT_SESSION_KIND],
   flows: [FLOWS_SESSION_KIND],
   // The fidelity judge is a depth-1 CHILD of a worker session, so it prices with
   // the worker step rather than carrying a flag of its own.

@@ -4,7 +4,7 @@
  * A hosted run works in an ephemeral clone that carries no `.truecourse/`, but
  * everything downstream of the scan reads the curated corpus (and the
  * resolutions folded into it) as FILES: guard setup's doc universe, the
- * generator's section plan, the conflict gate. And since documentation stopped
+ * generator's document plan, the conflict gate. And since documentation stopped
  * belonging to a repository, what the corpus names is no longer in the clone
  * either — a `context/<sourceId>/<docPath>` ref is a workspace document, not a
  * file of this repository.
@@ -39,6 +39,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { corpusFilePath, decisionsPath, type CuratedCorpus, type DecisionsFile } from '@truecourse/spec-consolidator';
+import { CLAIMS_FILE_VERSION, type ClaimsFile } from '@truecourse/shared';
+import { specClaimsFilePath } from '@truecourse/shared/work-tree';
 import {
   listWorkspaceSpecVersions,
   loadWorkspaceSpec,
@@ -64,7 +66,7 @@ export interface MaterializedSlice {
 
 /** A corpus that holds nothing — what an empty slice materializes as. */
 const EMPTY_CORPUS: CuratedCorpus = {
-  version: 3,
+  version: 6,
   generatedAt: new Date(0).toISOString(),
   docs: [],
   areas: [],
@@ -90,6 +92,19 @@ export async function materializeStoredSpec(
       : null) ?? (await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId }, 'corpus'));
   const sourceIds = corpus ? await contextBindings(workspaceOrgId, ref.repoKey) : [];
   const slice = corpus ? sliceCorpus(corpus, sourceIds) : null;
+  // The claims the scan read from the slice's documents travel with it: test
+  // generation composes its flows from them.
+  const claims =
+    (at?.claims
+      ? await loadWorkspaceSpec<ClaimsFile>({ workspaceOrgId, scope: opts.scope }, 'claims', { id: at.claims })
+      : null) ?? (await loadWorkspaceSpec<ClaimsFile>({ workspaceOrgId }, 'claims'));
+  const refs = new Set((slice?.docs ?? []).map((d) => d.ref));
+  const sliceClaims: ClaimsFile = {
+    version: CLAIMS_FILE_VERSION,
+    generatedAt: claims?.generatedAt ?? corpus?.generatedAt ?? EMPTY_CORPUS.generatedAt,
+    claims: (claims?.claims ?? []).filter((c) => refs.has(c.doc)),
+  };
+  writeJson(specClaimsFilePath(treeDir), sliceClaims);
   // An empty slice is written as an empty corpus rather than left out: a
   // repository that reads no documents is a repository whose corpus holds none,
   // and every stage downstream reads that file to learn it.
@@ -114,18 +129,18 @@ export async function materializeStoredSpec(
 }
 
 /**
- * The corpus and docs-snapshot versions a pull request's scan wrote at one
- * head, by id — null for a head it never scanned.
+ * The corpus, claims and docs-snapshot versions a pull request's scan wrote at
+ * one head, by id — null for a head it never scanned.
  */
 async function versionsAtHead(
   workspaceOrgId: string,
   scope: string,
   commitSha: string,
-): Promise<{ corpus: string | null; docs: string | null }> {
+): Promise<{ corpus: string | null; claims: string | null; docs: string | null }> {
   const ref = { workspaceOrgId, scope };
-  const idAt = async (artifact: 'corpus' | 'docs'): Promise<string | null> =>
+  const idAt = async (artifact: 'corpus' | 'claims' | 'docs'): Promise<string | null> =>
     (await listWorkspaceSpecVersions(ref, artifact)).find((v) => v.sourceCommit === commitSha)?.id ?? null;
-  return { corpus: await idAt('corpus'), docs: await idAt('docs') };
+  return { corpus: await idAt('corpus'), claims: await idAt('claims'), docs: await idAt('docs') };
 }
 
 /**

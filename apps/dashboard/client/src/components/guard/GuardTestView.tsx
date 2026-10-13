@@ -178,15 +178,12 @@ export interface GuardTestViewModel {
   goal?: string;
   flow?: { id: string; title: string };
   /**
-   * The spec section the test binds to, the footer's Spec fact. Optional: read
-   * inside its own flow the milestone list already links every section the test
+   * The document the test binds to, the footer's Spec fact. Optional: read
+   * inside its own flow the milestone list already links every document the test
    * walks, and a flow with no inventory row behind it has nothing to point at.
    */
   binds?: {
     doc: string;
-    section: string;
-    headingText?: string;
-    fingerprint?: string;
   };
   interfacePath: readonly string[];
   evidence: GuardEvidenceRef | null;
@@ -993,6 +990,7 @@ const VERDICT_TONE: Record<
 > = {
   failed: { dot: "bg-red-500", border: "border-red-500/35" },
   succeeded: { dot: "bg-emerald-500", border: "border-emerald-500/35" },
+  "partially-succeeded": { dot: "bg-lime-500", border: "border-lime-500/35" },
   blocked: { dot: "bg-amber-500", border: "border-amber-500/35" },
   "never-run": { dot: "bg-sky-500", border: "border-sky-500/35" },
   "not-testable": { dot: "bg-slate-400", border: "border-border" },
@@ -1033,7 +1031,7 @@ export function GuardScenarioBody({
   showGoal?: boolean;
   onOpenFlow?: (flowId: string) => void;
   onOpenInterface?: (interfaceId: string) => void;
-  onOpenSpec: (doc: string, section: string) => void;
+  onOpenSpec: (doc: string) => void;
 }) {
   const [source, setSource] = useState<{
     file?: string;
@@ -1537,15 +1535,10 @@ export function GuardScenarioBody({
           <FootFact label="Spec">
             <button
               type="button"
-              onClick={() => onOpenSpec(test.binds!.doc, test.binds!.section)}
+              onClick={() => onOpenSpec(test.binds!.doc)}
               className={FOOT_BTN}
             >
-              <span className={FOOT_TEXT}>
-                {test.binds.headingText ?? test.binds.doc}
-              </span>
-              <span className={`${FOOT_TEXT} text-muted-foreground`}>
-                § {test.binds.section}
-              </span>
+              <span className={FOOT_TEXT}>{test.binds.doc}</span>
               <ArrowUpRight className="h-3 w-3 shrink-0" />
             </button>
           </FootFact>
@@ -1596,7 +1589,7 @@ export function GuardTestView({
   notes?: ReactNode;
   onOpenFlow?: (flowId: string) => void;
   onOpenInterface?: (interfaceId: string) => void;
-  onOpenSpec: (doc: string, section: string) => void;
+  onOpenSpec: (doc: string) => void;
 }) {
   // The two readings of ONE file: this page, or the YAML it was read from.
   const { mode, setMode, raw } = useArtifactMode("YAML");

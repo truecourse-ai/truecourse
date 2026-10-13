@@ -1,21 +1,26 @@
 import { describe, expect, it } from 'vitest'
-import { composeDocCoverage, type GuardCoverageSources } from '../../packages/core/src/commands/guard-read.js'
+import { composeClaimCoverage, type GuardCoverageSources } from '../../packages/core/src/commands/guard-read.js'
 import {
+  claimId,
   GuardManifestSchema, GuardFlowsFileSchema, GuardGenerateReportSchema, GuardScenarioSchema, GuardLatestSchema,
   coversFlowMilestones, scenarioMilestoneProof, flowFingerprint,
   type GuardFlowMilestone,
 } from '@truecourse/shared'
 
 const doc = 'docs/spec.md'
-const content = '# Expenses\nAdd and edit expenses.'
+// Two claims read from the one sentence, told apart by their order.
 const milestones: GuardFlowMilestone[] = [1, 2].map((order) => ({
-  order, doc, anchor: 'expenses', claimTitle: `Expense milestone ${order}`, proofDrivers: ['web', 'api'],
+  order, doc, claimId: claimId(doc, ['sentence:expenses'], order - 1), claimTitle: `Expense milestone ${order}`, sentences: ['sentence:expenses'],
 }))
 function sources(ms = milestones): GuardCoverageSources {
   const fingerprint = flowFingerprint(ms)
-  const bindings = [{ doc, anchor: 'expenses', fingerprint: 'sha256:section' }]
+  const bindings = [{ doc, sentences: ['sentence:expenses'] }]
+  const claims = ms.map((m) => ({
+    id: m.claimId, doc, sentences: m.sentences, subject: 'expenses', statement: m.claimTitle, areas: [], testable: true as const,
+  }))
   return {
     latest: null, result: null,
+    claims: { version: 1, generatedAt: '2026-09-08T00:00:00Z', claims },
     flows: GuardFlowsFileSchema.parse({ version: 1, generatedAt: '2026-09-08T00:00:00Z', flows: [{
       id: 'expenses', title: 'Expenses', goal: 'Manage expenses', fingerprint, milestones: ms, bindings, composedOf: [], synthesisInputsHash: 'sha256:inputs',
     }], noFlowClaims: [] }),
@@ -26,9 +31,10 @@ function sources(ms = milestones): GuardCoverageSources {
     }] }),
   }
 }
+/** The first claim's reading: its own word, and the flow that carries it. */
 function read(s: GuardCoverageSources) {
-  const section = composeDocCoverage(doc, content, s).sections[0]
-  return { section, flow: section.flows[0] }
+  const claim = composeClaimCoverage(s).claims[0]
+  return { claim, flow: claim.flows[0] }
 }
 
 describe('coverage across alternative flow proofs', () => {
@@ -47,9 +53,9 @@ describe('coverage across alternative flow proofs', () => {
   })
 
   it('a successful full web proof settles the flow while keeping the unavailable API alternative visible', () => {
-    const { section, flow } = read(sources())
+    const { claim, flow } = read(sources())
     expect(flow.status).toBe('guarded')
-    expect(section.status).toBe('guarded')
+    expect(claim.status).toBe('guarded')
     expect(flow.surfaces.find((s) => s.gap)).toMatchObject({ status: 'no-interface', coveredByAlternative: true })
   })
 
@@ -60,13 +66,6 @@ describe('coverage across alternative flow proofs', () => {
     s.manifest!.flows[0].scenarios[0].milestoneCoverage!.pop()
     expect(read(s).flow.surfaces.find((r) => r.gap)?.coveredByAlternative).toBeUndefined()
     expect(read(s).flow.status).not.toBe('guarded')
-  })
-
-  it('keeps a mandatory API promise unmet even if a web test tags every milestone', () => {
-    const s = sources([milestones[0], { ...milestones[1], proofDrivers: ['api'] }])
-    const { flow } = read(s)
-    expect(flow.status).toBe('no-interface')
-    expect(flow.surfaces[0].coverageComplete).toBe(false)
   })
 
   it('does not let a passing partial scenario claim complete coverage, even without gaps', () => {
@@ -87,19 +86,9 @@ describe('coverage across alternative flow proofs', () => {
     expect(read(s).flow.status).toBe('fail')
   })
 
-  it('preserves unrelated gaps', () => {
-    const s = sources()
-    s.manifest!.flows[0].gaps.push({ surface: 'cli', kind: 'no-interface', reason: 'A separate CLI obligation' })
-    expect(read(s).flow.status).toBe('no-interface')
-  })
-
-  it('uses manifest requirements without flows.json, and keeps legacy manifests conservative', () => {
+  it('joins a claim to its flows through the flow corpus alone: without flows.json nothing carries it', () => {
     const s = sources(); s.flows = null
-    expect(read(s).flow.status).toBe('guarded')
-    delete s.manifest!.flows[0].milestones
-    delete s.manifest!.flows[0].scenarios[0].milestoneCoverage
-    expect(read(s).flow.status).toBe('no-interface')
-    expect(GuardManifestSchema.safeParse(s.manifest).success).toBe(true)
+    expect(read(s).claim).toMatchObject({ status: 'unguarded', flows: [] })
   })
 
   it('does not reuse proof of an older flow composition', () => {
@@ -116,8 +105,8 @@ describe('coverage across alternative flow proofs', () => {
     const s = sources()
     s.latest = GuardLatestSchema.parse({
       run: { runId: 'run', ranAt: '2026-09-08T00:00:00Z', branch: 'main', commit: 'abc', recipeFingerprint: 'sha256:recipe' },
-      summary: { total: 1, pass: 0, fail: 0, error: 0, stale: 0, orphaned: 0 }, sections: [],
-      scenarios: [{ id: 'expenses.web', title: 'Expenses', outcome, durationMs: 1, flowId: 'expenses', binds: { doc, section: 'expenses', fingerprint: 'sha256:section' } }],
+      summary: { total: 1, pass: 0, fail: 0, error: 0, stale: 0, orphaned: 0 },
+      scenarios: [{ id: 'expenses.web', title: 'Expenses', outcome, durationMs: 1, flowId: 'expenses', binds: { doc, sentences: ['sentence:expenses'] } }],
     })
     expect(read(s).flow.status).toBe(outcome)
     expect(read(s).flow.surfaces.find((r) => r.gap)?.coveredByAlternative).toBe(outcome === 'pass' ? true : undefined)
@@ -128,25 +117,25 @@ describe('coverage across alternative flow proofs', () => {
     const flow = s.flows!.flows[0]
     s.scenarios = [GuardScenarioSchema.parse({
       id: 'expenses.web', title: 'Manage expenses', flow: { id: flow.id, fingerprint: flow.fingerprint },
-      binds: [{ doc, section: 'expenses', fingerprint: 'sha256:section' }],
+      binds: [{ doc, sentences: ['sentence:expenses'] }],
       steps: milestones.map((m) => ({ driver: 'web', navigate: '/expenses', milestone: m.order, expect: { visible: { role: 'heading', name: 'Expenses' } } })),
     })]
     s.result = GuardGenerateReportSchema.parse({
-      generatedAt: '2026-09-08T00:00:00Z', status: 'ok', sectionsTotal: 1, sectionsChanged: 1, skippedUnchanged: 0, noChanges: false,
-      written: [{ id: 'expenses.web', title: 'Expenses', doc, anchor: 'expenses', file: '.truecourse/scenarios/expenses.web.yaml', status: 'passing' }], coverageGaps: [{ doc, anchor: 'expenses', flowId: 'expenses', surface: 'api', kind: 'no-interface', reason: 'No API mapping' }],
-      birthFindings: [], errors: [], extractionFailures: [], orphaned: [],
+      generatedAt: '2026-09-08T00:00:00Z', status: 'ok', noChanges: false,
+      written: [{ id: 'expenses.web', title: 'Expenses', doc, file: '.truecourse/scenarios/expenses.web.yaml', status: 'passing' }], coverageGaps: [{ flowId: 'expenses', surface: 'api', kind: 'no-interface', reason: 'No API mapping' }],
+      birthFindings: [], errors: [], extractionFailures: [],
     })
     s.manifest = null
     expect(read(s).flow.status).toBe('guarded')
-    s.scenarios[0].binds[0].fingerprint = 'sha256:old-section'
+    s.scenarios[0].binds[0].sentences = ['sentence:older-text']
     expect(read(s).flow.status).toBe('no-interface')
-    s.scenarios[0].binds[0].fingerprint = 'sha256:section'
+    s.scenarios[0].binds[0].sentences = ['sentence:expenses']
     const written = s.result.written
     s.result.written = []
     expect(read(s).flow.status).toBe('no-interface')
     expect(read(s).flow.surfaces[0].status).toBe('never-run')
     s.result.written = written
-    s.result.errors.push({ flowId: 'expenses', surface: 'cli', doc, anchor: 'expenses', kind: 'authoring', message: 'Could not author another required attempt' })
+    s.result.errors.push({ flowId: 'expenses', surface: 'cli', doc, kind: 'authoring', message: 'Could not author another required attempt' })
     expect(read(s).flow.status).toBe('authoring-error')
   })
 
@@ -160,26 +149,4 @@ describe('coverage across alternative flow proofs', () => {
     expect(proof).toEqual([{ milestone: 2, driver: 'web' }])
     expect(coversFlowMilestones(milestones, proof)).toBe(false)
   })
-})
-
-it('never promotes two independently reviewed partial case tests through their union', async () => {
-  const { GUARD_REVIEW_POLICY_VERSION } = await import('@truecourse/shared')
-  const { scenarioReviewFingerprint } = await import('@truecourse/shared/guard-proof-node')
-  const ms: GuardFlowMilestone[] = [{ ...milestones[0], verification: { method: 'behavior', scope: 'web', observable: 'expense', cases: [
-    { id: 'created', claim: 'The expense appears', method: 'behavior', requires: ['browser'], conditions: [] },
-    { id: 'reload', claim: 'The expense survives reload', method: 'behavior', requires: ['browser'], conditions: [] },
-  ] }, proofDrivers: ['web'] }]
-  const s = sources(ms)
-  const fingerprint = s.flows!.flows[0].fingerprint
-  s.scenarios = ['created','reload'].map(id => GuardScenarioSchema.parse({ id, title: id,
-    binds: [{ doc, section: 'expenses', fingerprint: 'sha256:section' }], flow: { id: 'expenses', fingerprint },
-    steps: [{ driver: 'web', navigate: '/', milestone: 1, checks: [id], expect: { text: { contains: id } } }],
-  }))
-  s.manifest!.flows[0].scenarios = s.scenarios.map(scenario => ({ id: scenario.id, drivers: ['web'], status: 'passing', reviewed: true,
-    reviewPolicyVersion: GUARD_REVIEW_POLICY_VERSION, reviewedScenarioFingerprint: scenarioReviewFingerprint(scenario),
-    caseEvidence: [{ milestone: 1, caseId: scenario.id, steps: [1], reason: 'Independent observed assertion' }], milestoneCoverage: scenarioMilestoneProof(scenario.steps) }))
-  const view = read(s)
-  expect(view.flow.status).not.toBe('guarded')
-  expect(view.flow.surfaces.filter(row => row.scenarioId).every(row => row.coverageComplete === false)).toBe(true)
-  expect(view.flow.surfaces.find(row => row.gap)?.coveredByAlternative).toBeUndefined()
 })

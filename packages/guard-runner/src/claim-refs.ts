@@ -2,11 +2,11 @@
  * The claim-reference cross-check: every reference into the claims store, from
  * every layer that makes one, resolved at LOAD TIME.
  *
- * Three layers reference claims, and each addresses them differently:
+ * Three layers reference claims, every one by claim id:
  *
- *  - a scenario step's `milestone` tag, by claim ID (`analyze-runs-…`);
- *  - a flow's milestones, by claim IDENTITY (`doc` + `anchor` + `claimTitle`);
- *  - a flow corpus's `noFlowClaims`, by the same identity.
+ *  - a scenario step's `milestone` tag;
+ *  - a flow's milestones;
+ *  - a flow corpus's `noFlowClaims`.
  *
  * A reference that resolves to nothing is a corpus defect: coverage accounting is
  * claim-keyed, so a dangling reference silently removes a claim from the
@@ -20,7 +20,7 @@
  * no-op — the same fail-soft rule every derived-store reader follows.
  */
 
-import { guardClaimKey, guardExecutionSteps, milestoneClaims, type GuardClaimsFile, type GuardFlowsFile, type GuardScenario } from '@truecourse/shared'
+import { guardExecutionSteps, milestoneClaims, type ClaimsFile, type GuardFlowsFile, type GuardScenario } from '@truecourse/shared'
 import type { ScenarioLoadError } from './scenario-loader.js'
 
 /** Repo-relative path of the flow corpus, for load-error attribution. */
@@ -30,7 +30,7 @@ const CLAIMS_REL = '.truecourse/scenarios/claims.json'
 
 /** Everything the cross-check reads. A `null` claims store makes it a no-op. */
 export interface ClaimRefSources {
-  claims: GuardClaimsFile | null
+  claims: ClaimsFile | null
   flows: GuardFlowsFile | null
   /** Loaded scenarios, each with the repo-relative file it came from. */
   scenarios: ReadonlyArray<{ scenario: GuardScenario; file: string }>
@@ -57,8 +57,6 @@ export function crossCheckClaimRefs(sources: ClaimRefSources): ScenarioLoadError
     }
   }
 
-  const identities = new Set(claims.claims.map(guardClaimKey))
-
   for (const { scenario, file } of scenarios) {
     // Teardown steps included — a `dashboard uninstall` teardown step legitimately
     // proves the uninstall claim, so its milestone tag resolves like any other.
@@ -75,19 +73,19 @@ export function crossCheckClaimRefs(sources: ClaimRefSources): ScenarioLoadError
 
   for (const flow of flows?.flows ?? []) {
     for (const m of flow.milestones) {
-      if (identities.has(guardClaimKey({ doc: m.doc, anchor: m.anchor, title: m.claimTitle }))) continue
+      if (byId.has(m.claimId)) continue
       errors.push({
         file: FLOWS_REL,
-        message: `flow "${flow.id}" milestone ${m.order} names claim ${m.doc}#${m.anchor} “${m.claimTitle}”, which ${CLAIMS_REL} does not declare`,
+        message: `flow "${flow.id}" milestone ${m.order} names claim "${m.claimId}" (“${m.claimTitle}”), which ${CLAIMS_REL} does not declare`,
       })
     }
   }
 
   for (const c of flows?.noFlowClaims ?? []) {
-    if (identities.has(guardClaimKey({ doc: c.doc, anchor: c.anchor, title: c.claimTitle }))) continue
+    if (byId.has(c.claimId)) continue
     errors.push({
       file: FLOWS_REL,
-      message: `noFlowClaims names claim ${c.doc}#${c.anchor} “${c.claimTitle}”, which ${CLAIMS_REL} does not declare`,
+      message: `noFlowClaims names claim "${c.claimId}", which ${CLAIMS_REL} does not declare`,
     })
   }
 

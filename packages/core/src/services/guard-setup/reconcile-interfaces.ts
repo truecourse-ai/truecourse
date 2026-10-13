@@ -38,7 +38,6 @@
  */
 
 import { createHash } from 'node:crypto'
-import { LEGACY_RECONCILE_INTERFACES_PROMPT_FINGERPRINT } from '../legacy-prompt-fingerprints.js'
 import { z } from 'zod'
 import {
   defineSessionKind,
@@ -339,8 +338,8 @@ Every resolution carries \`evidence\`: the output you observed, quoted — the l
 4. \`check_resolutions\` on the complete list — it runs the exact validation the fold runs.
 5. Produce the outcome.`
 
-/** The prompt half of the cache key — folding it means editing the prompt above
- *  invalidates exactly this kind's cache. */
+/** The prompt's fingerprint, a diagnostic: the cache key folds
+ *  {@link RECONCILE_INTERFACES_STAGE_VERSION} instead. */
 export const RECONCILE_INTERFACES_PROMPT_FINGERPRINT = promptFingerprint(
   RECONCILE_INTERFACES_SYSTEM_PROMPT,
 )
@@ -361,29 +360,14 @@ export function reconcileInterfacesCacheKey(
   diagnostics: readonly MapperDiagnostic[],
   recipeContract: string,
 ): string {
-  return reconcileKeyOver(`reconcile-v${RECONCILE_INTERFACES_STAGE_VERSION}`, diagnostics, recipeContract)
-}
-
-/** {@link reconcileInterfacesCacheKey} as it was computed while the prompt was
- *  in it — the key a miss falls back to. Its recipe half is the WHOLE recipe
- *  fingerprint, which is what the old key folded. Delete with the legacy hash. */
-export function reconcileInterfacesLegacyCacheKey(
-  diagnostics: readonly MapperDiagnostic[],
-  recipeFingerprint: string,
-): string {
-  return reconcileKeyOver(LEGACY_RECONCILE_INTERFACES_PROMPT_FINGERPRINT, diagnostics, recipeFingerprint)
-}
-
-function reconcileKeyOver(
-  stage: string,
-  diagnostics: readonly MapperDiagnostic[],
-  recipe: string,
-): string {
   const canonical = [...diagnostics]
     .map((d) => ({ surface: d.surface, kind: d.kind, subject: d.subject, detail: d.detail }))
     .sort((a, b) => a.subject.localeCompare(b.subject) || a.kind.localeCompare(b.kind))
   return createHash('sha256')
-    .update([stage, JSON.stringify(canonical), recipe].join('::'), 'utf-8')
+    .update(
+      [`reconcile-v${RECONCILE_INTERFACES_STAGE_VERSION}`, JSON.stringify(canonical), recipeContract].join('::'),
+      'utf-8',
+    )
     .digest('hex')
 }
 
@@ -402,12 +386,9 @@ export interface ReconcileInterfacesRunOptions {
   diagnostics: readonly MapperDiagnostic[]
   /** The resolved recipe entry (`resolveEntry`'s output) `run_entry` spawns. */
   entry: readonly string[]
-  /** Folded into the cache key: a recipe move re-asks every dispute. */
-  /** The recipe CONTRACT — what the disputes are settled against. */
+  /** The recipe CONTRACT — what the disputes are settled against. Folded into
+   *  the cache key: a contract move re-asks every dispute. */
   recipeContract: string
-  /** The whole recipe fingerprint, for the OLD key a miss falls back to.
-   *  Delete with the legacy hash. */
-  legacyRecipeFingerprint: string
   /**
    * The session driver, LAZILY: resolved only when a session must actually run,
    * so a cache hit (and the empty-diagnostics zero-session path) never pays
@@ -451,7 +432,6 @@ export async function runReconcileInterfacesSession(
     repoRoot: opts.repoRoot,
     cacheName: RECONCILE_INTERFACES_CACHE_NAME,
     key: reconcileInterfacesCacheKey(opts.diagnostics, opts.recipeContract),
-    legacyKeys: [reconcileInterfacesLegacyCacheKey(opts.diagnostics, opts.legacyRecipeFingerprint)],
     schema: ReconcileResolutionsSchema,
     run: async () => {
       const driver = await opts.driver()

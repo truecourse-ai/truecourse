@@ -2,7 +2,6 @@ import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { readManifest } from '@truecourse/guard-runner'
-import { guardManifestSections } from '@truecourse/shared'
 import {
   makeTempRepo,
   rmrf,
@@ -10,7 +9,7 @@ import {
   writeDoc,
   writeCorpus,
   raw,
-  extractSessionBy,
+  claimsBy,
   runGenerate,
   submitWorkerSessions,
   PASSING_STEPS,
@@ -49,7 +48,7 @@ describe('generateGuards — entry pre-flight', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => raw('relkit --version prints the version', PASSING_STEPS)),
     })
 
@@ -73,11 +72,10 @@ describe('generateGuards — entry pre-flight', () => {
     expect(res.birthPassed).toBe(0)
 
     // The flow stayed unsettled: its entry records no scenario and no inputs hash, so
-    // the next generate re-runs it. Nothing was committed for the section.
+    // the next generate re-runs it.
     expect(versionFlow(r)?.scenarios).toEqual([])
     expect(versionFlow(r)?.generationInputsHash).toBeNull()
     expect(res.flows).toMatchObject({ settled: 0, unsettled: 1 })
-    expect(guardManifestSections(readManifest(r)).find((s) => s.anchor === 'version')!.scenarioIds).toEqual([])
   })
 
   it('an entry naming a NONEXISTENT script → ONE entry-preflight error, ZERO findings (the live cli.js/cli.mjs failure)', async () => {
@@ -93,7 +91,7 @@ describe('generateGuards — entry pre-flight', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => raw('relkit --version prints the version', PASSING_STEPS)),
     })
 
@@ -120,7 +118,7 @@ describe('generateGuards — entry pre-flight', () => {
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => raw('relkit --version prints the version', PASSING_STEPS)),
     })
 
@@ -128,9 +126,7 @@ describe('generateGuards — entry pre-flight', () => {
     expect(res.entryPreflight).toBeUndefined()
     expect(res.written.map((w) => w.flowId)).toEqual(['version'])
     expect(res.errors).toEqual([])
-    expect(guardManifestSections(readManifest(r)).find((s) => s.anchor === 'version')!.scenarioIds).toEqual([
-      'version',
-    ])
+    expect(versionFlow(r)?.scenarios.map((s) => s.id)).toEqual(['version'])
   })
 })
 
@@ -148,7 +144,7 @@ describe('recipe discovery — post-build entry existence check', () => {
     const res = await runGenerate({
       repoRoot: r,
       recipeRunner: async () => ({ build: 'true', entry: ['node', 'dist/cli.js'] }),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions(() => raw('relkit --version prints the version', PASSING_STEPS)),
     })
 

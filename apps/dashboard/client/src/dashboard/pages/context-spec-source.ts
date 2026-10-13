@@ -1,7 +1,7 @@
 /**
  * The WORKSPACE corpus as a {@link SpecSource}.
  *
- * The corpus components (`GuardCoveragePage`, `SpecOverlapDetail`,
+ * The corpus components (`GuardCoveragePage`, `SpecConflictDetail`,
  * `SpecDocViewer`) read their corpus, their documents and their decisions
  * through this seam rather than through `@/lib/api` directly, which is exactly
  * what lets Context point them at the workspace: one corpus, one set of

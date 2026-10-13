@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  composeDocCoverage,
+  composeClaimCoverage,
   readGuardEvidenceAt,
 } from '../../packages/core/src/commands/guard-read';
 import type { GuardGenerateReport } from '../../packages/shared/src/index';
@@ -24,39 +24,51 @@ function repo(): string {
 }
 
 const DOC = 'docs/cli.md';
-const CONTENT = ['# Version', 'the --version flag prints the semver'].join('\n');
 
 function report(over: Partial<GuardGenerateReport>): GuardGenerateReport {
   return {
     generatedAt: '2026-07-08T00:00:00.000Z',
     status: 'ok',
-    sectionsTotal: 1,
-    sectionsChanged: 1,
-    skippedUnchanged: 0,
     noChanges: false,
     written: [],
     coverageGaps: [],
     birthFindings: [],
     errors: [],
     extractionFailures: [],
-    orphaned: [],
     ...over,
   };
 }
 
-describe('composeDocCoverage — dismissed status', () => {
-  it('paints a section with a dismissed gap as status "dismissed" and totals it', () => {
-    const cov = composeDocCoverage(DOC, CONTENT, {
+describe('composeClaimCoverage — dismissed status', () => {
+  it('paints a dismissed claim as "dismissed" with the note, and totals it under Not testable', () => {
+    const view = composeClaimCoverage({
       manifest: null,
       latest: null,
-      result: report({
-        coverageGaps: [{ doc: DOC, anchor: 'version', kind: 'dismissed', reason: 'dismissed: the --version claim' }],
-      }),
+      result: report({}),
+      claims: {
+        version: 1,
+        generatedAt: '2026-07-08T00:00:00.000Z',
+        claims: [
+          {
+            id: 'claim::version',
+            doc: DOC,
+            sentences: ['s1'],
+            subject: 'the --version flag',
+            statement: 'the --version flag prints the semver.',
+            areas: [],
+            testable: true,
+          },
+        ],
+      },
+      decisions: {
+        version: 1,
+        dismissedClaims: [{ claimId: 'claim::version', dismissedAt: '2026-07-08T00:00:00.000Z', note: 'not a product promise' }],
+        dismissedFlows: [],
+      },
     });
-    const section = cov.sections.find((s) => s.anchor === 'version')!;
-    expect(section.status).toBe('dismissed');
-    expect(section.reason).toContain('dismissed');
-    expect(cov.totals.dismissed).toBe(1);
+    expect(view.claims[0]).toMatchObject({ status: 'dismissed', dismissed: true, reason: 'not a product promise' });
+    expect(view.totals.dismissed).toBe(1);
+    expect(view.totals.byStatus['not-testable']).toBe(1);
   });
 });
 

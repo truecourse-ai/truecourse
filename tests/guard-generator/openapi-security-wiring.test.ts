@@ -1,28 +1,17 @@
 /**
- * The security wiring: a per-section `securityFingerprint` folds into
- * the section's content key (and through it every bound flow's generation-inputs hash
- * and authoring cache key) ONLY for a SECURED OpenAPI operation, so a public /
- * markdown / cli section is byte-identical to before it; a scheme-definition edit
- * re-keys the referencing secured section; and the authoring prompt is handed the
- * scheme→credential mapping (satisfied + unsatisfied).
+ * The security wiring at the recipe gate: a credential's `satisfies` must name
+ * a security scheme some corpus OpenAPI document declares, checked before any
+ * LLM stage runs.
  */
 import { describe, it, expect, afterEach } from 'vitest'
-import {
-  workerCacheKey,
-  sectionInputsKey,
-  legacyFlowGenerationInputsHash,
-  planGuardWork,
-  type SectionInput,
-  type FlowWorkerSessionSeam,
-} from '@truecourse/guard-generator'
-import { writeManifest } from '@truecourse/guard-runner'
+import type { FlowWorkerSessionSeam } from '@truecourse/guard-generator'
 import {
   makeTempRepo,
   rmrf,
   writeApiRecipe,
   writeCorpus,
   writeDoc,
-  extractSessionBy,
+  claimsBy,
   submitWorkerSessions,
   runGenerate,
   interfacesOf,
@@ -74,144 +63,9 @@ function setupRepo(spec = openapi(), credentials?: Parameters<typeof writeApiRec
   return r
 }
 
-const API_KEY = { 'api-key': { header: 'X-API-Key', valueFromEnv: 'API_KEY' } }
-const INTERFACES = ['sha256:interface']
-
 /** The interfaces the secured operations are realized through. */
 const meInterfaces = (r: string) =>
   interfacesOf(r, apiInterface('GET', '/me'), apiInterface('GET', '/admin'), apiInterface('GET', '/public'))
-
-describe('planGuardWork — securityFingerprint stamping', () => {
-  it('stamps a secured operation section; leaves the public operation empty', () => {
-    const r = setupRepo(openapi(), API_KEY)
-    const plan = planGuardWork(r)
-    const me = plan.sections.find((s) => s.headingText === 'GET /me')!
-    const pub = plan.sections.find((s) => s.headingText === 'GET /public')!
-    expect(me.securityFingerprint).toMatch(/^sha256:/)
-    expect(pub.securityFingerprint).toBe('')
-  })
-
-  it('re-keys exactly the referencing secured section when its scheme definition changes; an unrelated section is untouched', () => {
-    const r = setupRepo(openapi(), API_KEY)
-    const plan0 = planGuardWork(r)
-    writeManifest(r, {
-      flows: plan0.sections.map((s) => ({
-        flowId: `${s.doc}#${s.anchor}`,
-        flowFingerprint: s.fingerprint,
-        bindings: [{ doc: s.doc, anchor: s.anchor, fingerprint: s.fingerprint }],
-        scenarios: [],
-        generationInputsHash: legacyFlowGenerationInputsHash({
-          flowFingerprint: s.fingerprint,
-          sectionKeys: [sectionInputsKey(s)],
-          interfaceFingerprints: INTERFACES,
-          recipeFingerprint: plan0.recipeFingerprint,
-        }),
-        gaps: [],
-      })),
-    })
-    expect(planGuardWork(r).work).toHaveLength(0)
-    const before = new Map(plan0.sections.map((s) => [s.anchor, sectionInputsKey(s)]))
-
-    // Rename the apiKeyAuth scheme's header param — a change invisible to GET /me's
-    // canonicalText (the scheme def lives in components), so no section is spec-side
-    // work; only securityFingerprint catches it, moving GET /me's content key and
-    // with it the hash of every flow bound to that operation.
-    writeDoc(r, 'api/openapi.yaml', openapi('X-Renamed-Key'))
-    const plan1 = planGuardWork(r)
-    expect(plan1.work).toHaveLength(0) // no section's own text changed
-    const moved = plan1.sections.filter((s) => before.get(s.anchor) !== sectionInputsKey(s))
-    expect(moved.map((s) => s.headingText)).toEqual(['GET /me'])
-  })
-})
-
-describe('workerCacheKey — security fold', () => {
-  const FLOW = { fingerprint: 'sha256:flow' }
-  function section(securityFingerprint: string): SectionInput {
-    return {
-      doc: 'api/openapi.yaml',
-      anchor: 'paths/get-getme',
-      fingerprint: 'sha256:sec',
-      headingText: 'GET /me',
-      level: 0,
-      ownText: '',
-      fullText: '',
-      areaTags: [],
-      suppressionFingerprint: '',
-      endpointSchemaFingerprint: '',
-      securityFingerprint,
-    }
-  }
-  const key = (securityFingerprint: string) =>
-    workerCacheKey(
-      'prompt-fp',
-      FLOW,
-      'api',
-      [sectionInputsKey(section(securityFingerprint))],
-      INTERFACES,
-      'sha256:recipe',
-    )
-
-  it('is byte-identical when the section is public, and moves once secured / on a scheme change', () => {
-    // An empty securityFingerprint folds nothing — identical to the pre-B7 key surface.
-    expect(key('')).toBe(key(''))
-    expect(key('sha256:secA')).not.toBe(key(''))
-    expect(key('sha256:secB')).not.toBe(key('sha256:secA'))
-  })
-})
-
-describe('generateGuards — the api worker briefing carries the operation-auth mapping', () => {
-  /** Collect every (flow, surface) worker BRIEFING, authoring nothing. */
-  function collectAuth(): { byFlow: Map<string, string>; runner: FlowWorkerSessionSeam } {
-    const byFlow = new Map<string, string>()
-    const runner = submitWorkerSessions(() => ({ blocked: [{ order: 1, capability: 'a spy worker authors nothing' }] }), {
-      onBriefing: (task, briefing) => byFlow.set(task.flowId, briefing),
-    })
-    return { byFlow, runner }
-  }
-
-  it('advertises the satisfying credential for a matched scheme and blocks on an unsatisfied one', async () => {
-    const r = setupRepo(openapi(), API_KEY)
-    const { byFlow, runner } = collectAuth()
-    await runGenerate({
-      repoRoot: r,
-      interfaces: meInterfaces(r),
-      extractSession: extractSessionBy({
-        'paths/get-getme': [{ claim: 'GET /me returns the caller', driver: 'api', reason: 'HTTP 200' }],
-        'paths/get-getadmin': [{ claim: 'GET /admin returns admin data', driver: 'api', reason: 'HTTP 200' }],
-        'paths/get-getpublic': [{ claim: 'GET /public returns data', driver: 'api', reason: 'HTTP 200' }],
-      }),
-      flowWorkerSession: runner,
-    })
-    // Every bound operation gets a worker, so the mapping must reach some briefing.
-    expect([...byFlow.keys()].sort()).toEqual(['paths-get-getadmin', 'paths-get-getme', 'paths-get-getpublic'])
-    const all = [...byFlow.values()].join('\n')
-    // apiKeyAuth (GET /me) is satisfied by the api-key credential via the header heuristic.
-    expect(byFlow.get('paths-get-getme')!).toContain('apiKeyAuth')
-    expect(byFlow.get('paths-get-getme')!).toContain('X-API-Key')
-    // oauth2Auth (GET /admin) has no declared credential → named as unsatisfied.
-    expect(all).toContain('oauth2Auth')
-  }, 60_000)
-
-  it('names the required scheme as unsatisfied when the recipe declares no credential for it', async () => {
-    const r = setupRepo(openapi(), undefined)
-    const { byFlow, runner } = collectAuth()
-    await runGenerate({
-      repoRoot: r,
-      interfaces: meInterfaces(r),
-      extractSession: extractSessionBy({
-        'paths/get-getme': [{ claim: 'GET /me returns the caller', driver: 'api', reason: 'HTTP 200' }],
-        'paths/get-getadmin': { untestable: 'needs oauth' },
-        'paths/get-getpublic': { untestable: 'trivial' },
-      }),
-      flowWorkerSession: runner,
-    })
-    // No credentials → apiKeyAuth is unsatisfiable, so the secured GET /me is
-    // briefed with the scheme named as unsatisfied and no credential beside it.
-    const me = byFlow.get('paths-get-getme')!
-    expect(me).toContain('apiKeyAuth')
-    expect(me).not.toContain('X-API-Key')
-  }, 60_000)
-})
 
 describe('generateGuards — `satisfies` validation', () => {
   /** A worker seam that must never be reached: validation stops the run first. */
@@ -226,9 +80,6 @@ describe('generateGuards — `satisfies` validation', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: meInterfaces(r),
-      extractSession: async () => {
-        throw new Error('extraction must not run — the recipe was rejected')
-      },
       flowWorkerSession: neverAuthors,
     })
     expect(res.status).toBe('recipe-failed')
@@ -245,11 +96,8 @@ describe('generateGuards — `satisfies` validation', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: meInterfaces(r),
-      extractSession: extractSessionBy({
-        'paths/get-getme': { untestable: 'nothing to author here' },
-        'paths/get-getadmin': { untestable: 'nothing to author here' },
-        'paths/get-getpublic': { untestable: 'nothing to author here' },
-      }),
+      // An OpenAPI document is one section of the tree, so its one claim is untestable.
+      claims: claimsBy({ 'openapi-yaml': { untestable: 'nothing to author here' } }),
       flowWorkerSession: neverAuthors,
     })
     expect(res.status).toBe('ok')
@@ -268,7 +116,7 @@ describe('generateGuards — `satisfies` validation', () => {
     const res = await runGenerate({
       repoRoot: r,
       interfaces: interfacesOf(r),
-      extractSession: extractSessionBy({ login: { untestable: 'prose only' } }),
+      claims: claimsBy({ login: { untestable: 'prose only' } }),
       flowWorkerSession: neverAuthors,
     })
     expect(res.status).toBe('ok')

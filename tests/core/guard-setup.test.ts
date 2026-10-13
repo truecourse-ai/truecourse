@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 import {
   recipePath,
   computeRecipeFingerprint,
-  legacyPreparationFingerprint,
+  computePreparationFingerprint,
   readGuardSetup,
   writeGuardSetup,
   dependenciesPath,
@@ -34,10 +34,10 @@ import {
   proposeRecipe,
   recipeCacheKey,
   RECIPE_CACHE_NAME,
-  legacyInterfacesFingerprint,
-  legacySeedStepFingerprint,
+  interfacesFingerprint,
+  computeSeedStepFingerprint,
   authFingerprint,
-  legacyRecipeStepFingerprint,
+  stepInputComponents,
   type GuardSetupSeedSession,
 } from '@truecourse/guard-generator';
 import type { GuardSetupReport, InterfacesFile } from '@truecourse/shared';
@@ -400,17 +400,17 @@ function settledRepo(): string {
     status: 'ok',
     recipe: { status: 'ok', outcome: 'exists' },
     steps: [
-      { key: 'recipe', status: 'ok', inputFingerprint: legacyRecipeStepFingerprint(r) },
+      // The recipe's and the catalog's inputs fold the detection snapshot, which
+      // only an analysis pass can produce — the estimate only asks whether those
+      // rows settled.
+      { key: 'recipe', status: 'ok', inputFingerprint: 'settled-recipe' },
       { key: 'detect', status: 'ok', inputFingerprint: '' },
-      // The catalog fingerprint folds the detection snapshot, which only an
-      // analysis pass can produce — the estimate only asks whether a row settled.
       { key: 'catalog', status: 'ok', inputFingerprint: 'settled-catalog' },
-      // A spine an older build wrote: no named inputs, so each row is checked
-      // against the step's OLD fingerprint once and settles.
-      { key: 'interfaces', status: 'ok', inputFingerprint: legacyInterfacesFingerprint(r) },
-      { key: 'seed', status: 'ok', inputFingerprint: legacySeedStepFingerprint(r) },
-      { key: 'preparations', status: 'ok', inputFingerprint: legacyPreparationFingerprint(r) },
-      { key: 'auth', status: 'ok', inputFingerprint: authFingerprint(r) },
+      // The rest carry the named inputs this tree computes, as a run records them.
+      { key: 'interfaces', status: 'ok', inputFingerprint: interfacesFingerprint(r), inputComponents: stepInputComponents(r, 'interfaces', {}) },
+      { key: 'seed', status: 'ok', inputFingerprint: computeSeedStepFingerprint(r, []), inputComponents: stepInputComponents(r, 'seed', {}) },
+      { key: 'preparations', status: 'ok', inputFingerprint: computePreparationFingerprint(r), inputComponents: stepInputComponents(r, 'preparations', {}) },
+      { key: 'auth', status: 'ok', inputFingerprint: authFingerprint(r), inputComponents: stepInputComponents(r, 'auth', {}) },
     ],
   };
   writeGuardSetup(r, report);

@@ -52,8 +52,8 @@ export interface GuardVersion extends StoredVersion {
   restoredFrom: string | null;
 }
 
-/** The two workspace series. Decisions are a ledger people edit, not a series. */
-export type WorkspaceSpecVersionArtifact = 'corpus' | 'docs';
+/** The workspace series: the corpus, the claims read from its documents, and the document snapshot. Decisions are a ledger people edit, not a series. */
+export type WorkspaceSpecVersionArtifact = 'corpus' | 'claims' | 'docs';
 
 export interface WorkspaceSpecVersion extends StoredVersion {
   artifact: WorkspaceSpecVersionArtifact;
@@ -61,11 +61,6 @@ export interface WorkspaceSpecVersion extends StoredVersion {
   sourceCommit: string | null;
 }
 
-/** One section of a document, as the guard manifest binds it. */
-export interface VersionSectionRef {
-  doc: string;
-  anchor: string;
-}
 
 /**
  * What changed between two versions of a scenario set. A flow is LIVE in a
@@ -83,7 +78,8 @@ export interface ScenarioSetDiff {
   };
   scenarios: { added: string[]; removed: string[] };
   /** A section is covered when a live flow with at least one scenario binds it. */
-  sections: { gained: VersionSectionRef[]; lost: VersionSectionRef[] };
+  /** The claims (by id) a live flow with a scenario proves on one side only. */
+  claims: { gained: string[]; lost: string[] };
 }
 
 /** What changed between two versions of a workspace corpus. */
@@ -95,6 +91,6 @@ export interface CorpusDiff {
     retagged: Array<{ ref: string; from: string[]; to: string[] }>;
   };
   areas: { added: string[]; removed: string[] };
-  /** Overlap flags by document pair: pairs flagged only after, only before. */
+  /** Conflicts by document pair: pairs flagged only after, only before. */
   conflicts: { opened: number; closed: number };
 }

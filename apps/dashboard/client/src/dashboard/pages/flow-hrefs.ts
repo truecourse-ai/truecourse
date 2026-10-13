@@ -18,7 +18,7 @@ export function flowsHref(repoId?: string): string {
   return repoId ? `${FLOWS_BASE}?repo=${encodeURIComponent(repoId)}` : FLOWS_BASE;
 }
 
-/** The list, narrowed to one of the five coverage words. */
+/** The list, narrowed to one of the coverage words. */
 export function flowsStatusHref(status: string): string {
   return `${FLOWS_BASE}?status=${encodeURIComponent(status)}`;
 }

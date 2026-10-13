@@ -1,6 +1,6 @@
 /**
  * Context › Documents and Conflicts: the rows an open pull request's check
- * adds. A document the check moved a section of is listed again under the
+ * adds. A document the check moved is listed again under the
  * pull request's number; a conflict the head would create is a row of its
  * own, with no page to open. Both narrow by `?pr=<owner/repo>#<n>`.
  */
@@ -52,7 +52,7 @@ const doc = (ref: string, title: string): ContextDocumentRow => ({
 
 const DOCUMENTS = [doc(REFUNDS_REF, 'Refunds'), doc(PAYOUTS_REF, 'Payouts')];
 
-/** #7 moved a section of Refunds and would put Refunds in conflict with Payouts. */
+/** #7 moved Refunds and would put Refunds in conflict with Payouts. */
 const PULL: WorkspacePullRequestRow = {
   repoFullName: REPO.name,
   number: 7,
@@ -74,11 +74,10 @@ const PULL: WorkspacePullRequestRow = {
     conclusion: 'failure',
     reason: 'conflict',
     settledAt: '2026-09-02T01:00:00.000Z',
-    sectionsMoved: [{ doc: REFUNDS_REF, anchor: 'window', flows: [] }],
+    docsMoved: [{ doc: REFUNDS_REF, flows: [] }],
     conflictsCreated: [
       {
         docs: [REFUNDS_REF, PAYOUTS_REF],
-        sections: [['window'], ['timing']],
         note: 'the refund window is two days in one and five in the other',
         area: 'acme/refunds',
         path: 'docs/refunds.md',
@@ -92,7 +91,7 @@ const PULL: WorkspacePullRequestRow = {
 /** The workspace's own corpus, with one open conflict of its own between the two documents. */
 const CORPUS = {
   corpus: {
-    version: 3,
+    version: 6,
     generatedAt: '2026-09-02T00:00:00.000Z',
     docs: [
       { ref: REFUNDS_REF, kind: 'prd', lastTouched: '', areaTags: ['acme/payments'] },
@@ -104,7 +103,7 @@ const CORPUS = {
         product: 'acme',
         concern: 'payments',
         docRefs: [REFUNDS_REF, PAYOUTS_REF],
-        overlaps: [{ docs: [REFUNDS_REF, PAYOUTS_REF], note: 'who owns the refund window', sections: [] }],
+        conflicts: [{ docs: [REFUNDS_REF, PAYOUTS_REF], note: 'who owns the refund window', sections: [] }],
       },
     ],
     relations: [],

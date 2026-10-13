@@ -1,7 +1,7 @@
 /**
  * The Spec-corpus data-source SEAM.
  *
- * `SpecCorpusView` / `SpecOverlapDetail` / `SpecDocViewer` (+ the `useSpecCorpus`
+ * `SpecCorpusView` / `SpecConflictDetail` / `SpecDocViewer` (+ the `useSpecCorpus`
  * hook) read the corpus, one doc's markdown, and record decisions
  * (includes/excludes/conflict-resolution) through a `SpecSource` rather than
  * calling `@/lib/api` directly. The DEFAULT is the repo implementation
@@ -42,24 +42,24 @@ export interface SkippedPage {
   total: number;
 }
 
-/** The section-verdict POST payload (pick-a-side / dismissal). */
+/** The verdict POST payload (pick-a-side / dismissal). */
 export interface ConflictResolutionPayload {
   docA: string;
-  anchorA: string | null;
   quoteA?: string;
+  sentenceA: string;
   docB: string;
-  anchorB: string | null;
   quoteB?: string;
+  sentenceB: string;
   verdict: 'a' | 'b' | 'dismissed';
   note?: string;
 }
 
-/** The verdict-DELETE payload (dispute identity: unordered pair + anchors). */
+/** The verdict-DELETE payload: the conflict's identity, each side's doc and sentence. */
 export interface DeleteConflictPayload {
   docA: string;
-  anchorA: string | null;
+  sentenceA: string;
   docB: string;
-  anchorB: string | null;
+  sentenceB: string;
 }
 
 /**

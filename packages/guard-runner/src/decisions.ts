@@ -11,9 +11,9 @@ import fs from 'node:fs'
 import {
   GuardDecisionsSchema,
   EMPTY_GUARD_DECISIONS,
-  dismissedClaimKey,
   type GuardDecisions,
   type GuardDismissedClaim,
+  type GuardClaimIdentity,
 } from '@truecourse/shared'
 import { guardDecisionsPath, atomicWriteJson } from './store.js'
 
@@ -40,7 +40,7 @@ export function writeGuardDecisions(repoRoot: string, decisions: GuardDecisions)
 }
 
 /**
- * Add a dismissal (idempotent on doc+anchor+title identity — a re-dismiss refreshes
+ * Add a dismissal (idempotent on the claim id — a re-dismiss refreshes
  * `dismissedAt`/`note` in place, never duplicates), returning the updated file.
  */
 export function dismissGuardClaim(
@@ -48,10 +48,7 @@ export function dismissGuardClaim(
   claim: GuardDismissedClaim,
 ): GuardDecisions {
   const decisions = readGuardDecisions(repoRoot)
-  const key = dismissedClaimKey(claim.doc, claim.anchor, claim.title)
-  const dismissedClaims = decisions.dismissedClaims.filter(
-    (d) => dismissedClaimKey(d.doc, d.anchor, d.title) !== key,
-  )
+  const dismissedClaims = decisions.dismissedClaims.filter((d) => d.claimId !== claim.claimId)
   dismissedClaims.push(claim)
   const next: GuardDecisions = { ...decisions, dismissedClaims }
   writeGuardDecisions(repoRoot, next)
@@ -61,15 +58,12 @@ export function dismissGuardClaim(
 /** Remove a dismissal by identity (no-op when absent), returning the updated file. */
 export function undismissGuardClaim(
   repoRoot: string,
-  identity: { doc: string; anchor: string; title: string },
+  identity: GuardClaimIdentity,
 ): GuardDecisions {
   const decisions = readGuardDecisions(repoRoot)
-  const key = dismissedClaimKey(identity.doc, identity.anchor, identity.title)
   const next: GuardDecisions = {
     ...decisions,
-    dismissedClaims: decisions.dismissedClaims.filter(
-      (d) => dismissedClaimKey(d.doc, d.anchor, d.title) !== key,
-    ),
+    dismissedClaims: decisions.dismissedClaims.filter((d) => d.claimId !== identity.claimId),
   }
   writeGuardDecisions(repoRoot, next)
   return next

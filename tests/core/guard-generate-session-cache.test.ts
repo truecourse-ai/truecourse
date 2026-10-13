@@ -36,17 +36,15 @@ vi.mock('../../packages/core/src/services/llm/session-driver.js', () => ({
 }))
 
 import { getCacheEntry } from '@truecourse/llm'
+import { parseDocTree, sentenceKey } from '@truecourse/shared'
 import {
-  collectWorkDocs,
   planGuardWork,
   type FlowSynthesisArea,
   type GuardDoc,
 } from '@truecourse/guard-generator'
 import {
-  EXTRACT_SESSION_CACHE_NAME,
   FLOWS_SESSION_CACHE_NAME,
   createGuardGenerateSessionSeams,
-  extractSessionCacheKey,
   flowsSessionCacheKey,
 } from '../../packages/core/src/services/guard-generate/index'
 import { listStoredSessionRuns } from '../../packages/core/src/lib/sessions-store.js'
@@ -57,8 +55,8 @@ import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-se
 
 const DOC = 'docs/tasks.md'
 const CONTENT = ['# Tasks', '', '## Creating tasks', '', '`relkit add <title>` creates a task.'].join('\n')
-const ANCHOR = 'tasks/creating-tasks'
 const CLAIM = '`relkit add <title>` creates a task'
+const CLAIM_ID = 'claim::tasks::create'
 
 const repos: string[] = []
 
@@ -86,7 +84,7 @@ function docRepo(): string {
   return r
 }
 
-const docsOf = (r: string): GuardDoc[] => collectWorkDocs(r, planGuardWork(r))
+const docsOf = (r: string): GuardDoc[] => planGuardWork(r).docs
 
 /** Call a session tool the way a driver does. */
 async function callTool(call: StubCall, name: string, args: unknown): Promise<void> {
@@ -99,123 +97,7 @@ async function callTool(call: StubCall, name: string, args: unknown): Promise<vo
   await call.emit({ type: 'tool-result', toolName: name, content: result.content, isError: result.isError })
 }
 
-const EXTRACT_DRAFT = {
-  claims: [{ claim: CLAIM, driver: 'cli' as const, sectionAnchor: ANCHOR, reason: 'stdout carries the new id', verification: { scope: 'configuration', method: 'behavior', observable: 'Task id on stdout', cases: [{ id: 'created-id', claim: 'Prints the created task id', method: 'behavior', requires: ['process'], conditions: [] }] }, needs: [] }],
-  untestable: [],
-}
-
 const transportFailure = { kind: 'failure' as const, failure: { kind: 'transport' as const, detail: 'gone', class: 'provider' as const, retryability: 'none' as const } }
-
-describe('the extract seam’s cache', () => {
-  it('resumes completed extraction without constructing a driver, and refuses a missing result', async () => {
-    const r = docRepo()
-    const [doc] = docsOf(r)
-    sessionScript = async call => {
-      await callTool(call, 'check_claims', EXTRACT_DRAFT)
-      return outcome(EXTRACT_DRAFT)
-    }
-    await createGuardGenerateSessionSeams({ repoRoot: r }).extractSession({ docs: [doc], prerequisiteTargets: [] })
-    const before = constructions
-    sessionScript = () => { throw new Error('completed extraction must not run again') }
-    const resumed = createGuardGenerateSessionSeams({ repoRoot: r, replaySteps: ['extract', 'flows'] })
-    expect((await resumed.extractSession({ docs: [doc], prerequisiteTargets: [] })).summary).toMatchObject({ ran: 0, fromCache: 1 })
-    await expect(resumed.extractSession({ docs: [{ ...doc, content: `${doc.content}\nNew requirement` }], prerequisiteTargets: [] }))
-      .rejects.toMatchObject({ name: 'GenerateStepNotReadyError', step: 'extract' })
-    expect(constructions).toBe(before)
-  })
-
-  it('runs a session on a miss, writes the entry, and serves the next run from it', async () => {
-    const r = docRepo()
-    const [doc] = docsOf(r)
-    let ran = 0
-    sessionScript = async (call) => {
-      ran++
-      await callTool(call, 'check_claims', EXTRACT_DRAFT)
-      return outcome(EXTRACT_DRAFT)
-    }
-
-    const first = await createGuardGenerateSessionSeams({ repoRoot: r }).extractSession({ docs: [doc], prerequisiteTargets: [] })
-    expect(first.summary).toMatchObject({ ran: 1, fromCache: 0, failed: 0 })
-    expect(ran).toBe(1)
-    expect(constructions).toBe(1)
-    // Only the OUTPUT is stored, never the envelope.
-    expect(await getCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(doc))).toEqual(EXTRACT_DRAFT)
-
-    const seams = createGuardGenerateSessionSeams({ repoRoot: r })
-    const second = await seams.extractSession({ docs: [doc], prerequisiteTargets: [] })
-    expect(second.summary).toMatchObject({ ran: 0, fromCache: 1, failed: 0 })
-    expect(ran).toBe(1)
-    // A fully-cached run builds NO driver and opens NO sessions-store run.
-    expect(constructions).toBe(1)
-    expect(seams.runId()).toBeUndefined()
-  })
-
-  it('opens exactly one sessions-store run for the whole invocation', async () => {
-    const r = docRepo()
-    const [doc] = docsOf(r)
-    sessionScript = async (call) => {
-      await callTool(call, 'check_claims', EXTRACT_DRAFT)
-      return outcome(EXTRACT_DRAFT)
-    }
-    const seams = createGuardGenerateSessionSeams({ repoRoot: r })
-    await seams.extractSession({ docs: [doc], prerequisiteTargets: [] })
-    const runId = seams.runId()
-    expect(runId).toBeTruthy()
-    expect((await listStoredSessionRuns(r, 'guard-generate')).map((run) => run.runId)).toEqual([runId])
-    seams.finish(false)
-  })
-
-  // The INJECTED driver seam (`opts.driver`) and its documented convention:
-  // whoever owns the driver owns the run record, so an injected one creates
-  // none at all — `runId()` stays undefined, `finish()` no-ops, and nothing is
-  // written under `sessions/`. The internal `createClaudeCodeSessionDriver`
-  // path is never reached (the mock's counter proves it).
-  it('an injected driver runs the sessions and opens NO run record', async () => {
-    const r = docRepo()
-    const [doc] = docsOf(r)
-    const { driver } = stubDriver(async (call) => {
-      await callTool(call, 'check_claims', EXTRACT_DRAFT)
-      return outcome(EXTRACT_DRAFT)
-    })
-    const { persistence, events } = memoryPersistence()
-
-    const seams = createGuardGenerateSessionSeams({
-      repoRoot: r,
-      driver: async () => ({ driver, persistence }),
-    })
-    const { byDoc, summary } = await seams.extractSession({ docs: [doc], prerequisiteTargets: [] })
-
-    expect(summary).toMatchObject({ ran: 1, fromCache: 0, failed: 0 })
-    expect(byDoc.get(doc.doc)?.ok).toBe(true)
-    // The transcript went to the INJECTED persistence, not a store run.
-    expect([...events.values()].flat().some((e) => e.type === 'session-start')).toBe(true)
-    expect(constructions).toBe(0)
-    expect(seams.runId()).toBeUndefined()
-    expect(() => seams.finish(false)).not.toThrow()
-    expect(await listStoredSessionRuns(r, 'guard-generate')).toEqual([])
-  })
-
-  it('never caches a FAILED session — the next run re-attempts it', async () => {
-    const r = docRepo()
-    const [doc] = docsOf(r)
-    let ran = 0
-    sessionScript = () => {
-      ran++
-      return transportFailure
-    }
-
-    const first = await createGuardGenerateSessionSeams({ repoRoot: r }).extractSession({ docs: [doc], prerequisiteTargets: [] })
-    expect(first.summary).toMatchObject({ ran: 1, failed: 1, allTransport: true })
-    expect(first.byDoc.get(doc.doc)).toEqual({
-      ok: false,
-      reason: 'extraction session failed: the provider failed (provider): gone',
-    })
-    expect(await getCacheEntry(r, EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey(doc))).toBeNull()
-
-    await createGuardGenerateSessionSeams({ repoRoot: r }).extractSession({ docs: [doc], prerequisiteTargets: [] })
-    expect(ran).toBe(2)
-  })
-})
 
 // ---------------------------------------------------------------------------
 // The flows seam: the engine's refusal converts a COMPLETED outcome into a
@@ -224,7 +106,7 @@ describe('the extract seam’s cache', () => {
 
 const AREA = (r: string): FlowSynthesisArea => ({
   areaId: 'tasks',
-  claims: [{ doc: DOC, anchor: ANCHOR, title: CLAIM, driver: 'cli' }],
+  claims: [{ id: CLAIM_ID, doc: DOC, title: CLAIM, sentences: [sentenceKey(parseDocTree(DOC, CONTENT).sentences.find((s) => s.text.includes(CLAIM))!.text)] }],
   docs: [
     {
       doc: DOC,
@@ -234,11 +116,11 @@ const AREA = (r: string): FlowSynthesisArea => ({
 })
 
 const CLEAN_FLOWS = {
-  flows: [{ title: 'Create a task', goal: 'a user adds a task', milestones: [{ order: 1, doc: DOC, anchor: ANCHOR, claimTitle: CLAIM }] }],
+  flows: [{ title: 'Create a task', goal: 'a user adds a task', milestones: [{ order: 1, claimId: CLAIM_ID }] }],
   noFlowClaims: [],
 }
 const DIRTY_FLOWS = {
-  flows: [{ title: 'Invented', goal: 'g', milestones: [{ order: 1, doc: DOC, anchor: ANCHOR, claimTitle: 'nothing like a claim' }] }],
+  flows: [{ title: 'Invented', goal: 'g', milestones: [{ order: 1, claimId: 'claim::tasks::invented' }] }],
   noFlowClaims: [],
 }
 

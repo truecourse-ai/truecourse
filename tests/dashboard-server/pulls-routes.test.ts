@@ -60,7 +60,7 @@ const report = (over: Partial<PullRequestCheckReport> = {}): PullRequestCheckRep
   base: { mergeBase: 'b', commit: 'b', nearestWithBase: null },
   fork: false,
   conflictsCreated: [],
-  sectionsMoved: [],
+  docsMoved: [],
   repositoriesAffected: [],
   run: {
     runId: 'run-1',
@@ -103,7 +103,7 @@ describe('GET /api/repos/:id/pulls', () => {
       status: 'settled',
       conclusion: 'failure',
       reason: 'new-failures',
-      report: report({ sectionsMoved: [{ doc: 'd', anchor: 'a', flows: [] }] }),
+      report: report({ docsMoved: [{ doc: 'd', flows: [] }] }),
       settledAt: '2026-09-21T11:00:00.000Z',
     });
 
@@ -117,7 +117,7 @@ describe('GET /api/repos/:id/pulls', () => {
       reason: 'new-failures',
       createdAt: latest.createdAt,
       settledAt: '2026-09-21T11:00:00.000Z',
-      counts: { conflictsCreated: 0, sectionsMoved: 1, newFailures: 1, preExisting: 2, fixed: 3 },
+      counts: { conflictsCreated: 0, docsMoved: 1, newFailures: 1, preExisting: 2, fixed: 3 },
     });
     expect(res.body.pullRequests[1].check).toBeNull();
 
@@ -161,7 +161,7 @@ describe('GET /api/context/pull-requests', () => {
     await pulls.savePullRequest(pr(3, { state: 'closed' }));
     const settled = await pulls.createCheck({ repoFullName: fixture.project.name, number: 1, headSha: 'head-1' });
     const created = [
-      { docs: ['a', 'b'] as [string, string], sections: [['x'], ['y']] as [string[], string[]], note: 'n', path: 'a.md', line: 3, blocksRepositories: [] },
+      { docs: ['a', 'b'] as [string, string], note: 'n', path: 'a.md', line: 3, blocksRepositories: [] },
     ];
     await pulls.updateCheck(settled.id, {
       status: 'settled',
@@ -183,7 +183,7 @@ describe('GET /api/context/pull-requests', () => {
       reason: 'conflict',
       settledAt: '2026-09-21T11:00:00.000Z',
       conflictsCreated: created,
-      sectionsMoved: [],
+      docsMoved: [],
     });
   });
 });
@@ -199,7 +199,7 @@ describe('POST /api/context/conflict-resolution', () => {
     });
     await request(app)
       .post('/api/context/conflict-resolution')
-      .send({ docA: 'context/s/a.md', anchorA: 'A', docB: 'context/s/b.md', anchorB: 'B', verdict: 'a' })
+      .send({ docA: 'context/s/a.md', sentenceA: 's-a', docB: 'context/s/b.md', sentenceB: 's-b', verdict: 'a' })
       .expect(200);
     expect(rechecked).toEqual([TEST_ORG]);
   });

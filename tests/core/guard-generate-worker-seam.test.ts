@@ -36,7 +36,6 @@ vi.mock('../../packages/core/src/services/llm/session-driver.js', () => ({
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import type { ToolContext, SessionOutcome } from '../../packages/agent-loop/src/index'
 import {
-  collectWorkDocs,
   planGuardWork,
   workerCacheKey,
   workerRecipeMaterial,
@@ -44,7 +43,7 @@ import {
   type GuardDoc,
   type WorkerFidelityInput,
 } from '@truecourse/guard-generator'
-import { GUARD_REVIEW_POLICY_VERSION, type GuardExpectedRed } from '@truecourse/shared'
+import { type GuardExpectedRed } from '@truecourse/shared'
 import {
   FIDELITY_SESSION_BUDGET,
   FIDELITY_SESSION_CACHE_NAME,
@@ -53,7 +52,6 @@ import {
   FLOW_WORKER_BUDGET,
   FLOW_WORKER_CACHE_NAME,
   FLOW_WORKER_STAGE_VERSION,
-  flowWorkerLegacyCacheKeys,
   FLOW_WORKER_CLI_SYSTEM_PROMPT,
   FLOW_WORKER_WEB_SYSTEM_PROMPT,
   FLOW_WORKER_SESSION_KIND,
@@ -63,7 +61,6 @@ import {
   fidelitySessionCacheKey,
   fidelitySessionDef,
   flowWorkerCacheKey,
-  flowWorkerPromptFingerprint,
   flowWorkerSessionDef,
   judgeWorkerFidelity,
 } from '../../packages/core/src/services/guard-generate/index'
@@ -101,13 +98,13 @@ function docRepo(): string {
   return r
 }
 
-const docsOf = (r: string): GuardDoc[] => collectWorkDocs(r, planGuardWork(r))
+const docsOf = (r: string): GuardDoc[] => planGuardWork(r).docs
 
 const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex')
 
 const YAML = 'title: Create a task\nsteps:\n  - run: ["add", "milk"]\n    expect:\n      exit: 0\n    milestone: 1\n'
 
-const reviewFor = (yaml: string) => ({ policyVersion: GUARD_REVIEW_POLICY_VERSION, scenarioFingerprint: sha256(yaml), caseEvidence: [] })
+const reviewFor = (yaml: string) => ({ scenarioFingerprint: sha256(yaml) })
 
 /** A recording {@link FlowWorkerTask} whose closures answer from a script. */
 interface FakeTask {
@@ -130,9 +127,7 @@ function fakeTask(over: Partial<FlowWorkerTask> = {}, flowId = 'create-a-task'):
     epic: false,
     cacheMaterial: {
       flowFingerprint: `fp-${flowId}`,
-      sectionKeys: ['docs/tasks.md#tasks/creating-tasks:abc'],
       interfaceFingerprints: ['iface-1'],
-      recipeFingerprint: 'recipe-1',
       mode: 'scratch',
       priorShas: [],
     },
@@ -240,13 +235,6 @@ describe('flowWorkerSessionDef', () => {
     }
   })
 
-  it('keys the legacy cache read on the frozen prompt fingerprints, never the live prompt', () => {
-    // A prompt edit must not move the old key: every entry stored before the
-    // prompt left the key is read through it once and re-saved.
-    expect(['cli', 'api', 'web'].map(surface => flowWorkerPromptFingerprint(surface as 'cli' | 'api' | 'web')))
-      .toEqual(['15277774880ee40e', '1ef548ff71971375', 'e3062e1cd80be77a'])
-  })
-
   it('routes both tools to the task’s engine closures', async () => {
     const { task, calls } = fakeTask()
     const d = flowWorkerSessionDef({ task, judgeWith: () => async () => ({ kind: 'faithful' }) })
@@ -277,23 +265,10 @@ describe('flowWorkerCacheKey', () => {
         `flow-worker-v${FLOW_WORKER_STAGE_VERSION}`,
         { fingerprint: base.cacheMaterial.flowFingerprint },
         'cli',
-        base.cacheMaterial.sectionKeys,
         base.cacheMaterial.interfaceFingerprints,
         workerRecipeMaterial(base.cacheMaterial),
       ),
     )
-    // The old key — the surface's prompt over the whole recipe fingerprint —
-    // stays computable, so a committed entry is served once on the way over.
-    expect(flowWorkerLegacyCacheKeys(base)).toEqual([expect.not.stringMatching(flowWorkerCacheKey(base))])
-    // The ONE old key folds the bag as it was then, never a formula nothing
-    // shipped: a web task whose bag moved still has exactly one.
-    const web = { ...base, surface: 'web' as const,
-      cacheMaterial: { ...base.cacheMaterial, interfaceFingerprints: ['iface-1', 'handed'], legacyInterfaceFingerprints: ['iface-1', 'whole-catalog'] } }
-    const [webLegacy, ...rest] = flowWorkerLegacyCacheKeys(web)
-    expect(rest).toEqual([])
-    expect(webLegacy).toBe(workerCacheKey(flowWorkerPromptFingerprint('web'), { fingerprint: base.cacheMaterial.flowFingerprint }, 'web',
-      base.cacheMaterial.sectionKeys, ['iface-1', 'whole-catalog'], base.cacheMaterial.recipeFingerprint))
-    expect(webLegacy).not.toBe(flowWorkerCacheKey(web))
   })
 
   it('moves with every behavior-affecting input and with nothing else', () => {
@@ -302,27 +277,23 @@ describe('flowWorkerCacheKey', () => {
       flowWorkerCacheKey({ ...base, surface, cacheMaterial: { ...base.cacheMaterial, ...over } })
 
     expect(move({ flowFingerprint: 'other' })).not.toBe(key)
-    expect(move({ sectionKeys: ['other'] })).not.toBe(key)
     expect(move({ interfaceFingerprints: ['other'] })).not.toBe(key)
     expect(move({ recipeSlice: 'other' })).not.toBe(key)
     expect(move({ roster: 'other' })).not.toBe(key)
     expect(move({ preparations: 'other' })).not.toBe(key)
     expect(move({}, 'api')).not.toBe(key)
-    // The whole recipe fingerprint rides along for the OLD key alone: a
-    // dependency bump moves it and re-authors nothing.
-    expect(move({ recipeFingerprint: 'other' })).toBe(key)
     // The flow ID and work item are bookkeeping, not key material.
     expect(flowWorkerCacheKey({ ...base, flowId: 'renamed', workItem: 'flow:renamed:cli' })).toBe(key)
   })
 
-  it('is insensitive to the ORDER of the two sorted lists', () => {
+  it('is insensitive to the ORDER of the interface fingerprints', () => {
     const two = {
       ...base,
-      cacheMaterial: { ...base.cacheMaterial, sectionKeys: ['a', 'b'], interfaceFingerprints: ['x', 'y'] },
+      cacheMaterial: { ...base.cacheMaterial, interfaceFingerprints: ['x', 'y'] },
     }
     const flipped = {
       ...base,
-      cacheMaterial: { ...base.cacheMaterial, sectionKeys: ['b', 'a'], interfaceFingerprints: ['y', 'x'] },
+      cacheMaterial: { ...base.cacheMaterial, interfaceFingerprints: ['y', 'x'] },
     }
     expect(flowWorkerCacheKey(two)).toBe(flowWorkerCacheKey(flipped))
   })
@@ -383,7 +354,6 @@ describe('the flow-worker pool’s cache', () => {
     await setCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task), {
       outcome: { kind: 'settled', scenarioYamlSha: sha256(YAML), expectedReds: [] },
       scenarioYaml: YAML,
-      version: GUARD_REVIEW_POLICY_VERSION,
       reviews: [reviewFor(YAML)],
     })
 
@@ -402,37 +372,6 @@ describe('the flow-worker pool’s cache', () => {
     expect(constructions).toBe(0)
   })
 
-  it('an entry under the retired bag’s key is served with no session and re-saved under the new one', async () => {
-    const r = docRepo()
-    // The bag used to carry the prerequisites' resolved STATE where it now
-    // carries their shape, so every task with one has an old key. Without the
-    // fallback read, the first run after the change re-authors the corpus.
-    const { task, calls } = fakeTask({
-      cacheMaterial: {
-        ...fakeTask().task.cacheMaterial,
-        interfaceFingerprints: ['prereq-shape', 'iface-1'],
-        legacyInterfaceFingerprints: ['[["currencybeacon","provided"]]', 'iface-1'],
-      },
-    })
-    const [legacyKey] = flowWorkerLegacyCacheKeys(task)
-    expect(legacyKey).not.toBe(flowWorkerCacheKey(task))
-    await setCacheEntry(r, FLOW_WORKER_CACHE_NAME, legacyKey, {
-      outcome: { kind: 'settled', scenarioYamlSha: sha256(YAML), expectedReds: [] },
-      scenarioYaml: YAML,
-      version: GUARD_REVIEW_POLICY_VERSION,
-      reviews: [reviewFor(YAML)],
-    })
-
-    const { summary } = await workerSeam(r)({ tasks: [task], epicTasks: [], mutatorTasks: [], docs: docsOf(r) })
-
-    expect(summary).toMatchObject({ ran: 0, fromCache: 1, failed: 0 })
-    expect(calls.prepare).toBe(0)
-    expect(constructions).toBe(0)
-    expect(await getCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task))).toMatchObject({
-      scenarioYaml: YAML,
-    })
-  })
-
   it('carries a web task’s read-set through the cache in both directions', async () => {
     const r = docRepo()
     // A HIT stands in for the session, so the flow records what that session read.
@@ -441,7 +380,6 @@ describe('the flow-worker pool’s cache', () => {
     await setCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(hit), {
       outcome: { kind: 'settled', scenarioYamlSha: sha256(YAML), expectedReds: [] },
       scenarioYaml: YAML,
-      version: GUARD_REVIEW_POLICY_VERSION,
       reviews: [reviewFor(YAML)],
       catalogReads: ['web/home', 'home'],
     })
@@ -459,7 +397,7 @@ describe('the flow-worker pool’s cache', () => {
   it('a cached settled entry whose confirmation FAILS is a miss — the session runs and overwrites it', async () => {
     const r = docRepo()
     const { task, calls } = fakeTask({ confirmCached: async () => false })
-    const stale = { outcome: { kind: 'settled' as const, scenarioYamlSha: sha256('stale'), expectedReds: [] }, scenarioYaml: 'stale', version: GUARD_REVIEW_POLICY_VERSION, reviews: [reviewFor('stale')] }
+    const stale = { outcome: { kind: 'settled' as const, scenarioYamlSha: sha256('stale'), expectedReds: [] }, scenarioYaml: 'stale', reviews: [reviewFor('stale')] }
     await setCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task), stale)
     sessionScript = settleScript
 
@@ -473,7 +411,6 @@ describe('the flow-worker pool’s cache', () => {
     expect(entry).toEqual({
       outcome: { kind: 'settled', scenarioYamlSha: sha256(YAML), expectedReds: [] },
       scenarioYaml: YAML,
-      version: GUARD_REVIEW_POLICY_VERSION,
       reviews: [reviewFor(YAML)],
     })
   })
@@ -485,10 +422,8 @@ describe('the flow-worker pool’s cache', () => {
       prior: { scenarios: [{ id: 'create-a-task', yaml: 'prior yaml' }] },
       cacheMaterial: {
         flowFingerprint: 'fp-create-a-task',
-        sectionKeys: ['docs/tasks.md#tasks/creating-tasks:abc'],
         interfaceFingerprints: ['iface-1'],
-        recipeFingerprint: 'recipe-1',
-        mode: 'edit',
+          mode: 'edit',
         priorShas: [sha256('prior yaml')],
       },
       ...over,
@@ -511,7 +446,6 @@ describe('the flow-worker pool’s cache', () => {
       outcome: outcomeCached,
       scenarioYaml: YAML,
       scenarioYamls: [YAML, YAML2],
-      version: GUARD_REVIEW_POLICY_VERSION,
       reviews: [reviewFor(YAML), reviewFor(YAML2)],
     })
 
@@ -538,7 +472,6 @@ describe('the flow-worker pool’s cache', () => {
       },
       // One yaml for two accepted shas: nothing can be confirmed.
       scenarioYaml: YAML,
-      version: GUARD_REVIEW_POLICY_VERSION,
       reviews: [reviewFor(YAML)],
     })
     sessionScript = settleScript
@@ -575,7 +508,6 @@ describe('the flow-worker pool’s cache', () => {
       },
       scenarioYaml: YAML,
       scenarioYamls: [YAML, YAML2],
-      version: GUARD_REVIEW_POLICY_VERSION,
       reviews: [reviewFor(YAML), reviewFor(YAML2)],
     })
   })
@@ -652,7 +584,6 @@ describe('the flow-worker pool’s cache', () => {
     await setCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task), {
       outcome: { kind: 'settled', scenarioYamlSha: sha256(YAML), expectedReds: [] },
       scenarioYaml: YAML,
-      version: GUARD_REVIEW_POLICY_VERSION,
       reviews: [reviewFor(YAML)],
     })
     sessionScript = settleScript
@@ -674,7 +605,6 @@ describe('the flow-worker pool’s cache', () => {
     expect(await getCacheEntry(r, FLOW_WORKER_CACHE_NAME, flowWorkerCacheKey(task))).toEqual({
       outcome: { kind: 'settled', scenarioYamlSha: sha256(YAML), expectedReds: [] },
       scenarioYaml: YAML,
-      version: GUARD_REVIEW_POLICY_VERSION,
       reviews: [reviewFor(YAML)],
     })
     // The cache lives under the KEPT one-shot name.
@@ -892,9 +822,7 @@ describe('the flow-worker pool’s waves and progress', () => {
 // ---------------------------------------------------------------------------
 
 const FIDELITY_INPUT: WorkerFidelityInput = {
-  proofContext: { milestones: [], steps: [] },
   flowFingerprint: 'flow-fp',
-  sectionKeys: ['b', 'a'],
   scenarioBehavior: JSON.stringify({ title: 't', steps: [] }),
   briefing: 'CLAIMS…\n\nCONFIRMATION CAPTURE (the engine ran this scenario in a fresh sandbox just now):\nPASS',
 }
@@ -914,12 +842,12 @@ const childOutcome = (value: unknown): SessionOutcome<never> =>
   }) as unknown as SessionOutcome<never>
 
 describe('fidelitySessionCacheKey', () => {
-  it('is insensitive to sectionKeys order and moves with the scenario behavior', () => {
+  it('moves with the flow and the scenario behavior, and not with the briefing text', () => {
     const key = fidelitySessionCacheKey(FIDELITY_INPUT)
-    expect(fidelitySessionCacheKey({ ...FIDELITY_INPUT, sectionKeys: ['a', 'b'] })).toBe(key)
     expect(fidelitySessionCacheKey({ ...FIDELITY_INPUT, scenarioBehavior: 'other' })).not.toBe(key)
     expect(fidelitySessionCacheKey({ ...FIDELITY_INPUT, flowFingerprint: 'other' })).not.toBe(key)
-    expect(fidelitySessionCacheKey({ ...FIDELITY_INPUT, sectionKeys: ['a'] })).not.toBe(key)
+    const { briefing: _briefing, ...keyed } = FIDELITY_INPUT
+    expect(fidelitySessionCacheKey(keyed)).toBe(key)
   })
 })
 

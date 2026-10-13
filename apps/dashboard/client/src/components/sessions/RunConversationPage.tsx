@@ -28,7 +28,6 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
 import { Capsule } from '@/dashboard/ui/bits';
-import { FindingCard, FindingResolveProvider } from './conversation-pieces';
 import { STEP_DOT, formatDuration, runDuration } from './run-model';
 import { useRunConversation } from './useRunConversation';
 import type { ConversationLine, DataField, SessionBlock, StepBlock } from './conversation-model';
@@ -166,16 +165,6 @@ export function RunConversationPage({
     return () => observer.disconnect();
   }, [toEnd]);
 
-  const hasDispute = useMemo(
-    () =>
-      steps.some((step) =>
-        step.sessions.some((block) =>
-          block.lines.some((line) => line.kind === 'outcome' && line.findings.some((f) => f.dispute !== undefined)),
-        ),
-      ),
-    [steps],
-  );
-
   return (
     <div className="flex h-full min-h-0 w-full">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -234,9 +223,7 @@ export function RunConversationPage({
         </div>
       </div>
       {selected && (
-        <FindingResolveProvider repoId={repoId} active={hasDispute}>
-          <WorkPane block={selected} onClose={() => select(null)} loading={loading} hasOlder={hasOlder} loadingOlder={loadingOlder} loadOlder={loadOlder} now={now} />
-        </FindingResolveProvider>
+        <WorkPane block={selected} onClose={() => select(null)} loading={loading} hasOlder={hasOlder} loadingOlder={loadingOlder} loadOlder={loadOlder} now={now} />
       )}
     </div>
   );
@@ -925,11 +912,6 @@ function Line({ line }: { line: ConversationLine }) {
       return (
         <Message ts={line.ts}>
           <Json label="outcome" value={line.value} />
-          {line.findings.map((finding, i) => (
-            <div key={i} className="mt-2">
-              <FindingCard finding={finding} />
-            </div>
-          ))}
         </Message>
       );
     case 'failure': {

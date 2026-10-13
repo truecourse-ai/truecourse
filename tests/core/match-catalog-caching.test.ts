@@ -29,16 +29,10 @@ const base: MatchUserContext = {
     steps: [`click action ${i}`, `observe ${'catalog detail '.repeat(100)}${i}`],
   })),
   flow: { id: 'flow-login', title: 'Unique login flow', goal: 'Unique account access goal' },
-  capabilities: ['browser', 'provider-control'],
-  providerControls: [{ service: 'mail', realization: 'stub', baseUrlEnvs: ['MAIL_URL'], credentialEnv: [], operations: ['response'] }],
   milestones: [{
     order: 1,
     claim: 'Unique login obligation',
     note: 'Unique synthesis note',
-    verification: {
-      method: 'behavior', observable: 'Unique signed-in screen',
-      cases: [{ id: 'successful-login', claim: 'Unique case obligation', method: 'behavior', requires: ['browser'], conditions: ['fresh-state'] }],
-    },
   }],
 };
 
@@ -46,8 +40,6 @@ const other: MatchUserContext = {
   ...base,
   flow: { id: 'flow-logout', title: 'Unique logout flow', goal: 'Unique session end goal' },
   milestones: [{ order: 1, claim: 'Unique logout obligation' }],
-  capabilities: ['http'],
-  providerControls: [{ problem: 'Unique unresolved fixture' }],
 };
 const correction: MatchUserContext = {
   ...base,
@@ -83,13 +75,11 @@ describe('matching catalog and task contents', () => {
     expect(buildMatchCatalogPrompt({ ...base, surface: 'api' })).not.toBe(catalog);
     const task = buildMatchTaskPrompt(correction);
     for (const value of ['Unique login flow', 'Unique account access goal', 'Unique login obligation',
-      'Unique synthesis note', 'Unique signed-in screen', JSON.stringify(base.milestones[0].verification!.cases),
-      JSON.stringify(base.providerControls), JSON.stringify(base.capabilities), 'missing:action',
+      'Unique synthesis note', 'missing:action',
       '  9', '  1', 'Unique invalid gap', 'Unique invalid previous reply']) {
       expect(task).toContain(value);
       expect(catalog).not.toContain(value);
     }
-    expect(buildMatchTaskPrompt(other)).toContain('Unique unresolved fixture');
   });
 });
 

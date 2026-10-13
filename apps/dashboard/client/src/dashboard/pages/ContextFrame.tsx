@@ -1,11 +1,12 @@
 /**
  * Context's frame: the one-row header ({@link PageHeader}, the platform's), the
- * WORKSPACE's two actions in it, and the side menu of its three sections beside
+ * WORKSPACE's two actions in it, and the side menu of its four sections beside
  * the content.
  *
  * Context is where documentation is sourced, all of it: a source is added here
  * and listed here (the section LANDS on Sources), its documents are curated
- * here, the conflicts between them are settled here, and a repository then
+ * here, the claims they make are listed here with how each stands, the
+ * conflicts between them are settled here, and a repository then
  * LINKS the sources it reads on its own Context tab. The repository console has
  * no corpus of its own any more.
  *
@@ -29,9 +30,9 @@ import { toastNoLlmProvider, toastOutOfCredits } from '@/dashboard/shell/use-run
 import { useWorkspaceRuns } from '@/dashboard/shell/use-workspace-runs';
 import { useContextSources, useContextStaleness } from '@/dashboard/shell/use-context';
 import { AddContextDialog } from './AddContextDialog';
-import { CONFLICTS_BASE, CONTEXT_BASE, DOCUMENTS_BASE } from './context-hrefs';
+import { CLAIMS_BASE, CONFLICTS_BASE, CONTEXT_BASE, DOCUMENTS_BASE } from './context-hrefs';
 
-export type ContextSection = 'sources' | 'documents' | 'conflicts';
+export type ContextSection = 'sources' | 'documents' | 'claims' | 'conflicts';
 
 const ACTION =
   'rounded border border-border px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted/60 disabled:opacity-50';
@@ -167,6 +168,7 @@ export function ContextFrame({
           items={[
             { id: 'sources', label: 'Sources', to: CONTEXT_BASE },
             { id: 'documents', label: 'Documents', to: DOCUMENTS_BASE },
+            { id: 'claims', label: 'Claims', to: CLAIMS_BASE },
             { id: 'conflicts', label: 'Conflicts', to: CONFLICTS_BASE },
           ]}
         />

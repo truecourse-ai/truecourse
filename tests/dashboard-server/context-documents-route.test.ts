@@ -36,7 +36,8 @@ import { resetSpecStore, saveWorkspaceSpec, setSpecStore } from '@truecourse/cor
 import { clearTestRegistry } from '../helpers/test-fixture';
 import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store';
 import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/memory-guard-overlays';
-import { manifestPath, writeGuardLatest } from '@truecourse/guard-runner';
+import { guardFlowsPath, manifestPath, writeGuardClaims, writeGuardLatest } from '@truecourse/guard-runner';
+import { claimId } from '@truecourse/shared';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ContextDocumentRow } from '@truecourse/shared';
@@ -49,7 +50,7 @@ const ref = (sourceId: string, name: string): string => `context/${sourceId}/${n
 const REFUNDS = ref(SITE, 'refunds.md');
 const ORPHAN = ref(ONLY, 'nobody.md');
 
-/** A document with one heading: a section the coverage join has something to say about. */
+/** A document with one claim the coverage join has something to say about. */
 const BODY = '# Refunds\n\nA refund settles within two business days.\n';
 
 let app: Express;
@@ -85,12 +86,35 @@ const corpus = (): CuratedCorpus =>
   }) as unknown as CuratedCorpus;
 
 /**
- * A stored run in which the document's one section FAILED: the manifest binds
- * the flow to the section, and the run says the flow's scenario failed there.
+ * A stored run in which the document's one claim FAILED: the flow carries the
+ * claim, and the run says the flow's scenario failed there.
  */
 function failingRun(repoPath: string): void {
-  const binding = { doc: REFUNDS, anchor: 'refunds', fingerprint: 'sha256:x' };
+  const binding = { doc: REFUNDS, sentences: ['refunds'] };
+  const id = claimId(REFUNDS, ['refunds']);
   fs.mkdirSync(path.dirname(manifestPath(repoPath)), { recursive: true });
+  // The claim the flow carries: coverage is keyed by it.
+  writeGuardClaims(repoPath, {
+    version: 1,
+    generatedAt: '2026-01-01T00:00:00.000Z',
+    claims: [{
+      id, doc: REFUNDS, sentences: ['refunds'], subject: 'refund',
+      statement: 'A refund settles within two business days.', areas: [], testable: true,
+    }],
+  });
+  fs.writeFileSync(
+    guardFlowsPath(repoPath),
+    JSON.stringify({
+      version: 1,
+      generatedAt: '2026-01-01T00:00:00.000Z',
+      flows: [{
+        id: 'f1', title: 'a refund settles', goal: 'settle a refund', fingerprint: 'sha256:f',
+        milestones: [{ order: 1, doc: REFUNDS, claimId: id, claimTitle: 'a refund settles', sentences: ['refunds'] }],
+        bindings: [binding], composedOf: [], synthesisInputsHash: 'sha256:i',
+      }],
+      noFlowClaims: [],
+    }),
+  );
   fs.writeFileSync(
     manifestPath(repoPath),
     JSON.stringify({
@@ -121,12 +145,11 @@ function failingRun(repoPath: string): void {
       {
         id: 's1',
         title: 'a refund settles',
-        binds: { doc: REFUNDS, section: 'refunds', fingerprint: 'sha256:x' },
+        binds: { doc: REFUNDS, sentences: ['refunds'] },
         outcome: 'fail',
         durationMs: 1,
       },
     ],
-    sections: [],
   });
 }
 
@@ -226,15 +249,15 @@ describe('GET /api/context/documents', () => {
   it('folds the status WORST FIRST across every repository that reads it', async () => {
     await setContextBindings(TEST_ORG, repoA.project.name, [SITE]);
     await setContextBindings(TEST_ORG, repoB.project.name, [SITE]);
-    // One repository ran the document's section and it failed; the other has
-    // run nothing, so its sections are unguarded — which the engine calls
-    // blocked. Failed outranks blocked, and the row says so.
+    // One repository ran the document's claim and it failed; the other has no
+    // claims yet, so it has nothing to say. Failed outranks silence, and the row
+    // says so.
     failingRun(repoA.repoPath);
 
     const [refunds] = await rows();
     expect(refunds!.repositories).toHaveLength(2);
     expect(refunds!.status).toBe('failed');
-    expect(refunds!.readings.map((r) => r.status)).toEqual(['failed', 'blocked']);
+    expect(refunds!.readings.map((r) => r.status)).toEqual(['failed', 'not-run']);
   });
 
   it('says what the one repository that reads it says, when only one does', async () => {
@@ -243,7 +266,7 @@ describe('GET /api/context/documents', () => {
 
     const [refunds] = await rows();
     expect(refunds!.repositories).toEqual([repoB.project.name]);
-    expect(refunds!.status).toBe('blocked');
+    expect(refunds!.status).toBe('not-run');
   });
 
   it('narrows by source, repository, area and status, AND across dimensions', async () => {
@@ -346,7 +369,7 @@ describe('GET /api/context/documents, the documents outside the corpus', () => {
       inclusion: 'in-corpus',
       decision: null,
       skipReason: null,
-      status: 'blocked',
+      status: 'not-run',
     });
   });
 

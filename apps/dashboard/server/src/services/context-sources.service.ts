@@ -38,6 +38,7 @@ import {
   updateContextSource,
 } from '@truecourse/core/lib/context-store';
 import {
+  composeContextClaims,
   composeContextDocumentRows,
   corpusDocSourceId,
   ContextConfigError,
@@ -47,21 +48,22 @@ import {
   repositorySourceId,
   siteConfig,
   siteSourceId,
+  type ContextClaimReading,
   type ContextDocumentFilter,
   type ContextSourceDriver,
   type ContextSourceScope,
 } from '@truecourse/core/services/context';
 import type { CuratedCorpus } from '@truecourse/spec-consolidator';
-import { buildDocSectionIndex } from '@truecourse/guard-runner';
+import { parseDocTree } from '@truecourse/shared';
 import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import { getWorkspaceDecisions } from '@truecourse/core/commands/spec-in-process';
-import {
-  docCoveragePlainStatus,
-  readGuardCoverageSources,
-} from '@truecourse/core/commands/guard-read';
+import { claimWordsByDoc, readGuardClaims } from '@truecourse/core/commands/guard-read';
+import { readGuardDecisions } from '@truecourse/core/lib/guard-store';
 import { requireWorkspaceDescription } from '@truecourse/core/lib/workspace-profile-store';
 import {
   CONTEXT_SOURCE_KINDS,
+  type ClaimsFile,
+  type ContextClaimsViewResponse,
   type ContextDocumentsViewResponse,
   type ContextSource,
   type ContextSourceConfig,
@@ -477,59 +479,53 @@ export async function readSourceDocuments(
   return { source: view, documents };
 }
 
-/** One section of a document, as its outline lists it. */
+/** One heading of a document, as its outline lists it. */
 export interface DocumentSectionOutline {
-  /** The section's address: what a flow milestone, a claim and a coverage row bind. */
-  anchor: string;
   heading: string;
   level: number;
-  /** First and last line, 1-based and inclusive. */
+  /** First and last line of the text under the heading, 1-based and inclusive. */
   lines: [number, number];
 }
 
-/** One document by its corpus ref: its text and its section outline. */
+/** One document by its corpus ref: its text and its outline. */
 export interface WorkspaceDocument {
   ref: string;
-  /** The whole document, or the named section's text when one was asked for. */
+  /** The whole document, or the asked-for lines of it. */
   content: string;
   sections: DocumentSectionOutline[];
-  /** The section `content` is, when one was asked for. */
-  section?: DocumentSectionOutline;
+  /** The lines `content` is, when a range was asked for. */
+  lines?: [number, number];
 }
 
 /**
- * One document's body by its corpus ref, with its section outline — the same
- * sections a flow milestone and a coverage row bind, derived by the runner's
- * section index. With `section` (an anchor), `content` is that section alone:
- * its heading to the next heading of the same or higher level.
+ * One document's body by its corpus ref, with its outline: each heading and the
+ * lines under it, from the shared document tree. With `lines` (1-based,
+ * inclusive), `content` is that range alone, clamped to the document.
  */
 export async function readWorkspaceDocument(
   org: string,
   ref: string,
-  section?: string,
+  lines?: [number, number],
 ): Promise<WorkspaceDocument> {
   const body = await readContextDocByRef(org, ref);
   if (body === null) throw createAppError(`Doc not found: ${ref}`, 404);
-  const sections: DocumentSectionOutline[] = buildDocSectionIndex(ref, body).sections.map((s) => ({
-    anchor: s.anchor,
+  const tree = parseDocTree(ref, body);
+  const sections: DocumentSectionOutline[] = tree.sections.map((s) => ({
     heading: s.headingText,
     level: s.level,
     lines: [s.startLine, s.endLine],
   }));
-  if (section === undefined) return { ref, content: body, sections };
-  const found = sections.find((s) => s.anchor === section);
-  if (!found) {
-    throw createAppError(
-      `No section "${section}" in ${ref}. Its sections: ${sections.map((s) => s.anchor).join(', ')}.`,
-      404,
-    );
+  if (lines === undefined) return { ref, content: body, sections };
+  const first = Math.max(1, lines[0]);
+  const last = Math.min(tree.lines.length, lines[1]);
+  if (first > last) {
+    throw createAppError(`Lines ${lines[0]}-${lines[1]} are outside ${ref}, which has ${tree.lines.length} lines.`, 404);
   }
-  const [first, last] = found.lines;
   return {
     ref,
-    content: body.split('\n').slice(first - 1, last).join('\n'),
+    content: tree.lines.slice(first - 1, last).join('\n'),
     sections,
-    section: found,
+    lines: [first, last],
   };
 }
 
@@ -582,26 +578,15 @@ export async function listWorkspaceDocuments(
     refsByRepo.set(binding.repoFullName, [...(refsByRepo.get(binding.repoFullName) ?? []), ...refs]);
   }
 
-  // One body read per document, for the documents somebody reads.
-  const bodies = new Map<string, string>();
-  for (const ref of new Set([...refsByRepo.values()].flat())) {
-    const body = await readContextDocByRef(org, ref);
-    if (body !== null) bodies.set(ref, body);
-  }
-
-  // One guard-state read per repository, then every document it reads
-  // composed against it. The externals index is deliberately not read: it
-  // never changes which of the five words a section wears.
+  // One claims read per repository, then every document it reads folded from
+  // the repository's claims. The externals index is deliberately not read: it
+  // never changes which of the five words a claim wears.
   const coverage = new Map<string, Map<string, GuardCoveragePlainStatus>>();
   for (const [repoFullName, refs] of refsByRepo) {
-    const guard = await readGuardCoverageSources(visible.get(repoFullName)!.path, undefined, {
-      externals: false,
-    });
+    const byDoc = claimWordsByDoc(await readGuardClaims(visible.get(repoFullName)!.path));
     const words = new Map<string, GuardCoveragePlainStatus>();
     for (const ref of new Set(refs)) {
-      const body = bodies.get(ref);
-      if (body === undefined) continue;
-      const word = docCoveragePlainStatus(ref, body, guard);
+      const word = byDoc.get(ref)?.doc;
       if (word) words.set(ref, word);
     }
     coverage.set(repoFullName, words);
@@ -623,6 +608,27 @@ export async function listWorkspaceDocuments(
     documents: filterContextDocumentRows(rows, filter),
     corpusAt: corpus.generatedAt ?? null,
   };
+}
+
+/**
+ * The Claims view: every claim the workspace's newest scan read, each folded
+ * across the caller's repositories that hold it ({@link composeContextClaims}).
+ * One claims read and one decisions read per repository.
+ */
+export async function listWorkspaceClaims(caller: ContextCaller): Promise<ContextClaimsViewResponse> {
+  const file = await loadWorkspaceSpec<ClaimsFile>({ workspaceOrgId: caller.org }, 'claims');
+  if (!file) return composeContextClaims(null, []);
+  // The map holds each repository under two names; one reading each.
+  const repos = new Set((await linkableRepos(caller)).values());
+  const readings: ContextClaimReading[] = [];
+  for (const entry of repos) {
+    readings.push({
+      repo: entry.slug,
+      view: await readGuardClaims(entry.path),
+      dismissals: (await readGuardDecisions(entry.path)).dismissedClaims,
+    });
+  }
+  return composeContextClaims(file, readings);
 }
 
 // --- Check -------------------------------------------------------------------

@@ -79,7 +79,6 @@ const FLOWS = {
       composedOf: [],
       manual: false,
       milestoneCount: 2,
-      sectionCount: 1,
       docs: ['docs/cli.md'],
       surfaces: [{ surface: 'cli', scenarioId: 'write-then-read.cli.1', status: 'pass', outcome: 'pass' }],
       drivers: ['cli'],
@@ -113,15 +112,68 @@ const HEAD_RUN = {
     {
       id: 'write-then-read.cli.1',
       title: 'Writes a file and reads it back',
-      binds: { doc: 'docs/cli.md', section: 'round-trip', fingerprint: 'sha256:x' },
+      binds: { doc: 'docs/cli.md', sentences: ['round-trip'] },
       outcome: 'fail',
       durationMs: 12,
       flowId: 'write-then-read',
       failure: { step: 2, expected: 'exit 0', actual: 'exit 1' },
     },
   ],
-  sections: [],
   runFlows: [],
+};
+
+/**
+ * A run of the stored flow tests: no scenario, one result per test. One test
+ * accepted passing failed, one passed, one never started because its seed
+ * did not hold.
+ */
+const TESTS_RUN = {
+  run: {
+    runId: 'r-tests',
+    ranAt: '2026-09-04T10:00:00Z',
+    branch: 'main',
+    commit: 'b3d8266',
+    recipeFingerprint: 'product-world',
+    origin: 'hosted',
+  },
+  summary: { total: 3, pass: 1, fail: 1, stale: 0, orphaned: 0, error: 1, blocked: 0 },
+  scenarios: [],
+  flowTests: [
+    {
+      flowId: 'write-then-read',
+      file: 'write-then-read.spec.ts',
+      authored: 'passing',
+      outcome: 'fail',
+      run: {
+        ranAt: '2026-09-04T10:00:00Z',
+        durationMs: 900,
+        steps: [
+          { order: 1, title: 'The file is written', outcome: 'passed', durationMs: 100 },
+          { order: 2, title: 'Reading it back shows the same text', outcome: 'failed', durationMs: 800, error: 'expect(received).toBe(expected)' },
+        ],
+        error: 'expect(received).toBe(expected)',
+      },
+    },
+    {
+      flowId: 'list-files',
+      file: 'list-files.spec.ts',
+      authored: 'passing',
+      outcome: 'pass',
+      run: { ranAt: '2026-09-04T10:00:00Z', durationMs: 300, steps: [{ order: 1, title: 'The files are listed', outcome: 'passed', durationMs: 300 }] },
+    },
+    {
+      flowId: 'delete-file',
+      file: 'delete-file.spec.ts',
+      authored: 'passing',
+      outcome: 'seed-failed',
+      run: { ranAt: '2026-09-04T10:00:00Z', durationMs: 50, steps: [], error: 'seed: the account could not be created' },
+    },
+  ],
+  runFlows: [
+    { flowId: 'write-then-read', title: 'Writes a file and reads it back', goal: 'round-trip a file', epic: false, milestones: [] },
+    { flowId: 'list-files', title: 'Lists the files', goal: 'see the files', epic: false, milestones: [] },
+    { flowId: 'delete-file', title: 'Deletes a file', goal: 'remove a file', epic: false, milestones: [] },
+  ],
 };
 
 /**
@@ -167,6 +219,8 @@ function serve(options: { flows?: unknown; history?: unknown; jobs?: JobView[] }
     if (rest === 'guard/scenarios') return json({ recipe: null, scenarios: [] });
     if (rest === 'guard/history') return json(options.history ?? HISTORY);
     if (rest === 'guard/runs/r-head7') return json(HEAD_RUN);
+    if (rest === 'guard/runs/r-tests') return json(TESTS_RUN);
+    if (rest === 'guard/evidence/visuals') return json({ visuals: [] });
     if (rest === 'guard/latest') return json({ error: 'no run' }, 404);
     return json({ error: `not found: ${rest}` }, 404);
   }) as unknown as typeof window.fetch;
@@ -266,6 +320,36 @@ describe('the Runs tab of a connected repository', () => {
     await screen.findByText('Writes a file and reads it back');
     expect(calls).toContain(`/api/repos/${REAL.id}/guard/runs/r-head7`);
     expect(screen.queryByText('No such run')).toBeNull();
+  });
+
+  it('opens a run of the stored flow tests with every test it ran, each opening in place', async () => {
+    serve();
+    renderAt(`/repos/${REAL.id}/runs/r-tests`);
+    const user = userEvent.setup();
+
+    const results = await screen.findByRole('list', { name: 'Run results' });
+    // Every test that did not pass leads in one group, the seed that did not hold among them.
+    const rows = within(results).getAllByRole('listitem').map((item) => item.textContent);
+    expect(rows.slice(0, 2)).toEqual([
+      expect.stringContaining('Deletes a file'),
+      expect.stringContaining('Writes a file and reads it back'),
+    ]);
+    expect(rows[2]).toContain('Lists the files');
+    // The header's time is the tests' own, not zero.
+    expect(screen.getByText('1.3s')).toBeInTheDocument();
+
+    await user.click(within(results).getByText('Writes a file and reads it back'));
+    const verdict = await screen.findByRole('region', { name: 'Test verdict' });
+    expect(within(verdict).getByText('Failed')).toBeInTheDocument();
+    expect(within(verdict).getByText('Accepted as passing, failed in this run.')).toBeInTheDocument();
+    const steps = screen.getByRole('region', { name: 'Steps' });
+    expect(within(steps).getByText('expect(received).toBe(expected)')).toBeInTheDocument();
+
+    // A seed that did not hold says what it said, since no step ran.
+    await user.click(within(results).getByText('Deletes a file'));
+    const seedVerdict = await screen.findByRole('region', { name: 'Test verdict' });
+    expect(within(seedVerdict).getByText('Seed failed')).toBeInTheDocument();
+    expect(within(seedVerdict).getByText('seed: the account could not be created')).toBeInTheDocument();
   });
 
   it('leads with the run in flight, on the branch the header names, saying its step', async () => {

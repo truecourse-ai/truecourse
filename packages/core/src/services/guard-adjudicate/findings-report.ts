@@ -17,14 +17,13 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import {
-  extractSectionTexts,
-  fingerprintText,
-  guardFindingsReportPath,
-  nodeRefContext,
-} from '@truecourse/guard-runner';
+import { guardFindingsReportPath } from '@truecourse/guard-runner';
 import {
   guardResultRunId,
+  parseDocTree,
+  sectionOfSentences,
+  sectionText,
+  sentencesByKey,
   type GuardLatest,
   type GuardScenarioResult,
 } from '@truecourse/shared';
@@ -65,13 +64,13 @@ function isReportFinding(row: GuardScenarioResult): boolean {
 }
 
 /**
- * Resolve the verbatim quote for a finding's primary bind — the section's live
- * full text, with an honest annotation when it has drifted past the bound
- * fingerprint (or is gone).
+ * Resolve the verbatim quote for a finding's primary bind — the live text of
+ * the section its bound sentences sit in, with an honest annotation when a
+ * bound sentence has left the document (or the document is gone).
  */
 function resolveQuote(
   repoRoot: string,
-  bind: { doc: string; section: string; fingerprint: string },
+  bind: { doc: string; sentences: readonly string[] },
 ): { quote: string; note?: string } {
   const abs = path.resolve(repoRoot, bind.doc);
   let content: string;
@@ -80,17 +79,16 @@ function resolveQuote(
   } catch {
     return { quote: '', note: 'the bound document is not on disk' };
   }
-  // `extractSectionTexts` returns the sections keyed by anchor.
-  const section = extractSectionTexts(bind.doc, content, nodeRefContext(repoRoot, abs)).get(bind.section);
-  if (!section) return { quote: '', note: 'the bound section no longer exists in the document' };
-  const quote =
-    section.fullText.length > QUOTE_CHARS
-      ? `${section.fullText.slice(0, QUOTE_CHARS)}…`
-      : section.fullText;
-  const drifted = fingerprintText(section.fullText) !== bind.fingerprint;
+  const tree = parseDocTree(bind.doc, content);
+  const section = sectionOfSentences(tree, bind.sentences);
+  if (!section) return { quote: '', note: 'none of the bound sentences is in the document any more' };
+  const text = sectionText(tree, section);
+  const quote = text.length > QUOTE_CHARS ? `${text.slice(0, QUOTE_CHARS)}…` : text;
+  const live = sentencesByKey(tree);
+  const drifted = bind.sentences.some((key) => !live.has(key));
   return {
     quote,
-    ...(drifted ? { note: 'the section text has been edited since the scenario bound it' } : {}),
+    ...(drifted ? { note: 'a bound sentence has been edited since the scenario bound it' } : {}),
   };
 }
 
@@ -145,7 +143,7 @@ export function renderGuardFindingsReport(input: {
     lines.push(
       `- **scenario**: \`${row.id}\`${row.flowId ? ` · flow \`${row.flowId}\`` : ''} · run ${guardResultRunId(row, envelope)}`,
     );
-    lines.push(`- **binds**: ${row.binds.doc} #${row.binds.section}`);
+    lines.push(`- **binds**: ${row.binds.doc}`);
     lines.push(`- **mechanism**: ${a.mechanism}${a.code ? ` (\`${a.code.file}:${a.code.line}\`)` : ''}`);
     if (row.failure) {
       lines.push(`- **observed** (step ${row.failure.step}): expected \`${row.failure.expected}\` — actual \`${row.failure.actual}\``);

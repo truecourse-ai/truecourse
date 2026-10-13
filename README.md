@@ -31,7 +31,7 @@ a documentation site) and turns it into tests that run.
 It curates those documents into a corpus of **claims**, works out the **flows** a
 user takes through the product, writes a test for each one against the real
 interfaces, and runs them. A failing test means the product and the documentation
-disagree, and it names which section.
+disagree, and it names which claim.
 
 For more details, check our documentation at
 **[docs.truecourse.dev](https://docs.truecourse.dev)**.
@@ -61,6 +61,25 @@ pnpm dev    # http://localhost:3000
 TrueCourse runs on your Claude Code login, so it needs the `claude` binary on
 your PATH and signed in. Everything runs on `claude-opus-5-5`; set
 `TRUECOURSE_MODEL` in `.env` to use another model.
+
+On Claude Code, a repository's product is brought up by a session that has a
+shell in the clone: it installs and builds the repository, starts its servers and
+containers on this machine, and leaves three scripts that do it again. The
+product comes up empty. Tests are then written as Playwright specs against the
+running product, each with a seed of its own that creates the accounts and data
+its flow starts from, so no two tests share any. That needs `@playwright/test`
+and its browser:
+
+```bash
+pnpm --filter @truecourse/guard-runner exec playwright install chromium
+```
+
+Every generate also runs the tests the repository already has against the commit
+it cloned. A test that no longer ends the way it was accepted is opened again:
+repaired when the product only changed how a step is reached, kept as a finding
+when the product stopped doing what the document says. Before any test is kept,
+a reviewer with a fresh context reads it against the documents it was written
+from. Pull request checks are not wired on this path yet.
 
 `TRUECOURSE_MODE=local` runs without sign-in, and folders on this machine can be
 connected as repositories.

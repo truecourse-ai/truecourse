@@ -1,6 +1,12 @@
-import { GuardBlockerSchema, GuardObligationRefSchema } from './verification.js'
+import {
+  FlowTestCopyDriftSchema,
+  FlowTestDisagreementSchema,
+  FlowTestRunSchema,
+  FlowTestStatusSchema,
+  type FlowTestStatus,
+} from './flow-tests.js'
 /**
- * Derived guard read-surface DTOs the dashboard renders — the per-section
+ * Derived guard read-surface DTOs the dashboard renders — the per-claim
  * coverage join, the flow inventory and its detail, the interface catalog, the
  * staleness probe, and a scenario's YAML source. These are *computed* on read
  * (never persisted, never validated back); the persisted, validated stores are
@@ -24,6 +30,7 @@ import { GuardOutcomeSchema, GuardFailureDetailSchema, GuardResultStageSchema } 
 import type { GuardOutcome, GuardFailureDetail, GuardLatest, GuardTestStatus } from './result.js'
 import {
   GuardBirthFindingSchema,
+  GuardBlockerSchema,
   GuardCoverageGapKindSchema,
   GuardGenerateErrorSchema,
   GuardTriageSchema,
@@ -69,9 +76,9 @@ import {
  *    read from the last report's authoring errors, never persisted, and a distinct
  *    id from the RUN outcome `error` — nothing ran here, so the two must never
  *    conflate in totals or meta;
- *  - `unguarded` — nothing binds the section (no scenario, no gap, no verdict).
+ *  - `unguarded` — nothing carries the claim (no flow, no gap, no verdict).
  */
-export type GuardSectionCoverageStatus =
+export type GuardCoverageStatus =
   | GuardOutcome
   | GuardGapDisplayKind
   | 'guarded'
@@ -130,23 +137,23 @@ export const GUARD_COVERAGE_STATUS_PRECEDENCE = [
   'untestable',
   'no-claim',
   'dismissed',
-] as const satisfies readonly GuardSectionCoverageStatus[]
+] as const satisfies readonly GuardCoverageStatus[]
 
 // Compile-time backstop: a new status (a new outcome, driver, or gap kind) that
 // nobody ranked would make `_UnrankedStatus` non-`never` and fail the build — a
 // rollup can never silently mis-order an unknown status.
 type _UnrankedStatus = Exclude<
-  GuardSectionCoverageStatus,
+  GuardCoverageStatus,
   (typeof GUARD_COVERAGE_STATUS_PRECEDENCE)[number]
 >
 const _allStatusesRanked: _UnrankedStatus extends never ? true : never = true
 void _allStatusesRanked
 
 /** The coverage-status union as a Zod enum (the precedence list is the domain). */
-export const GuardSectionCoverageStatusSchema = z.enum(
+export const GuardCoverageStatusSchema = z.enum(
   GUARD_COVERAGE_STATUS_PRECEDENCE as unknown as [
-    GuardSectionCoverageStatus,
-    ...GuardSectionCoverageStatus[],
+    GuardCoverageStatus,
+    ...GuardCoverageStatus[],
   ],
 )
 
@@ -156,9 +163,9 @@ export const GuardSectionCoverageStatusSchema = z.enum(
  * flows). An empty set is `unguarded`; an unknown value ranks last.
  */
 export function worstCoverageStatus(
-  statuses: readonly GuardSectionCoverageStatus[],
-): GuardSectionCoverageStatus {
-  let best: GuardSectionCoverageStatus = 'unguarded'
+  statuses: readonly GuardCoverageStatus[],
+): GuardCoverageStatus {
+  let best: GuardCoverageStatus = 'unguarded'
   let bestRank = GUARD_COVERAGE_STATUS_PRECEDENCE.length
   for (const status of statuses) {
     const rank = GUARD_COVERAGE_STATUS_PRECEDENCE.indexOf(status)
@@ -171,14 +178,19 @@ export function worstCoverageStatus(
 }
 
 // ---------------------------------------------------------------------------
-// THE COVERAGE VOCABULARY — five words, and only these five.
+// THE COVERAGE VOCABULARY — six words, and only these six.
 // ---------------------------------------------------------------------------
 
 /**
  * What a reader is told about coverage: a doc section, a flow, an overview
- * counter, a filter and a chip each wear exactly ONE of these five, everywhere.
+ * counter, a filter and a chip each wear exactly ONE of these six, everywhere.
  *
  *  - `succeeded` — the claims' scenarios passed;
+ *  - `partially-succeeded` — a flow's test ran to its end and passed, but only
+ *    after its author HEALED around something that is not the product failing: a
+ *    control the documents name one way and the product another (copy drift).
+ *    What was healed is on the test. Only a flow wears it: no wire status folds
+ *    onto it, so a section or a document never does ({@link guardFlowPlainStatus});
  *  - `failed` — a scenario contradicted the spec (drift), or could not complete;
  *  - `blocked` — something NAMED stands between the claim and its proof: no
  *    interface to step through, a supplied dependency nobody registered, an
@@ -189,7 +201,7 @@ export function worstCoverageStatus(
  *  - `never-run` — scenarios exist and have never executed. A first-class status:
  *    "committed but unproven" is neither a pass nor a gap.
  *
- * The wire keeps its richer status ids ({@link GuardSectionCoverageStatus}); they
+ * The wire keeps its richer status ids ({@link GuardCoverageStatus}); they
  * decide COLOUR, ordering, and the sentence a detail row shows. They are never
  * the word. Scenario-level RUN verdicts keep their own pass/fail wording — these
  * five are the coverage vocabulary, not the verdict vocabulary.
@@ -198,28 +210,33 @@ export type GuardCoveragePlainStatus =
   | 'failed'
   | 'blocked'
   | 'never-run'
+  | 'partially-succeeded'
   | 'succeeded'
   | 'not-testable'
 
 /**
- * The five in SEVERITY order — worst first, and the order every counter, filter
- * and legend lists them in. `not-testable` is last on purpose: it is the one
- * status that is nobody's to-do, so it surfaces only when nothing else applies.
+ * The six in SEVERITY order — worst first, and the order every counter, filter
+ * and legend lists them in. `partially-succeeded` sits just above `succeeded`:
+ * the flow is proven, and something beside it is a reader's to fix.
+ * `not-testable` is last on purpose: it is the one status that is nobody's
+ * to-do, so it surfaces only when nothing else applies.
  */
 export const GUARD_COVERAGE_PLAIN_ORDER = [
   'failed',
   'blocked',
   'never-run',
+  'partially-succeeded',
   'succeeded',
   'not-testable',
 ] as const satisfies readonly GuardCoveragePlainStatus[]
 
-/** The five words as a wire value, for the payloads that carry one. */
+/** The six words as a wire value, for the payloads that carry one. */
 export const GuardCoveragePlainStatusSchema = z.enum([...GUARD_COVERAGE_PLAIN_ORDER])
 
 /** The ONE word per status. Nothing else may name a coverage state to a reader. */
 export const GUARD_COVERAGE_STATUS_WORD: Record<GuardCoveragePlainStatus, string> = {
   succeeded: 'Succeeded',
+  'partially-succeeded': 'Partially succeeded',
   failed: 'Failed',
   blocked: 'Blocked',
   'not-testable': 'Not testable',
@@ -231,7 +248,7 @@ export const GUARD_COVERAGE_STATUS_WORD: Record<GuardCoveragePlainStatus, string
  * so the two can never disagree: re-ranking a status into another tier changes
  * its word with it.
  */
-const COVERAGE_PLAIN: Record<GuardSectionCoverageStatus, GuardCoveragePlainStatus> = {
+const COVERAGE_PLAIN: Record<GuardCoverageStatus, GuardCoveragePlainStatus> = {
   fail: 'failed',
   // Nothing about the repo is proven wrong, but the scenario reached no verdict —
   // and a run that could not finish is a failure of the run, never a pass.
@@ -267,13 +284,13 @@ const COVERAGE_PLAIN: Record<GuardSectionCoverageStatus, GuardCoveragePlainStatu
  * from a newer server) reads `blocked` — attention-needing, never blank.
  */
 export function guardCoveragePlainStatus(
-  status: GuardSectionCoverageStatus,
+  status: GuardCoverageStatus,
 ): GuardCoveragePlainStatus {
   return COVERAGE_PLAIN[status] ?? 'blocked'
 }
 
 /** The one WORD a wire status wears on a coverage surface. */
-export function guardCoverageWord(status: GuardSectionCoverageStatus): string {
+export function guardCoverageWord(status: GuardCoverageStatus): string {
   return GUARD_COVERAGE_STATUS_WORD[guardCoveragePlainStatus(status)]
 }
 
@@ -283,7 +300,7 @@ export function guardCoverageWord(status: GuardSectionCoverageStatus): string {
  * (nothing accounts for it), matching `unguarded`'s own word.
  */
 export function worstCoveragePlainStatus(
-  statuses: readonly GuardSectionCoverageStatus[],
+  statuses: readonly GuardCoverageStatus[],
 ): GuardCoveragePlainStatus {
   return guardCoveragePlainStatus(worstCoverageStatus(statuses))
 }
@@ -310,22 +327,6 @@ export function manualFlowScenarioId(flowId: string): string | null {
   return isManualFlowId(flowId) ? flowId.slice(MANUAL_FLOW_PREFIX.length) : null
 }
 
-/** One scenario's run result, projected onto a section for the coverage detail. */
-export interface GuardSectionScenario {
-  id: string
-  title: string
-  outcome: GuardOutcome
-  durationMs: number
-  /** Present on `fail` / `error`. */
-  failure?: GuardFailureDetail
-  /** Repo-relative pointer into `guard/evidence/`; present on `fail` / `error`. */
-  evidencePath?: string
-  /** Live anchor the section was found under when it moved (a silent remap). */
-  remappedTo?: string
-  /** The section's current (edited) fingerprint; present on `stale`. */
-  currentFingerprint?: string
-}
-
 /**
  * Why a flow has no scenario on one surface — the manifest/report gap, with the
  * label every surface renders (see `guardGapLabel`).
@@ -333,7 +334,6 @@ export interface GuardSectionScenario {
 export const GuardFlowGapSchema = z
   .object({
     kind: GuardCoverageGapKindSchema,
-    obligations: z.array(GuardObligationRefSchema).min(1).optional(),
     milestones: z.array(z.number().int().positive()).min(1).optional(),
     /** The generator's one-line explanation. */
     reason: z.string(),
@@ -369,7 +369,7 @@ export const GuardFlowSurfaceSchema = z
     surface: GuardDriverIdSchema.optional(),
     /** The scenario realizing the flow here; absent when the surface ended in a gap. */
     scenarioId: z.string().optional(),
-    status: GuardSectionCoverageStatusSchema,
+    status: GuardCoverageStatusSchema,
     /** The last run's outcome for `scenarioId`; absent when this run has none. */
     outcome: GuardOutcomeSchema.optional(),
     /**
@@ -390,16 +390,16 @@ export const GuardFlowSurfaceSchema = z
 export type GuardFlowSurface = z.infer<typeof GuardFlowSurfaceSchema>
 
 /**
- * A flow as a SECTION lists it — the user-directed inversion: clicking a spec
- * section shows the FLOWS that traverse it, never scenarios (those are reached
- * through the flow detail, one further click).
+ * A flow as a CLAIM lists it: the flow traverses the claim at one or more of its
+ * milestones, and a reader goes from the claim to the flows that test it, never
+ * straight to scenarios (those are reached through the flow, one further click).
  */
-export const GuardSectionFlowSchema = z
+export const GuardClaimFlowSchema = z
   .object({
     flowId: z.string(),
     title: z.string(),
     /** Worst applicable status after complete alternative proofs are accounted for. */
-    status: GuardSectionCoverageStatusSchema,
+    status: GuardCoverageStatusSchema,
     /** The gap text behind `status`, when a gap decided it. */
     reason: z.string().optional(),
     /** The providable services behind a `needs-setup` status. */
@@ -408,104 +408,14 @@ export const GuardSectionFlowSchema = z
     epic: z.boolean(),
     /** True for the Manual pseudo-flow of a hand-written scenario. */
     manual: z.boolean(),
-    /** 1-based orders of the milestones whose claim sits in THIS section. */
-    milestonesInSection: z.array(z.number().int().positive()),
+    /** 1-based orders of the milestones that prove THIS claim. */
+    milestoneOrders: z.array(z.number().int().positive()),
     /** Milestones in the whole flow — the chain the flow detail paints. */
     milestoneCount: z.number().int().nonnegative(),
     surfaces: z.array(GuardFlowSurfaceSchema),
   })
   .strict()
-export type GuardSectionFlow = z.infer<typeof GuardSectionFlowSchema>
-
-/**
- * One claim a section states that no flow carries — the gap that must stay
- * visible next to the section's scenarios. Sourced from the flow corpus's
- * `noFlowClaims` (which names the claim) and from the last generate's
- * claim-level coverage gaps (which may only carry the reason).
- */
-export interface GuardSectionClaimGap {
-  /** The claim's store id, when the claims store resolves the identity. */
-  claimId?: string
-  /** The claim's title; absent for a generate gap that named no claim. */
-  title?: string
-  /** Why it reached no flow. */
-  reason: string
-  /** The gap's kind, when the generate report classified it. */
-  kind?: GuardCoverageGapKind
-}
-
-/** A live doc section joined to its guard coverage. */
-export interface GuardSectionCoverage {
-  /** Slugified heading path (the section anchor) in the live doc. */
-  anchor: string
-  /** Raw heading text, for display. */
-  headingText: string
-  /** Heading level 1–6; `0` for a whole-document (non-markdown) section. */
-  level: number
-  /** `sha256:…` over the live section text. */
-  fingerprint: string
-  status: GuardSectionCoverageStatus
-  /** The gap / untestable one-liner; present for gap statuses. */
-  reason?: string
-  /** Capability nouns a `blocked-on` status names (parsed from `reason`). */
-  blockedOnCapabilities?: string[]
-  /**
-   * The providable external services behind a `needs-setup` status — present iff
-   * `status === 'needs-setup'`. The CTA the coverage view renders
-   * ("Provide open-meteo → Dependencies") is built from this.
-   */
-  needsSetup?: GuardNeedsSetup
-  /**
-   * The FLOWS that traverse this section, worst-first — what a section click
-   * shows. The section's `status` is the worst status over them.
-   */
-  flows: GuardSectionFlow[]
-  /**
-   * The section's CLAIM-LEVEL gaps — claims stated here that no flow carries,
-   * each with its reason. Independent of `status`: `guarded` outranks every gap
-   * status, so a section with both scenarios and gapped claims would otherwise
-   * report only its rank and lose the gaps entirely. A reader must see both.
-   */
-  claimGaps: GuardSectionClaimGap[]
-  /** Scenario ids the section's flows are realized by (flat, for counts/links). */
-  scenarioIds: string[]
-  /**
-   * Per-scenario run results for this section from the last run (empty until run).
-   *
-   * @deprecated Section-level scenarios are not a rendering surface any more —
-   * render `flows` (a section shows flows; a flow shows its scenarios). Kept only
-   * while `GuardSectionDetail` still reads it; drop the field with that component's
-   * flow rewrite.
-   */
-  scenarios: GuardSectionScenario[]
-}
-
-/** Coverage bound to this doc whose anchor is gone from the live doc. */
-export interface GuardOrphanedCoverage {
-  /** The authored anchor that no longer resolves in the live doc. */
-  anchor: string
-  scenarioIds: string[]
-  scenarios: GuardSectionScenario[]
-}
-
-/** The per-doc coverage payload — the coverage view renders it over the spec doc. */
-export interface GuardDocCoverage {
-  /** Repo-relative doc path. */
-  doc: string
-  /** Whether the doc parsed as markdown (vs the whole-doc fallback). */
-  markdown: boolean
-  /** Live doc sections in document order, each joined to its coverage. */
-  sections: GuardSectionCoverage[]
-  /** Guards bound to this doc whose section was removed (still worth surfacing). */
-  orphanedSections: GuardOrphanedCoverage[]
-  /** Live-section counts by status (every status key present, zero when none). */
-  totals: Record<GuardSectionCoverageStatus, number>
-  /** The run the outcomes were drawn from; null when never run. */
-  runId: string | null
-  ranAt: string | null
-  /** The generate the gaps/classification were drawn from; null when never generated. */
-  generatedAt: string | null
-}
+export type GuardClaimFlow = z.infer<typeof GuardClaimFlowSchema>
 
 /**
  * The amber-dot signal the Pipeline view and Context's Scan button read, and
@@ -549,7 +459,7 @@ export const GuardRunFlowSchema = z
           .object({
             order: z.number().int().positive(),
             doc: z.string(),
-            anchor: z.string(),
+            claimId: z.string(),
             claimTitle: z.string(),
           })
           .strict(),
@@ -623,14 +533,6 @@ export interface GuardScenarioListItem {
   title: string
   /** Repo-relative spec doc the scenario binds to. */
   doc: string
-  /** Slugified heading path the scenario binds to (`binds.section`). */
-  anchor: string
-  /**
-   * The bound section's human heading text ("10.7 The Local Developer Loop"),
-   * joined from the live doc's section index — the anchor slug is an engine
-   * identifier, never UI copy. Absent when the doc or section no longer exists.
-   */
-  headingText?: string
   /** Repo-relative path of the YAML file. */
   file: string
   /** True when no manifest flow lists this id (authored by hand, not generated). */
@@ -767,11 +669,52 @@ export const GuardFlowProgressSchema = z.object({
   coverage: z.enum(['complete', 'partial', 'unverified', 'unknown']),
   verified: z.number().int().nonnegative(),
   total: z.number().int().nonnegative(),
-  unit: z.enum(['cases', 'milestones']),
-  category: z.enum(['behavior', 'system', 'mixed']),
   generation: z.enum(['ready', 'incomplete', 'error', 'unsupported', 'needs-setup']),
 }).strict()
 export type GuardFlowProgress = z.infer<typeof GuardFlowProgressSchema>
+
+/**
+ * The wire status a flow wears for what its Playwright test says, so a flow
+ * proven by a test reads through the same words as every other flow.
+ */
+export function flowTestCoverageStatus(status: FlowTestStatus): GuardCoverageStatus {
+  return status === 'passing' ? 'pass' : status === 'failing' ? 'fail' : 'blocked-on'
+}
+
+/** What a flow's Playwright test says about it, as far as a list row tells it. */
+export const GuardFlowTestMarkSchema = z
+  .object({
+    status: FlowTestStatusSchema,
+    /** True when the test creates its own starting data through a seed. */
+    seeded: z.boolean(),
+    /** A failing test: what the documents say, and what the product did instead. */
+    documented: z.string().optional(),
+    observed: z.string().optional(),
+    /** A blocked flow: the missing thing in a few words, the key blocked flows group by. */
+    blockedOn: z.string().optional(),
+    /** A blocked flow: the same thing as its test's session explained it, in full. */
+    blockedBy: z.string().optional(),
+    /** Names the documents have one way and the product another, which the test met. Absent when it met none. */
+    copyDrift: z.array(FlowTestCopyDriftSchema).optional(),
+  })
+  .strict()
+export type GuardFlowTestMark = z.infer<typeof GuardFlowTestMarkSchema>
+
+/** A flow's Playwright test, whole: what it proved, its files, and the run that stands. */
+export const GuardFlowTestViewSchema = z
+  .object({
+    status: FlowTestStatusSchema,
+    summary: z.string(),
+    disagreement: FlowTestDisagreementSchema.optional(),
+    blockedBy: z.string().optional(),
+    blockedOn: z.string().optional(),
+    copyDrift: z.array(FlowTestCopyDriftSchema).optional(),
+    spec: z.object({ file: z.string(), content: z.string() }).optional(),
+    seed: z.object({ file: z.string(), content: z.string() }).optional(),
+    run: FlowTestRunSchema.optional(),
+  })
+  .strict()
+export type GuardFlowTestView = z.infer<typeof GuardFlowTestViewSchema>
 
 export const GuardFlowListItemSchema = z
   .object({
@@ -781,7 +724,7 @@ export const GuardFlowListItemSchema = z
     /** One-line user goal; empty for a Manual pseudo-flow (a scenario has no goal). */
     goal: z.string(),
     /** Worst applicable status after complete alternative proofs are accounted for. */
-    status: GuardSectionCoverageStatusSchema,
+    status: GuardCoverageStatusSchema,
     /** Coverage bucket — the filter/tally key (`guarded | partial | blocked | ungenerated`). */
     bucket: GuardFlowBucketSchema,
     /** True for an epic flow (it chains other flows through `composedOf`). */
@@ -791,8 +734,6 @@ export const GuardFlowListItemSchema = z
     /** True for the Manual pseudo-flow of a hand-written scenario. */
     manual: z.boolean(),
     milestoneCount: z.number().int().nonnegative(),
-    /** Sections the flow binds. */
-    sectionCount: z.number().int().nonnegative(),
     /** Repo-relative docs the flow binds — the area/doc filter key. */
     docs: z.array(z.string()),
     surfaces: z.array(GuardFlowSurfaceSchema),
@@ -822,7 +763,7 @@ export const GuardFlowListItemSchema = z
      * Optional/defaulted so a payload written before the split still parses.
      */
     toolDefects: z.number().int().nonnegative().default(0),
-    /** Generate errors on the flow's bound sections (best-effort attribution). */
+    /** Generate errors attributed to the flow. */
     errors: z.number().int().nonnegative(),
     /** True when the last run flagged interface drift on any of the flow's scenarios. */
     interfaceDrifted: z.boolean(),
@@ -841,13 +782,20 @@ export const GuardFlowListItemSchema = z
     dismissed: z.boolean().default(false),
     /** Why it was dismissed, when the person who did it said. */
     dismissalNote: z.string().optional(),
+    /** Present when the flow is proven by a Playwright test rather than scenarios. */
+    test: GuardFlowTestMarkSchema.optional(),
   })
   .strict()
 export type GuardFlowListItem = z.infer<typeof GuardFlowListItemSchema>
 
 /**
- * A flow's coverage status in the five words — the ONE derivation every flow
+ * A flow's coverage status in the six words — the ONE derivation every flow
  * list reads, so no two of them can disagree about a flow.
+ *
+ * PARTIALLY SUCCEEDED is a flow whose Playwright test passes and carries copy
+ * drift: it reached its end because its author used the product's name for a
+ * control the documents call something else. A FAILING test that met copy
+ * drift is Failed, as any failing test is: the drift is on its page.
  *
  * FAILED means a test ran and was contradicted (at birth or in a run): guard
  * commits failing tests, so a birth failure reaches the list as a `fail` surface
@@ -859,11 +807,15 @@ export type GuardFlowListItem = z.infer<typeof GuardFlowListItemSchema>
  * generate is what clears it.
  */
 export function guardFlowPlainStatus(
-  flow: Pick<GuardFlowListItem, 'status' | 'bucket' | 'findings'>,
+  flow: Pick<GuardFlowListItem, 'status' | 'bucket' | 'findings'> & {
+    /** The flow's Playwright test, when it has one: its status and what it healed around. */
+    test?: Pick<GuardFlowTestMark, 'status' | 'copyDrift'>
+  },
 ): GuardCoveragePlainStatus {
   if (flow.findings > 0) return 'failed'
   if (flow.bucket === 'ungenerated') return 'blocked'
-  return guardCoveragePlainStatus(flow.status)
+  const word = guardCoveragePlainStatus(flow.status)
+  return word === 'succeeded' && flow.test?.status === 'passing' && flow.test.copyDrift?.length ? 'partially-succeeded' : word
 }
 
 /** Flow-tally for the list header — the buckets plus the corpus totals. */
@@ -912,42 +864,16 @@ export interface GuardFlowsView extends z.infer<typeof GuardFlowsViewCoreSchema>
   recipe: GuardRecipeCard | null
 }
 
-/** One milestone of a flow, joined to the LIVE section it was extracted under. */
+/** One milestone of a flow: the claim it proves and the document it is read from. */
 export const GuardFlowMilestoneViewSchema = z
   .object({
     order: z.number().int().positive(),
     doc: z.string(),
-    anchor: z.string(),
+    /** The id of the claim this milestone proves. */
+    claimId: z.string(),
     claimTitle: z.string(),
     /** Synthesis' note on why this step sits here. */
     note: z.string().optional(),
-    /** The live section's heading text; absent when the doc or section is gone. */
-    headingText: z.string().optional(),
-    /** True when the anchor still resolves in the live doc (else: orphaned). */
-    live: z.boolean(),
-    /** The section fingerprint the flow bound at synthesis. */
-    boundFingerprint: z.string().optional(),
-    /** The live section's fingerprint — differs ⇒ the section was edited. */
-    currentFingerprint: z.string().optional(),
-    /** True when bound and live fingerprints disagree (the section drifted). */
-    drifted: z.boolean(),
-    /**
-     * The milestone's CASES — the situations that would prove it, each as the
-     * sentence it states. No per-case state: a flow's cases stand or fall
-     * together, and the flow's own verdict says which. Absent on a milestone
-     * that declares none (the legacy shape).
-     */
-    cases: z
-      .array(
-        z
-          .object({
-            id: z.string().min(1),
-            /** The case's own sentence, never its machine id. */
-            claim: z.string().min(1),
-          })
-          .strict(),
-      )
-      .optional(),
   })
   .strict()
 export type GuardFlowMilestoneView = z.infer<typeof GuardFlowMilestoneViewSchema>
@@ -960,7 +886,7 @@ export const GuardFlowScenarioRowSchema = z
     title: z.string().optional(),
     /** Repo-relative path of the committed YAML — the source pointer. */
     file: z.string().optional(),
-    status: GuardSectionCoverageStatusSchema,
+    status: GuardCoverageStatusSchema,
     /**
      * True when the committed test PASSED its birth execution. Guard commits
      * failing tests too, so this is a real per-test fact (not "it exists"): a
@@ -1039,7 +965,7 @@ export const GuardFlowDetailSchema = z
     progress: GuardFlowProgressSchema.optional(),
     title: z.string(),
     goal: z.string(),
-    status: GuardSectionCoverageStatusSchema,
+    status: GuardCoverageStatusSchema,
     bucket: GuardFlowBucketSchema,
     epic: z.boolean(),
     manual: z.boolean(),
@@ -1058,7 +984,7 @@ export const GuardFlowDetailSchema = z
      * committed failing test is already a `surfaces` row carrying its failure.
      */
     findings: z.array(GuardBirthFindingSchema),
-    /** Generate errors on the flow's bound sections (best-effort attribution). */
+    /** Generate errors attributed to the flow. */
     errors: z.array(GuardGenerateErrorSchema),
     /**
      * True when no synthesized flow claims this one any more — it survives only
@@ -1080,6 +1006,8 @@ export const GuardFlowDetailSchema = z
     generatedAt: z.string().nullable(),
     runId: z.string().nullable(),
     ranAt: z.string().nullable(),
+    /** Present when the flow is proven by a Playwright test rather than scenarios. */
+    test: GuardFlowTestViewSchema.optional(),
   })
   .strict()
 export type GuardFlowDetail = z.infer<typeof GuardFlowDetailSchema>
@@ -1292,24 +1220,7 @@ export const GuardInterfacesViewSchema = z
   .strict()
 export type GuardInterfacesView = z.infer<typeof GuardInterfacesViewSchema>
 
-// --- Claims tab ---------------------------------------------------------------
-
-/**
- * One flow that carries a claim — the trace's middle link. `milestoneOrder` is
- * where the claim sits in the flow's path, so a reader can jump straight at it.
- */
-export const GuardClaimFlowRefSchema = z
-  .object({
-    flowId: z.string(),
-    /** The flow's title; its id when the corpus no longer names it. */
-    title: z.string(),
-    /** 1-based position of the milestone that proves this claim in that flow. */
-    milestoneOrder: z.number().int().positive(),
-    /** The synthesis note on that milestone, when it wrote one. */
-    note: z.string().optional(),
-  })
-  .strict()
-export type GuardClaimFlowRef = z.infer<typeof GuardClaimFlowRefSchema>
+// --- Claims --------------------------------------------------------------------
 
 /**
  * One scenario that proves a claim, reached through a step tagged with the
@@ -1323,9 +1234,8 @@ export const GuardClaimScenarioRefSchema = z
     /** 1-based step numbers whose `milestone` names this claim. */
     steps: z.array(z.number().int().positive()),
     /**
-     * The scenario's verdict in the latest run, when one ran it — what makes the
-     * claim ledger run-aware. Absent when the scenario has never executed (or
-     * the view was built with no run store).
+     * The scenario's verdict in the latest run, when one ran it. Absent when the
+     * scenario has never executed (or the view was built with no run store).
      */
     outcome: GuardOutcomeSchema.optional(),
   })
@@ -1333,64 +1243,54 @@ export const GuardClaimScenarioRefSchema = z
 export type GuardClaimScenarioRef = z.infer<typeof GuardClaimScenarioRefSchema>
 
 /**
- * Where a claim stands in coverage accounting. Claim-keyed, so it always exists,
- * and RUN-AWARE — "proven" is earned by a green run, never by authorship alone:
- * `proven` (a proof step PASSED in the latest run), `failing` (proof steps exist
- * and the latest run failed them — none passing), `planned` (a flow carries it,
- * and any proof step has no verdict yet — unwritten, never run, stale, or
- * blocked), `gapped` (accounted for as a `noFlowClaim`, with a reason),
- * `unplanned` (no flow, no gap record — the honest hole synthesis owes an answer
- * for).
+ * One claim with its coverage: what a document promises, and what stands behind
+ * it. The STATUS is the worst over the flows that carry the claim, by
+ * {@link GUARD_COVERAGE_STATUS_PRECEDENCE}; a claim no flow carries wears the
+ * kind the flow corpus's `noFlowClaims` reason states, or `unguarded` when
+ * nothing accounts for it; a dismissed claim wears `dismissed`. The flows are
+ * the trace a reader follows to the tests.
  */
-export const GuardClaimCoverageSchema = z.enum(['proven', 'failing', 'planned', 'gapped', 'unplanned'])
-export type GuardClaimCoverage = z.infer<typeof GuardClaimCoverageSchema>
-
-/** One claim as the Claims tab lists it: the store row plus its two traces. */
 export const GuardClaimRowSchema = z
   .object({
     id: z.string(),
     doc: z.string(),
-    anchor: z.string(),
-    title: z.string(),
-    claim: z.string(),
-    contentHash: z.string(),
-    verifyVia: z.string().optional(),
-    /** The live section's heading text, when the anchor still resolves in the doc. */
-    headingText: z.string().optional(),
-    /** False when the claim's anchor no longer exists in the live doc. */
-    anchorLive: z.boolean(),
-    coverage: GuardClaimCoverageSchema,
-    /** Why the claim reached no flow — present exactly for `gapped`. */
-    gapReason: z.string().optional(),
-    /** True when a `decisions.json` dismissal names this claim. */
+    /** What the claim states, as the scan read it. */
+    statement: z.string(),
+    /** The keys of the sentences the claim is read from. */
+    sentences: z.array(z.string()),
+    status: GuardCoverageStatusSchema,
+    /** The gap text or dismissal note behind `status`, when one decided it. */
+    reason: z.string().optional(),
+    /** The providable services behind a `needs-setup` status. */
+    needsSetup: GuardNeedsSetupSchema.optional(),
+    /** True when the decisions ledger dismisses this claim. */
     dismissed: z.boolean(),
-    flows: z.array(GuardClaimFlowRefSchema),
+    flows: z.array(GuardClaimFlowSchema),
     scenarios: z.array(GuardClaimScenarioRefSchema),
   })
   .strict()
 export type GuardClaimRow = z.infer<typeof GuardClaimRowSchema>
 
-/** One refused statement, as the Claims tab lists it under its doc. */
+/** One claim the scan read and judged untestable, with its reason. */
 export const GuardUntestableRowSchema = z
   .object({
+    id: z.string(),
     doc: z.string(),
-    anchor: z.string(),
-    text: z.string(),
+    statement: z.string(),
     reason: z.string(),
-    headingText: z.string().optional(),
-    anchorLive: z.boolean(),
   })
   .strict()
 export type GuardUntestableRow = z.infer<typeof GuardUntestableRowSchema>
 
 /**
- * The Claims tab payload — the extracted claim corpus with the trace from claim
- * to flow to scenario, and the refused statements beside it. Always answers (an
- * `extracted: false` view is the empty state, never an error).
+ * The claims payload — every claim of the repository's documents with its
+ * status and its trace to flows and tests, the untestable statements beside
+ * them, and the five-word tally. Always answers (an `extracted: false` view is
+ * the empty state, never an error).
  */
 export const GuardClaimsViewSchema = z
   .object({
-    /** False when no claims store exists — the client renders its empty state. */
+    /** False when no claim corpus exists — the client renders its empty state. */
     extracted: z.boolean(),
     generatedAt: z.string().nullable(),
     claims: z.array(GuardClaimRowSchema),
@@ -1398,16 +1298,10 @@ export const GuardClaimsViewSchema = z
     totals: z
       .object({
         claims: z.number().int().nonnegative(),
-        proven: z.number().int().nonnegative(),
-        /** Claims whose proof steps the latest run failed (none passing). */
-        failing: z.number().int().nonnegative(),
-        planned: z.number().int().nonnegative(),
-        gapped: z.number().int().nonnegative(),
-        unplanned: z.number().int().nonnegative(),
+        /** Every claim under the five coverage words; a dismissed claim counts as Not testable. */
+        byStatus: z.record(GuardCoveragePlainStatusSchema, z.number().int().nonnegative()),
         dismissed: z.number().int().nonnegative(),
         untestable: z.number().int().nonnegative(),
-        /** Claims whose anchor no longer resolves in its live doc. */
-        orphanedAnchors: z.number().int().nonnegative(),
       })
       .strict(),
   })
@@ -1415,33 +1309,33 @@ export const GuardClaimsViewSchema = z
 export type GuardClaimsView = z.infer<typeof GuardClaimsViewSchema>
 
 /**
- * A stored run's SECTION SUMMARY: the coverage word every document section the
- * run's scenario set covers wore at that moment, keyed by {@link guardSectionRef}.
- * Statuses only, so a run's history costs a handful of bytes per section.
+ * A stored run's CLAIM SUMMARY: the coverage word every claim of the
+ * repository's documents wore at that moment, keyed by {@link guardClaimRef}.
+ * Statuses only, so a run's history costs a handful of bytes per claim.
  *
  * It is what makes history readable: a run snapshot says which SCENARIOS passed,
- * and turning that back into sections needs the scenario set, the report and the
- * documents as they were. Written when the run is persisted, never guessed
+ * and turning that back into claims needs the claim corpus, the flows and the
+ * manifest as they were. Written when the run is persisted, never guessed
  * afterwards. A run without one is simply absent from the trend.
  */
-export type GuardRunSectionSummary = Record<string, GuardCoveragePlainStatus>
+export type GuardRunClaimSummary = Record<string, GuardCoveragePlainStatus>
 
 /**
  * ONE run's FLOW SUMMARY: every flow of the repository as the word it wore at
- * that moment, keyed by flow id. The flow twin of {@link GuardRunSectionSummary},
+ * that moment, keyed by flow id. The flow twin of {@link GuardRunClaimSummary},
  * written beside it and for the same reason — a run snapshot says which
  * SCENARIOS passed, and turning that back into flows needs the manifest and the
  * corpus as they were. It is what Home's trend counts.
  */
 export type GuardRunFlowSummary = Record<string, GuardCoveragePlainStatus>
 
-/** The address of ONE section of ONE document: `<docRef>#<anchor>`. */
-export function guardSectionRef(doc: string, anchor: string): string {
-  return `${doc}#${anchor}`
+/** The address of ONE claim of ONE document: `<docRef>#<claimId>`. */
+export function guardClaimRef(doc: string, claimId: string): string {
+  return `${doc}#${claimId}`
 }
 
-/** The document half of a {@link guardSectionRef} (a ref with no `#` is the doc). */
-export function guardSectionRefDoc(sectionRef: string): string {
-  const cut = sectionRef.lastIndexOf('#')
-  return cut === -1 ? sectionRef : sectionRef.slice(0, cut)
+/** The document half of a {@link guardClaimRef} (a ref with no `#` is the doc). */
+export function guardClaimRefDoc(claimRef: string): string {
+  const cut = claimRef.indexOf('#')
+  return cut === -1 ? claimRef : claimRef.slice(0, cut)
 }

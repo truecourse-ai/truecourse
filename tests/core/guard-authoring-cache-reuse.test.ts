@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setCacheEntry } from '@truecourse/llm'
-import { flowFingerprint, GUARD_REVIEW_POLICY_VERSION, interfaceFingerprint, movedSchemeInputs, type GuardFlow, type Interface } from '@truecourse/shared'
+import { claimId, flowFingerprint, interfaceFingerprint, movedSchemeInputs, sentenceKey, type GuardFlow, type Interface } from '@truecourse/shared'
 import { buildRouteManifest, loadRecipe, readMergedInterfaceCatalog, recipePath } from '@truecourse/guard-runner'
 import {
   buildServerRouteIndex,
   buildWebAuthorCatalog,
-  collectWorkDocs,
   planGuardWork,
   readFlowsFile,
   type FlowSynthesisArea,
@@ -21,12 +20,11 @@ import {
 import { buildAuthorUserPrompt } from '../../packages/guard-generator/src/prompts.js'
 import type { FlowWorkerTask } from '../../packages/guard-generator/src/generate.js'
 import { createGuardGenerateSessionSeams } from '../../packages/core/src/services/guard-generate/run.js'
-import { EXTRACT_SESSION_CACHE_NAME, extractSessionCacheKey } from '../../packages/core/src/services/guard-generate/extract.js'
 import { FLOWS_SESSION_CACHE_NAME, flowsSessionCacheKey } from '../../packages/core/src/services/guard-generate/flows.js'
-import { CachedWorkerEntrySchema, flowWorkerCacheKey, flowWorkerPromptFingerprint } from '../../packages/core/src/services/guard-generate/flow-worker.js'
+import { CachedWorkerEntrySchema, flowWorkerCacheKey } from '../../packages/core/src/services/guard-generate/flow-worker.js'
 import { authoringFixture } from '../fixtures/guard-authoring-benchmark/fixture.js'
 import {
-  extractSessionBy,
+  claimsBy,
   FIXTURE_WEB_SERVER,
   flowWorkerSessionOf,
   interfacesOf,
@@ -43,30 +41,29 @@ import { installMemoryKvCache, resetKvCacheStore } from '../helpers/memory-kv-ca
 const roots: string[] = []
 beforeEach(() => { installMemoryKvCache() })
 afterEach(() => { resetKvCacheStore(); while (roots.length) rmrf(roots.pop()!) })
-const DOC = 'docs/tasks.md', WEB_DOC = 'docs/app.md', ANCHOR = 'tasks/creating-tasks', CLAIM = '`relkit add <title>` creates a task'
+const DOC = 'docs/tasks.md', WEB_DOC = 'docs/app.md', CLAIM = '`relkit add <title>` creates a task'
+const SENTENCE = sentenceKey(`${CLAIM}.`), CLAIM_ID = claimId(DOC, [SENTENCE])
 function seededRepo() {
   const root = makeTempRepo(); roots.push(root)
   writeRecipe(root); writeCorpus(root, [{ ref: DOC }]); writeDoc(root, DOC, '# Tasks\n\n## Creating tasks\n\n`relkit add <title>` creates a task.\n')
-  const doc = collectWorkDocs(root, planGuardWork(root))[0]
-  const area: FlowSynthesisArea = { areaId: 'tasks', claims: [{ doc: DOC, anchor: ANCHOR, title: CLAIM, driver: 'cli' }],
+  const doc = planGuardWork(root).docs[0]
+  const area: FlowSynthesisArea = { areaId: 'tasks', claims: [{ id: CLAIM_ID, doc: DOC, title: CLAIM, sentences: [SENTENCE] }],
     docs: [{ doc: DOC, outline: doc.sections.map(s => ({ anchor: s.anchor, headingText: s.headingText, level: s.level })) }] }
   return { root, doc, area }
 }
 
 /** The flow the web fixture's own action realizes — the shortlist's terms. */
 function webFlow(): GuardFlow {
-  const milestones = [{ order: 1, doc: 'synthetic.md', anchor: 'creation', claimTitle: 'Creating an organisation displays its dialog', proofDrivers: ['web' as const] }]
+  const milestones = [{ order: 1, doc: 'synthetic.md', claimId: 'claim::creation', claimTitle: 'Creating an organisation displays its dialog', sentences: ['creation'] }]
   return { id: 'organisation', title: 'Create organisation', goal: 'Show the creation dialog', fingerprint: flowFingerprint(milestones),
-    milestones, bindings: [{ doc: 'synthetic.md', anchor: 'creation', fingerprint: 'sha256:doc' }], composedOf: [], synthesisInputsHash: 'same' }
+    milestones, bindings: [{ doc: 'synthetic.md', sentences: ['creation'] }], composedOf: [], synthesisInputsHash: 'same' }
 }
 
 /** Everything a flow's settle record folds except the web read-set under test. */
 const BASE_PARTS: FlowGenerationInputParts = {
   flowFingerprint: 'sha256:flow',
-  sectionKeys: ['docs/app.md#creation:abc'],
   assignmentFingerprints: ['assignment'],
   interfaceFingerprints: ['sha256:organisation'],
-  prerequisiteMaterial: 'none',
   recipeSlice: 'slice',
   roster: 'roster',
   preparation: 'preparation',
@@ -75,36 +72,31 @@ const BASE_PARTS: FlowGenerationInputParts = {
 }
 
 describe('author-only changes retain upstream cache compatibility', () => {
-  it('reads seeded extract and synthesis outcomes with zero upstream driver calls', async () => {
+  it('reads seeded synthesis outcomes with zero upstream driver calls', async () => {
     const { root, doc, area } = seededRepo()
-    const extract = { claims: [{ claim: CLAIM, driver: 'cli', sectionAnchor: ANCHOR, reason: 'stdout carries the id',
-      verification: { scope: 'configuration', method: 'behavior', observable: 'Task id', cases: [{ id: 'created-id', claim: 'Prints the id', method: 'behavior', requires: ['process'], conditions: [] }] }, needs: [] }], untestable: [] }
-    const flows = { flows: [{ title: 'Create task', goal: 'Create task', milestones: [{ order: 1, doc: DOC, anchor: ANCHOR, claimTitle: CLAIM }] }], noFlowClaims: [] }
-    const keys = [extractSessionCacheKey(doc), flowsSessionCacheKey(area)]
-    await setCacheEntry(root, EXTRACT_SESSION_CACHE_NAME, keys[0], extract)
-    await setCacheEntry(root, FLOWS_SESSION_CACHE_NAME, keys[1], flows)
+    const flows = { flows: [{ title: 'Create task', goal: 'Create task', milestones: [{ order: 1, claimId: CLAIM_ID }] }], noFlowClaims: [] }
+    const keys = [flowsSessionCacheKey(area)]
+    await setCacheEntry(root, FLOWS_SESSION_CACHE_NAME, keys[0], flows)
     const f = authoringFixture(); const catalog = createAuthorCatalog(f.interfaces, f.resources)
     buildAuthorUserPrompt({ ...f.context, webSetupCandidates: catalog.candidates([f.own], 'organisation') })
     const calls = vi.fn(() => { throw new Error('Warm upstream cache must never call a provider') })
     const { driver } = stubDriver(calls)
     const acquire = vi.fn(async () => ({ driver, persistence: memoryPersistence().persistence }))
     const seams = createGuardGenerateSessionSeams({ repoRoot: root, driver: acquire })
-    expect((await seams.extractSession({ docs: [doc], prerequisiteTargets: [] })).summary).toMatchObject({ ran: 0, fromCache: 1 })
     expect((await seams.flowsAreaSession({ areas: [area], docs: [doc] })).summary).toMatchObject({ ran: 0, fromCache: 1 })
     expect(calls).not.toHaveBeenCalled()
     expect(acquire).not.toHaveBeenCalled()
-    expect([extractSessionCacheKey(doc), flowsSessionCacheKey(area)]).toEqual(keys)
+    expect([flowsSessionCacheKey(area)]).toEqual(keys)
   })
   it('classifies valid, invalid, missing and deterministic no-call matching pairs individually', async () => {
     const root = makeTempRepo(); roots.push(root)
     const fixture = authoringFixture(); const catalog = buildSurfaceCatalogs([fixture.own]).get('web')!
-    const makeFlow = (id: string, implementation = false): GuardFlow => {
-      const milestones = [{ order: 1, doc: 'synthetic.md', anchor: id, claimTitle: 'Show dialog', proofDrivers: ['web' as const],
-        ...(implementation ? { verification: { method: 'implementation' as const, observable: 'Inspect source algorithm' } } : {}) }]
+    const makeFlow = (id: string): GuardFlow => {
+      const milestones = [{ order: 1, doc: 'synthetic.md', claimId: `claim::${id}`, claimTitle: 'Show dialog', sentences: [id] }]
       return { id, title: id, goal: 'Show dialog', fingerprint: flowFingerprint(milestones), milestones,
-        bindings: [{ doc: 'synthetic.md', anchor: id, fingerprint: 'sha256:doc' }], composedOf: [], synthesisInputsHash: 'same' }
+        bindings: [{ doc: 'synthetic.md', sentences: [id] }], composedOf: [], synthesisInputsHash: 'same' }
     }
-    const valid = makeFlow('valid'), invalid = makeFlow('invalid'), missing = makeFlow('missing'), skipped = makeFlow('skipped', true)
+    const valid = makeFlow('valid'), invalid = makeFlow('invalid'), missing = makeFlow('missing')
     const reply = { plan: [{ interfaceId: fixture.own.id, milestone: 1 }], gaps: [] }
     const originalKey = matchCacheKey(valid, catalog)
     await setCacheEntry(root, MATCH_CACHE_NAME, originalKey, reply)
@@ -116,7 +108,6 @@ describe('author-only changes retain upstream cache compatibility', () => {
     expect(await readCachedMatch(root, invalid, catalog)).toBeNull()
     expect(await readCachedMatch(root, missing, catalog)).toBeNull()
     expect(await matchFlow(root, valid, catalog, calls)).toMatchObject({ calls: 0 })
-    expect(await matchFlow(root, skipped, catalog, calls)).toMatchObject({ calls: 0, kind: 'gap' })
     expect(calls).not.toHaveBeenCalled()
     expect(await matchFlow(root, invalid, catalog, calls)).toMatchObject({ calls: 1 })
     expect(await matchFlow(root, missing, catalog, calls)).toMatchObject({ calls: 1 })
@@ -142,7 +133,7 @@ describe('author-only changes retain upstream cache compatibility', () => {
     expect(material(own)).not.toBe(material(f.resources))
 
     const task = (surface: 'cli' | 'api' | 'web', web: string): FlowWorkerTask => ({ surface,
-      cacheMaterial: { flowFingerprint: 'same-flow', sectionKeys: ['same-section'], recipeFingerprint: 'same-recipe',
+      cacheMaterial: { flowFingerprint: 'same-flow',
         interfaceFingerprints: ['matched-interface', ...(surface === 'web' ? [web] : [])], mode: 'scratch', priorShas: [] } } as unknown as FlowWorkerTask)
     expect(flowWorkerCacheKey(task('web', material(unrelated)))).toBe(flowWorkerCacheKey(task('web', material(f.resources))))
     expect(flowWorkerCacheKey(task('web', material(own)))).not.toBe(flowWorkerCacheKey(task('web', material(f.resources))))
@@ -150,12 +141,10 @@ describe('author-only changes retain upstream cache compatibility', () => {
       // Only web consumes the catalog dependency. The actual worker helper
       // cannot accidentally include a catalog supplied on another surface.
       expect(flowWorkerCacheKey(task(surface, material(own)))).toBe(flowWorkerCacheKey(task(surface, material(f.resources))))
-      expect(flowWorkerPromptFingerprint(surface)).not.toBe(flowWorkerPromptFingerprint('web'))
     }
-    const cached = { version: GUARD_REVIEW_POLICY_VERSION - 1,
-      outcome: { kind: 'settled', scenarioYamlSha: 'sha', expectedReds: [] }, scenarioYaml: 'yaml', reviews: [] }
-    expect(CachedWorkerEntrySchema.safeParse(cached).success).toBe(false)
-    expect(CachedWorkerEntrySchema.safeParse({ ...cached, version: GUARD_REVIEW_POLICY_VERSION }).success).toBe(true)
+    const cached = { outcome: { kind: 'settled', scenarioYamlSha: 'sha', expectedReds: [] }, scenarioYaml: 'yaml', reviews: [] }
+    expect(CachedWorkerEntrySchema.safeParse(cached).success).toBe(true)
+    expect(CachedWorkerEntrySchema.safeParse({ ...cached, version: 5 }).success).toBe(false)
   })
 
   it('settles a web flow against the entries its session read, and nothing else', () => {
@@ -203,7 +192,7 @@ describe('author-only changes retain upstream cache compatibility', () => {
     await runGenerate({
       repoRoot: root,
       interfaces: interfacesOf(root, home),
-      extractSession: extractSessionBy({ home: [{ driver: 'web' }] }),
+      claims: claimsBy({ home: [{ driver: 'web' }] }),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         tasks.push(task)
         return { kind: 'outcome', outcome: { kind: 'blocked', perMilestone: [{ order: 1, capability: 'credentials' }] } }

@@ -20,7 +20,7 @@ import {
   writeDoc,
   writeCorpus,
   acceptedSha,
-  extractSessionBy,
+  claimsBy,
   faithfulJudge,
   flowWorkerSessionOf,
   runGenerate,
@@ -196,7 +196,7 @@ describe('generateGuards — the doc example is embedded byte-for-byte end to en
 
     const res = await runGenerate({
       repoRoot: r,
-      extractSession: extractSessionBy({ check: [{ claim: 'the version prints for the documented input' }] }),
+      claims: claimsBy({ check: [{ claim: 'the version prints for the documented input' }] }),
       flowWorkerSession: flowWorkerSessionOf(async (task) => {
         briefing = await task.prepare()
         // The historical defect: the doc's example reformatted on the way in.

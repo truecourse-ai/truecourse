@@ -1,4 +1,3 @@
-import { stepChecks } from './step-parts.js'
 /**
  * The API driver's verb vocabulary — the per-driver closed sub-schema the driver
  * registry (`drivers.ts`) describes, in its own module because a driver's verbs are
@@ -163,7 +162,6 @@ export const GuardApiRequestStepSchema = z
     note,
     /** The flow milestone this step realizes. See {@link milestone}. */
     milestone,
-    checks: stepChecks,
   })
   .strict()
 
@@ -277,15 +275,15 @@ export const GuardLogsSchema = z
   .strict()
 
 export const GuardApiBootStepSchema = z
-  .object({ boot: GuardBootSchema, milestone, checks: stepChecks })
+  .object({ boot: GuardBootSchema, milestone })
   .strict()
 
 export const GuardApiSignalStepSchema = z
-  .object({ signal: GuardSignalSchema, milestone, checks: stepChecks })
+  .object({ signal: GuardSignalSchema, milestone })
   .strict()
 
 export const GuardApiLogsStepSchema = z
-  .object({ logs: GuardLogsSchema, milestone, checks: stepChecks })
+  .object({ logs: GuardLogsSchema, milestone })
   .strict()
 
 /**

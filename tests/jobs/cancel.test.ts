@@ -1,7 +1,8 @@
 /**
  * Cancellation: a deliberate stop is a first-class outcome, not a failure. A job
  * cancelled while queued never runs; one aborted mid-run settles `cancelled`
- * with no error and no notification, and its settled hook is told so.
+ * with no error and no notification, and its settled hook is told so. A job that
+ * stops ITSELF is the other thing its signal carries: that one failed.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { PGlite } from '@electric-sql/pglite';
@@ -208,6 +209,71 @@ describe('cancel — a job running in this process', () => {
     await Promise.all(running);
     expect(await verdict).toBe('cancelled');
     expect((await rt.jobStore.get(job.id))?.status).toBe('cancelled');
+  });
+});
+
+describe('a job that stops itself', () => {
+  const lost = new Error('Activity writer lost its lease');
+
+  it('unwinds on its signal and settles failed on why it gave up', async () => {
+    const rt = runtime();
+    const started = deferred<void>();
+    const settled = vi.fn(async () => {});
+    const onError = vi.fn((err: Error) => ({ level: 'error' as const, title: 'Failed', body: err.message }));
+    const def: JobDefinition<Payload> = {
+      type: 'test.job',
+      title: 'Testing',
+      steps: [],
+      org: (p) => p.org,
+      onSettled: settled,
+      run: async (ctx) => {
+        started.resolve();
+        await new Promise<void>((_res, rej) => {
+          ctx.signal?.addEventListener('abort', () => rej(new Error('aborted')), { once: true });
+          // What the body's own infrastructure does when it cannot go on.
+          setTimeout(() => ctx.fail(lost), 5);
+        });
+        return { notification: null };
+      },
+      onError,
+    };
+
+    const { jobs, running } = await jobsOver(rt, def);
+    const job = await rt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:lost' });
+    await jobs.addJob('test.job', { jobId: job.id, org: ORG }, 'test.job:lost');
+    await started.promise;
+    await Promise.all(running);
+
+    const row = await rt.jobStore.get(job.id);
+    expect(row?.status).toBe('failed');
+    expect(row?.error).toContain('lost its lease');
+    expect(onError).toHaveBeenCalledWith(lost, expect.anything());
+    expect(await rt.notifications.listForOrg(ORG)).toHaveLength(1);
+    expect(settled).toHaveBeenCalledWith(expect.anything(), 'failed', undefined);
+  });
+
+  it('a body that ran to its end after giving up still settles failed', async () => {
+    const rt = runtime();
+    const def: JobDefinition<Payload> = {
+      type: 'test.job',
+      title: 'Testing',
+      steps: [],
+      org: (p) => p.org,
+      run: async (ctx) => {
+        ctx.fail(lost);
+        return { result: { written: 3 }, notification: null };
+      },
+      onError: (err) => ({ level: 'error', title: 'Failed', body: err.message }),
+    };
+
+    const { jobs, running } = await jobsOver(rt, def);
+    const job = await rt.jobStore.create({ org: ORG, type: 'test.job', key: 'test.job:late' });
+    await jobs.addJob('test.job', { jobId: job.id, org: ORG }, 'test.job:late');
+    await Promise.all(running);
+
+    const row = await rt.jobStore.get(job.id);
+    expect(row?.status).toBe('failed');
+    expect(row?.error).toContain('lost its lease');
   });
 });
 

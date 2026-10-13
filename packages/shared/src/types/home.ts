@@ -6,7 +6,7 @@
  * fold made them useless as a total — a section is worth the worst thing in it,
  * so one blocked scenario erased every proof beside it and a workspace with
  * dozens of passing flows read zero. The strip and the trend therefore count
- * flows, in the Flows page's five words, so the same flow wears the same word
+ * flows, in the Flows page's words, so the same flow wears the same word
  * and rides the same number on both pages.
  *
  * Sections are still counted, and still in the product owner's words: the Areas
@@ -24,7 +24,7 @@ import type { ContextDocumentStatus } from './context.js';
 
 // --- Flows: what the strip and the trend count -------------------------------
 
-/** The five words a FLOW wears on Home, which are the engine's own five. */
+/** The words a FLOW wears on Home, which are the engine's own. */
 export type HomeFlowStatus = GuardCoveragePlainStatus;
 
 /**
@@ -34,6 +34,7 @@ export type HomeFlowStatus = GuardCoveragePlainStatus;
  */
 export const HOME_FLOW_STATUS_ORDER = [
   'succeeded',
+  'partially-succeeded',
   'failed',
   'blocked',
   'not-testable',
@@ -43,7 +44,7 @@ export const HOME_FLOW_STATUS_ORDER = [
 /** The ONE word per flow status — the Flows page's, never a second name. */
 export const HOME_FLOW_STATUS_WORD: Record<HomeFlowStatus, string> = GUARD_COVERAGE_STATUS_WORD;
 
-/** Flows counted under the five words. */
+/** Flows counted under those words. */
 export interface HomeFlowTally {
   total: number;
   byStatus: Record<HomeFlowStatus, number>;
@@ -137,6 +138,35 @@ export interface HomeChangeRow {
   href: string;
 }
 
+/** One finding: a flow whose test fails where the product and its documents part ways. */
+export interface HomeFindingRow {
+  /** `<owner/repo>:<flowId>`. */
+  id: string;
+  title: string;
+  /** What the documents say happens. */
+  documented: string;
+  /** What the product did instead. */
+  observed: string;
+  /** Opens the flow. */
+  href: string;
+}
+
+/** The flows blocked on one missing thing. */
+export interface HomeBlockedOnRow {
+  /** The missing thing, in the words the flows' tests gave it. */
+  reason: string;
+  flows: number;
+  href: string;
+}
+
+/** One document's flows, counted under the words a flow wears. */
+export interface HomeDocumentFlowsRow extends HomeFlowTally {
+  /** The document as the flows cite it. */
+  doc: string;
+  /** Opens Flows narrowed to this document. */
+  href: string;
+}
+
 /** `GET /api/home?period=`, the whole page in one answer. */
 export interface HomeResponse {
   period: HomePeriod;
@@ -149,6 +179,12 @@ export interface HomeResponse {
   attention: HomeAttentionRow[];
   /** Newest first. */
   changed: HomeChangeRow[];
+  /** The failing flow tests, in flow order. */
+  findings: HomeFindingRow[];
+  /** What blocked flows wait on, most flows first. */
+  blockedOn: HomeBlockedOnRow[];
+  /** Worst share first: Failed plus Blocked over the document's FLOWS. */
+  documents: HomeDocumentFlowsRow[];
 }
 
 /**

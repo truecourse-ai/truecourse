@@ -71,16 +71,13 @@ export async function undismissFlow(
 }
 
 /**
- * Reverse a claim dismissal by its identity `{ doc, anchor, title }`. A no-op
- * when there is none; answers the updated ledger.
+ * Reverse a claim dismissal by the claim's id. A no-op when there is none;
+ * answers the updated ledger.
  */
 export async function undismissClaim(
   repoPath: string,
-  request: { doc?: string; anchor?: string; title?: string },
+  request: { claimId?: string },
 ): Promise<GuardDecisions> {
-  const { doc, anchor, title } = request;
-  if (!doc || !anchor || !title) {
-    throw new GuardDecisionError('undismiss requires { doc, anchor, title }.');
-  }
-  return undismissGuardClaim(repoPath, { doc, anchor, title });
+  if (!request.claimId) throw new GuardDecisionError('undismiss requires { claimId }.');
+  return undismissGuardClaim(repoPath, { claimId: request.claimId });
 }

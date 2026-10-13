@@ -17,45 +17,7 @@ import type {
   GuardGapDisplayKind,
   GuardGenerateError,
   GuardGenerateReport,
-  GuardNeedsSetup,
 } from '@truecourse/shared';
-
-/** Changed sections split the way the generate report counts them. */
-export interface GuardSettledCounts {
-  /** Sections whose spec content changed since the last generate. */
-  changed: number;
-  /** Changed sections that recorded a scenario or gap (accounted for). */
-  settled: number;
-  /** Changed sections that re-attempt next run (a birth finding or authoring error). */
-  unsettled: number;
-  /** Sections skipped because their spec content was unchanged. */
-  unchanged: number;
-}
-
-/**
- * Settled / unsettled split, identical to `composeGuardStatus`.
- *
- * A COMMITTED failing test settles its section: guard commits every test it
- * authors, so the section has its measurement and the measurement is red, there
- * is nothing to re-attempt. Only work that left NOTHING behind is unsettled: a
- * fidelity rejection (judged an invalid measurement, never committed), an
- * authoring error, and, on reports written before failing tests were committed -
- * a birth failure that withheld its scenario (no `committed` flag).
- */
-export function settledCounts(report: GuardGenerateReport): GuardSettledCounts {
-  const unsettled = new Set<string>();
-  for (const f of report.birthFindings) {
-    if (f.committed) continue;
-    unsettled.add(`${f.doc}\0${f.anchor}`);
-  }
-  for (const e of report.errors) unsettled.add(`${e.doc}\0${e.anchor}`);
-  return {
-    changed: report.sectionsChanged,
-    settled: Math.max(0, report.sectionsChanged - unsettled.size),
-    unsettled: unsettled.size,
-    unchanged: report.skippedUnchanged,
-  };
-}
 
 /** Display order: blocked-on first, then the awaiting drivers (registry-derived),
  *  then the residual kinds (dismissed, a user choice, last). A new driver slots
@@ -85,11 +47,8 @@ export interface BlockedOnEntry {
 }
 
 /**
- * Tally capability nouns across many blocked-on sections, one increment per
- * (section, capability), descending by count then name. The single tally used by
- * both the Coverage totals strip (over the doc's blocked-on sections) and the
- * gaps-based {@link blockedOnTally} (over the generate report), so there is one
- * implementation, not two.
+ * Tally capability nouns across many blocked-on gaps, one increment per
+ * (gap, capability), descending by count then name.
  */
 export function tallyCapabilities(capabilityLists: Iterable<readonly string[]>): BlockedOnEntry[] {
   const tally: Record<string, number> = {};
@@ -108,46 +67,6 @@ export function tallyCapabilities(capabilityLists: Iterable<readonly string[]>):
 export function blockedOnTally(gaps: readonly GuardCoverageGap[]): BlockedOnEntry[] {
   return tallyCapabilities(
     gaps.filter((g) => g.kind === 'blocked-on').map((g) => parseBlockedOnCapabilities(g.reason)),
-  );
-}
-
-/** One providable service and the sections waiting on it. */
-export interface NeedsSetupEntry {
-  service: string;
-  count: number;
-  /** True when the account is ALREADY provided, the gap is stale, re-generate. */
-  provided: boolean;
-}
-
-/**
- * Tally the SERVICES behind a doc's `needs-setup` sections, one increment per
- * (section, service), still-to-provide first, then descending by count and name.
- * `provided` marks the "setup done" sub-state: nothing to fill in, the flows just
- * need the next `guard generate`. A service that appears in both readings counts
- * as still-to-provide (something is genuinely missing somewhere).
- */
-export function tallyNeedsSetup(
-  needsSetups: Iterable<GuardNeedsSetup | undefined>,
-): NeedsSetupEntry[] {
-  const tally = new Map<string, NeedsSetupEntry>();
-  const bump = (service: string, provided: boolean): void => {
-    const entry = tally.get(service);
-    if (!entry) tally.set(service, { service, count: 1, provided });
-    else {
-      entry.count += 1;
-      entry.provided = entry.provided && provided;
-    }
-  };
-  for (const needsSetup of needsSetups) {
-    if (!needsSetup) continue;
-    for (const service of needsSetup.services) bump(service, false);
-    for (const service of needsSetup.provided) bump(service, true);
-  }
-  return [...tally.values()].sort(
-    (a, b) =>
-      Number(a.provided) - Number(b.provided) ||
-      b.count - a.count ||
-      a.service.localeCompare(b.service),
   );
 }
 

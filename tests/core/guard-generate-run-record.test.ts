@@ -83,7 +83,7 @@ describe('guard generate run record', () => {
     // run.json files every session under its step instead of after the list.
     expect(checklist?.items.map((i) => [i.key, i.sessionKinds])).toEqual([
       ['index', []],
-      ['extract', ['guard-generate.claim-diff', 'guard-generate.extract']],
+      ['extract', []],
       ['interfaces', []],
       ['flows', ['guard-generate.flows']],
       ['match', ['guard-generate.match']],
@@ -117,7 +117,7 @@ describe('a generate the gates stop is on record too', () => {
     fs.writeFileSync(
       path.join(repo, '.truecourse', 'specs', 'corpus.json'),
       JSON.stringify({
-        version: 3,
+        version: 6,
         generatedAt: '2026-01-01T00:00:00Z',
         docs: [
           { ref: 'docs/v1.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['users'] },
@@ -129,7 +129,7 @@ describe('a generate the gates stop is on record too', () => {
             product: 'users',
             concern: 'users',
             docRefs: ['docs/v1.md', 'docs/v2.md'],
-            overlaps: [{ docs: ['docs/v1.md', 'docs/v2.md'], note: 'two names for one thing', sections: [] }],
+            conflicts: [{ docs: ['docs/v1.md', 'docs/v2.md'], note: 'two names for one thing', sections: [] }],
           },
         ],
         relations: [],
@@ -163,10 +163,10 @@ describe('a generate the gates stop is on record too', () => {
     fs.writeFileSync(
       path.join(repo, '.truecourse', 'specs', 'corpus.json'),
       JSON.stringify({
-        version: 3,
+        version: 6,
         generatedAt: '2026-01-01T00:00:00Z',
         docs: [{ ref: 'docs/cli.md', kind: 'prd', lastTouched: '2026-01-01T00:00:00Z', areaTags: ['cli'] }],
-        areas: [{ id: 'cli', product: 'cli', concern: 'cli', docRefs: ['docs/cli.md'], overlaps: [] }],
+        areas: [{ id: 'cli', product: 'cli', concern: 'cli', docRefs: ['docs/cli.md'], conflicts: [] }],
         relations: [],
         skippedDocs: [],
       }),

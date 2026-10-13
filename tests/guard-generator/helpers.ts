@@ -4,10 +4,15 @@ import os from 'node:os'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import yaml from 'js-yaml'
-import { buildDocSectionIndex } from '@truecourse/guard-runner'
+import { specClaimsFilePath } from '@truecourse/shared/work-tree'
 import {
+  claimId,
   interfaceFingerprint,
+  parseDocTree,
+  sectionSentences,
+  sentenceKey,
   type ApiRequestContract,
+  type Claim,
   type GuardExpectedRed,
   type DetectedExternalService,
   type OutboundRequest,
@@ -17,12 +22,11 @@ import {
 } from '@truecourse/shared'
 import {
   generateGuards,
-  type ExtractResult,
-  type ExtractSessionSeam,
-  type ExtractedClaimWithNeeds,
   type FlowSet,
   flowAreaKey,
+  type FlowClaimInput,
   type FlowSynthesisArea,
+  type SynthesizedMilestone,
   type FlowsAreaSessionResult,
   type FlowsAreaSessionSeam,
   type FlowsEpicSessionSeam,
@@ -36,13 +40,11 @@ import {
   type MatchRunner,
   type WorldClassifyRunner,
   type RecipeRunner,
-  type ClaimDiffRunner,
   type RawGeneratedApiScenario,
   type RawGeneratedCliScenario,
   type RawGeneratedScenario,
   type RawGeneratedWebScenario,
   type SeedDraftDatabase,
-  type UntestableNote,
   type WorkerFidelityJudge,
 } from '@truecourse/guard-generator'
 
@@ -118,12 +120,14 @@ export function writeCorpus(repo: string, docs: { ref: string; areaTags?: string
   )
 }
 
-/** The live binding (doc + anchor + fingerprint) for a section by its heading text. */
+/** The live binding for a section by its heading text, bound to the section's first sentence as {@link writeClaims}'s default claim is. */
 export function bindsFor(repo: string, docRel: string, headingText: string): GuardScenario['binds'] {
-  const content = fs.readFileSync(path.join(repo, docRel), 'utf-8')
-  const section = buildDocSectionIndex(docRel, content).sections.find((s) => s.headingText === headingText)
+  const tree = parseDocTree(docRel, fs.readFileSync(path.join(repo, docRel), 'utf-8'))
+  const section = tree.sections.find((s) => s.headingText === headingText)
   if (!section) throw new Error(`no section "${headingText}" in ${docRel}`)
-  return [{ doc: docRel, section: section.anchor, fingerprint: section.fingerprint }]
+  const first = sectionSentences(tree, section)[0]
+  if (!first) throw new Error(`section "${headingText}" in ${docRel} has no sentence`)
+  return [{ doc: docRel, sentences: [sentenceKey(first.text, first.repeat)] }]
 }
 
 /** A raw generated CLI scenario as a model would return it (behavioral fields only). */
@@ -309,68 +313,70 @@ export function sessionSummary(kind: string, over: Partial<GuardSessionSummary> 
   }
 }
 
-export const EXTRACT_KIND = 'guard-generate.extract'
 export const FLOWS_KIND = 'guard-generate.flows'
 export const WORKER_KIND = 'guard-generate.flow-worker'
 
-/** How a section's claims are described in an {@link extractSessionBy} spec. */
+/**
+ * How a section's claims are described in a {@link claimsBy} spec: its claims
+ * (a statement each; any other field is the old extraction vocabulary and is
+ * ignored), or its untestable note.
+ */
 export type ClaimSpec =
-  | Array<{ claim?: string; driver?: 'cli' | 'api' | 'web' | 'tui' | 'library'; reason?: string; alternativeDrivers?: ExtractedClaimWithNeeds['alternativeDrivers']; needs?: ExtractedClaimWithNeeds['needs']; verification?: ExtractedClaimWithNeeds['verification'] }>
+  | Array<{ claim?: string; [field: string]: unknown }>
   | { untestable: string }
 
-/**
- * The claim-extraction SEAM driven by a per-anchor claim map: for every section
- * of every doc it is handed, either that section's claims or its untestable
- * note. Sections absent from the map yield one default cli claim (so
- * "everything testable" is the default) — the shape {@link extractBy}'s runner
- * had, moved onto the seam.
- */
-export function extractSessionBy(
-  byAnchor: Record<string, ClaimSpec>,
-  onDoc?: (doc: string) => void,
-): ExtractSessionSeam {
-  return async ({ docs, onDoc: tick }) => {
-    const byDoc = new Map<string, ExtractResult>()
-    let done = 0
-    tick?.(0, docs.length)
-    for (const doc of docs) {
-      onDoc?.(doc.doc)
-      const claims: ExtractedClaimWithNeeds[] = []
-      const untestable: UntestableNote[] = []
-      for (const section of doc.sections) {
-        const spec = byAnchor[section.anchor] ?? [{}]
-        if (Array.isArray(spec)) {
-          for (const c of spec) {
-            claims.push({
-              claim: c.claim ?? `${section.anchor} claim`,
-              driver: c.driver ?? 'cli',
-              sectionAnchor: section.anchor,
-              reason: c.reason ?? 'exit code is observable',
-              ...(c.alternativeDrivers ? { alternativeDrivers: c.alternativeDrivers } : {}),
-              ...(c.needs ? { needs: c.needs } : {}),
-              ...(c.verification ? { verification: c.verification } : {}),
-            })
-          }
-        } else {
-          untestable.push({ sectionAnchor: section.anchor, reason: spec.untestable })
-        }
-      }
-      byDoc.set(doc.doc, { ok: true, data: { claims, untestable }, complete: true, failedViews: 0 })
-      tick?.(++done, docs.length)
-    }
-    return { byDoc, summary: sessionSummary(EXTRACT_KIND, { ran: docs.length }) }
-  }
+/** A per-anchor claim map, what {@link runGenerate} writes as the repo's `specs/claims.json`. */
+export type ClaimsSpec = Record<string, ClaimSpec>
+
+/** The spec as given; the name says what it describes at the call site. */
+export function claimsBy(byAnchor: ClaimsSpec): ClaimsSpec {
+  return byAnchor
 }
 
-/** An extraction seam that answers from an explicit per-doc map. */
-export function extractSessionOf(
-  byDoc: Map<string, ExtractResult>,
-  summary: Partial<GuardSessionSummary> = {},
-): ExtractSessionSeam {
-  return async () => ({
-    byDoc,
-    summary: sessionSummary(EXTRACT_KIND, { ran: byDoc.size, ...summary }),
-  })
+/**
+ * Write the scan's claims for every corpus doc of `repo`: for each section,
+ * the claims the spec names (read from the section's first sentence) or one
+ * default claim, so "everything testable" is the default; an `untestable` note
+ * becomes an untestable claim on that sentence. A section with no sentence of
+ * its own yields nothing.
+ */
+export function writeClaims(repo: string, byAnchor: ClaimsSpec = {}): Claim[] {
+  const corpusFile = path.join(repo, '.truecourse', 'specs', 'corpus.json')
+  const claims: Claim[] = []
+  if (fs.existsSync(corpusFile)) {
+    const corpus = JSON.parse(fs.readFileSync(corpusFile, 'utf-8')) as { docs: { ref: string; areaTags?: string[] }[] }
+    for (const d of corpus.docs) {
+      const abs = path.join(repo, d.ref)
+      if (!fs.existsSync(abs)) continue
+      const tree = parseDocTree(d.ref, fs.readFileSync(abs, 'utf-8'))
+      for (const section of tree.sections) {
+        const first = sectionSentences(tree, section)[0]
+        if (!first) continue
+        const key = sentenceKey(first.text, first.repeat)
+        const spec = byAnchor[section.anchor] ?? [{}]
+        const areas = d.areaTags ?? []
+        if (Array.isArray(spec)) {
+          spec.forEach((c, i) => {
+            claims.push({
+              id: claimId(d.ref, [key], i),
+              doc: d.ref,
+              sentences: [key],
+              subject: section.headingText,
+              statement: typeof c.claim === 'string' ? c.claim : `${section.anchor} claim`,
+              areas,
+              testable: true,
+            })
+          })
+        } else {
+          claims.push({ id: claimId(d.ref, [key]), doc: d.ref, sentences: [key], subject: section.headingText, statement: first.text, areas, testable: { reason: 'not-observable' } })
+        }
+      }
+    }
+  }
+  const file = specClaimsFilePath(repo)
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, JSON.stringify({ version: 1, generatedAt: '2026-01-01T00:00:00Z', claims }))
+  return claims
 }
 
 // --- Flow synthesis ---------------------------------------------------------
@@ -408,19 +414,34 @@ function continuing(prior: readonly GuardFlow[], title: string): { id: string } 
 }
 
 /**
- * Flow synthesis fake: ONE atomic flow per claim, titled from the claim's anchor —
- * so a flow's id IS the anchor slug and its scenarios read `<anchor>.<surface>.<n>`.
- * The default for tests that care about a claim, not a composition.
+ * The title the flow fakes give a claim's flow: the claim's statement minus the
+ * ` claim` suffix {@link writeClaims}'s default statement carries, so a default
+ * claim under section `cli/version` yields the flow id `cli-version` and its
+ * scenarios read `cli-version.<surface>.<n>`.
+ */
+export function flowTitleOf(claim: { title: string }): string {
+  return claim.title.replace(/ claim$/, '')
+}
+
+/** A flow milestone over one synthesis claim, as the fakes emit it. */
+function milestoneOf(c: FlowClaimInput, order: number): SynthesizedMilestone {
+  return { order, claimId: c.id }
+}
+
+/**
+ * Flow synthesis fake: ONE atomic flow per claim, titled by {@link flowTitleOf} —
+ * so a default claim's flow id IS its section slug. The default for tests that
+ * care about a claim, not a composition.
  */
 export function flowPerClaimSession(onArea?: (areaId: string) => void): FlowsAreaSessionSeam {
   return flowsAreaSessionOf((area, prior) => {
     onArea?.(area.areaId)
     return {
       flows: area.claims.map((c) => ({
-        ...continuing(prior, c.anchor),
-        title: c.anchor,
+        ...continuing(prior, flowTitleOf(c)),
+        title: flowTitleOf(c),
         goal: `verify ${c.title}`,
-        milestones: [{ order: 1, doc: c.doc, anchor: c.anchor, claimTitle: c.title, ...(c.verification?.cases ? { caseIds: c.verification.cases.map(v => v.id) } : {}) }],
+        milestones: [milestoneOf(c, 1)],
       })),
       noFlowClaims: [],
     }
@@ -439,7 +460,7 @@ export function flowOfAllSession(title: string, onArea?: (areaId: string) => voi
           ...continuing(prior, title),
           title,
           goal: `walk ${area.claims.length} milestone(s)`,
-          milestones: area.claims.map((c, i) => ({ order: i + 1, doc: c.doc, anchor: c.anchor, claimTitle: c.title, ...(c.verification?.cases ? { caseIds: c.verification.cases.map(v => v.id) } : {}) })),
+          milestones: area.claims.map((c, i) => milestoneOf(c, i + 1)),
         },
       ],
       noFlowClaims: [],
@@ -670,7 +691,7 @@ export function submitWorkerSessions(
 export function matchAll(onCall?: (flowId: string, surface: string) => void): MatchRunner {
   return async ({ flow, milestones, interfaces, surface }) => {
     onCall?.(flow.id, surface)
-    return { plan: milestones.map((m) => ({ interfaceId: interfaces[0].id, milestone: m.order, ...(m.verification?.cases?.length ? { checks: m.verification.cases.map(c => c.id) } : {}) })) }
+    return { plan: milestones.map((m) => ({ interfaceId: interfaces[0].id, milestone: m.order })) }
   }
 }
 
@@ -680,7 +701,7 @@ export function matchBy(unrealizable: Record<string, string>, onCall?: (flowId: 
     onCall?.(ctx.flow.id)
     const reason = unrealizable[ctx.flow.id]
     if (reason) return { unrealizable: reason }
-    return { plan: ctx.milestones.map((m) => ({ interfaceId: ctx.interfaces[0].id, milestone: m.order, ...(m.verification?.cases?.length ? { checks: m.verification.cases.map(c => c.id) } : {}) })) }
+    return { plan: ctx.milestones.map((m) => ({ interfaceId: ctx.interfaces[0].id, milestone: m.order })) }
   }
 }
 
@@ -753,8 +774,12 @@ export function judgeBy(
  * about. There is no production fallback any more: the four session seams are
  * REQUIRED fields, so a test that omits one does not compile.
  */
-export function runGenerate(options: GenerateGuardsOptions): Promise<GuardGenerateResult> {
-  return generateGuards({ ...flowStageSeams(options.repoRoot), ...options })
+export function runGenerate(options: GenerateGuardsOptions & { claims?: ClaimsSpec }): Promise<GuardGenerateResult> {
+  const { claims, ...rest } = options
+  // The claims the run composes from: the spec's, or one default claim per
+  // section when the tree carries none yet.
+  if (claims || !fs.existsSync(specClaimsFilePath(rest.repoRoot))) writeClaims(rest.repoRoot, claims ?? {})
+  return generateGuards({ ...flowStageSeams(rest.repoRoot), ...rest })
 }
 
 /**
@@ -765,18 +790,15 @@ export function runGenerate(options: GenerateGuardsOptions): Promise<GuardGenera
  */
 export function flowStageSeams(repo: string): {
   interfaces: InterfaceProvider
-  extractSession: ExtractSessionSeam
   flowsAreaSession: FlowsAreaSessionSeam
   flowsEpicSession: FlowsEpicSessionSeam
   flowWorkerSession: FlowWorkerSessionSeam
   matchRunner: MatchRunner
   worldClassifyRunner: WorldClassifyRunner
   recipeRunner: RecipeRunner
-  claimDiffRunner: ClaimDiffRunner
 } {
   return {
     interfaces: DEFAULT_INTERFACES(repo),
-    extractSession: extractSessionBy({}),
     flowsAreaSession: flowPerClaimSession(),
     flowsEpicSession: noEpicSessions,
     flowWorkerSession: noWorkerSessions,
@@ -784,13 +806,10 @@ export function flowStageSeams(repo: string): {
     // No flow is destructive unless a test says so — the default keeps every
     // existing case's scheduling (and its `errors: []` assertions) unchanged.
     worldClassifyRunner: async () => ({ mutators: [] }),
-    // A test that needs a recipe proposed, or the claim-diff gate asked,
-    // injects its own: reaching these means the case forgot to.
+    // A test that needs a recipe proposed injects its own: reaching this
+    // means the case forgot to.
     recipeRunner: async () => {
       throw new Error('no recipe proposer injected for this case')
-    },
-    claimDiffRunner: async () => {
-      throw new Error('no claim-diff runner injected for this case')
     },
   }
 }

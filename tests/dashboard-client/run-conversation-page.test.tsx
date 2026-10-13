@@ -749,7 +749,6 @@ describe('the words the page is allowed to use', () => {
     expect(readdirSync(dir).sort()).toEqual([
       'RunConversationPage.tsx',
       'conversation-model.ts',
-      'conversation-pieces.tsx',
       'run-model.ts',
       'useRunConversation.ts',
     ]);

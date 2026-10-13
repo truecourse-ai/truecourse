@@ -38,7 +38,7 @@ interface SpecCorpusPayload {
   corpus: CuratedCorpus | null;
   manualIncludes: string[];
   manualExcludes: string[];
-  /** Section-scoped conflict verdicts — the client re-derives resolved/
+  /** Conflict verdicts — the client re-derives resolved/
    *  dismissed/orphaned conflict state from these via the shared derivation. */
   conflictResolutions: ConflictResolution[];
 }

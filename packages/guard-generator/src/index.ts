@@ -19,6 +19,7 @@ export {
   // steps in order. `@truecourse/core` enforces the cache-only replay of the
   // prior ones against these.
   GENERATE_SESSION_STEPS,
+  PRODUCT_WORLD_RECIPE_FINGERPRINT,
   type GenerateStep,
   type GenerateGuardsOptions,
   // One line per thing a run did, filed under the phase that did it.
@@ -44,14 +45,10 @@ export {
 
 export {
   planGuardWork,
-  collectWorkDocs,
   corpusOpenApiDocs,
   hasGuardUniverse,
   readCorpusAreaTags,
-  sectionInputsKey,
-  legacyFlowGenerationInputsHash,
   flowGenerationInputComponents,
-  flowInterfaceFingerprintBag,
   flowSettleDigest,
   flowSettleVerdict,
   type FlowGenerationInputParts,
@@ -61,18 +58,18 @@ export {
   type SectionInput,
 } from './section-plan.js'
 
+export { readSpecClaims, placeClaims, claimAreaInputs, oneLine, dismissedReason } from './claims-input.js'
+export type { ClaimPlacement, ClaimAreaInputs, ClaimAreaInputsOptions } from './claims-input.js'
+
 export {
   matchFlow,
-  matchProviderControls,
   planFlowMatching,
   readCachedMatch,
   buildSurfaceCatalogs,
   interfaceDigest,
   realizationLines,
   realizationAssignmentFingerprint,
-  partitionPlanPreparations,
   matchCacheKey,
-  matchLegacyCacheKeys,
   surfaceIdentityFingerprint,
   MATCH_STAGE_VERSION,
   MATCH_CACHE_NAME,
@@ -88,7 +85,6 @@ export {
   buildOperationIndex,
   matchOperationsForSection,
   matchedRequestSchemas,
-  matchedSchemaFingerprint,
   type OperationEntry,
 } from './openapi-enrich.js'
 
@@ -108,37 +104,12 @@ export {
 
 export {
   readSuppressedClaims,
-  readSuppressionIndex,
-  suppressedQuotesIn,
-  suppressionKey,
 } from './suppression.js'
 
-export {
-  snapExtraction,
-  isSystemicSessionLoss,
-  reconciliationProblems,
-  mergeSettledSections,
-  carryPriorCaseIdentity,
-  priorClaimsToAccount,
-  type DocClaims,
-  type ExtractResult,
-  type ExtractedClaimWithNeeds,
-  type ExtractPrior,
-  type PriorClaim,
-  type ReconcilableDraft,
-  type ExtractSessionSeam,
-  type PriorExtraction,
-  type ReuseExtractionSeam,
-  type GuardSessionSummary,
-} from './extract.js'
 
-export { priorExtractions, type PriorExtractionsInput } from './extract-prior.js'
+export { isSystemicSessionLoss, type GuardSessionSummary } from './sessions.js'
 
-export {
-  mergeExtractedClaims,
-  persistExtractedClaims,
-  type ExtractedDocOutcome,
-} from './claims-persist.js'
+export { writeClaimsCorpus } from './claims-persist.js'
 
 export {
   synthesizeFlows,
@@ -149,7 +120,6 @@ export {
   flowAreaClaimsMaterial,
   flowAreaOutlinesMaterial,
   flowEpicDigestsMaterial,
-  flowSectionKey,
   flowsPath,
   readFlowsFile,
   checkFlowSet,
@@ -179,7 +149,6 @@ export {
   discoverRecipe,
   verifyProposal,
   recipeCacheKey,
-  recipeLegacyCacheKey,
   staticProposalComplaints,
   failureReport,
   RECIPE_CACHE_NAME,
@@ -302,18 +271,16 @@ export {
   readSpecExcerpts,
   collectSecuritySchemes,
   recipeStepFingerprint,
-  legacyRecipeStepFingerprint,
   interfacesFingerprint,
-  legacyInterfacesFingerprint,
   computeSeedStepFingerprint,
   engineSeedRedraftDue,
   recordedSchemaFiles,
   schemaFilesFingerprint,
   type StepObservations,
-  legacySeedStepFingerprint,
   authFingerprint,
   settledSteps,
   stepSettled,
+  stepInputComponents,
   type SettledStepRow,
   GUARD_SETUP_STEPS,
   GUARD_SETUP_ONLY_STEPS,
@@ -403,10 +370,6 @@ export {
   type SeedRetryContext,
   type SeedSchemaTable,
   type RecipeAppInventoryEntry,
-  CLAIM_DIFF_SYSTEM_PROMPT,
-  CLAIM_DIFF_PROMPT_FINGERPRINT,
-  buildClaimDiffUserPrompt,
-  type ClaimDiffSectionInput,
   WORLD_CLASSIFY_SYSTEM_PROMPT,
   WORLD_CLASSIFY_PROMPT_FINGERPRINT,
   buildWorldClassifyUserPrompt,
@@ -432,21 +395,10 @@ export {
   type RecipeRunner,
   type MatchRunner,
   type WorldClassifyRunner,
-  type ClaimDiffRunner,
   type LeafSummaries,
 } from './leaf-seams.js'
 
-export {
-  reuseCosmeticExtractions,
-  rememberDocTexts,
-  claimDiffCacheKey,
-  claimDiffLegacyCacheKey,
-  docContentHash,
-  CLAIM_DIFF_CACHE_NAME,
-  DOC_TEXT_CACHE_NAME,
-  EMPTY_CLAIM_DIFF_GATE,
-  type ClaimDiffGateResult,
-} from './claim-diff.js'
+export { docContentHash } from './section-plan.js'
 
 export {
   TestabilityVerdictSchema,
@@ -456,9 +408,6 @@ export {
   RecipeApiServerProposalSchema,
   SeedProposalSchema,
   SeedProvidesProposalSchema,
-  ExtractedClaimSchema,
-  UntestableNoteSchema,
-  DocExtractionSchema,
   RawGeneratedScenarioSchema,
   RawGeneratedCliScenarioSchema,
   RawGeneratedWebScenarioSchema,
@@ -479,9 +428,6 @@ export {
   type RecipeProposal,
   type RecipeApiProposal,
   type RecipeApiServerProposal,
-  type ExtractedClaim,
-  type UntestableNote,
-  type DocExtraction,
   type RawGeneratedApiScenario,
   type RawGeneratedCliScenario,
   type RawGeneratedWebScenario,
@@ -497,8 +443,6 @@ export {
   type SynthesizedMilestone,
   type SynthesizedEpicFlow,
   type RetiredFlow,
-  ClaimDiffSchema,
-  type ClaimDiff,
   WorldClassifySchema,
   type WorldClassify,
 } from './schemas.js'
@@ -534,8 +478,6 @@ export { apiAuthEvidence, probeCandidatesFromInterfaces, requiredResources } fro
 export type { ApiAuthEvidence, RequiredResource } from './seed-evidence.js'
 
 export type { GuardSetupPreparationSession, GuardSetupPreparationSessionInput } from './setup.js'
-
-export { bindClaimPrerequisites, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowPrerequisiteShapeFingerprint, flowInvocationGaps } from './prerequisites.js'
 
 export { completeRealization } from './match.js'
 

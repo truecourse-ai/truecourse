@@ -1,12 +1,10 @@
 /**
- * What the one-shot RETIREMENT left behind, pinned on the
- * three things a refactor could quietly break:
+ * What the one-shot RETIREMENT left behind, pinned on the things a refactor
+ * could quietly break:
  *
  *  - the four session seams are REQUIRED options — a caller that forgets one
  *    must not compile, because there is no production fallback any more;
- *  - `legacyFlowGenerationInputsHash` FROZE the retired prompts' fingerprints as
- *    literal salt, so every user's committed flow hashes survived the cut-over.
- *    That value must never move again;
+ *  - a flow settles by its named inputs, compared name by name;
  *  - an abort still reports EVERY stage's losses: the transport tally of the
  *    surviving one-shots AND the session-kind tallies, which the transport audit
  *    never sees.
@@ -18,9 +16,7 @@ import path from 'node:path'
 import { readManifest, loadScenarios } from '@truecourse/guard-runner'
 import {
   generateGuards,
-  legacyFlowGenerationInputsHash,
   flowGenerationInputComponents,
-  flowInterfaceFingerprintBag,
   flowSettleVerdict,
   type FlowGenerationInputParts,
   MATCH_SESSION_KIND,
@@ -36,12 +32,10 @@ import {
   raw,
   runGenerate,
   flowStageSeams,
-  extractSessionBy,
-  extractSessionOf,
+  claimsBy,
   flowsAreaSessionOf,
   submitWorkerSessions,
   sessionSummary,
-  EXTRACT_KIND,
   FLOWS_KIND,
   PASSING_STEPS,
 } from './helpers.js'
@@ -73,73 +67,13 @@ function seed(): string {
   return r
 }
 
-// ---------------------------------------------------------------------------
-// The frozen hash.
-// ---------------------------------------------------------------------------
-
-describe('legacyFlowGenerationInputsHash — the frozen retirement salt', () => {
-  /**
-   * The value the PRE-retirement code produced for these inputs, recomputed off
-   * git HEAD before the cut-over. `section-plan.ts` keeps the retired
-   * extract/flows/epic prompt fingerprints as literal constants precisely so
-   * this number could not move: swapping in the session prompts' fingerprints
-   * would have re-authored every committed flow in every user's repo for no
-   * behavioral reason. If this case ever goes red, the salt moved and every
-   * committed corpus is about to be re-worked.
-   *
-   * MOVED ONCE, DELIBERATELY, with the blast-radius cut: the canonical cli/api
-   * scenario schemas gained `world` and the author doctrine gained the
-   * shared-world/self-mint contract, both of which the corpus is MEANT to
-   * re-author under — the old corpora were written with no blast-radius
-   * discipline at all (a committed delete-account scenario deleted the seeded
-   * principal mid-run).
-   */
-  // Intentionally rolled for case-granular matching, reviewed preparation profiles,
-  // prerequisite eligibility, grounded proof, and the explicit review-policy version.
-  // Policy v5 deliberately revalidates committed coverage under typed web evidence.
-  // Provider control changes the authoring contract and includes the web prompt
-  // in this hash. The retired extract/flows/epic salts remain unchanged.
-  const GOLDEN = 'sha256:eb1546f70ef7a02e259ba2d7a26c109ed2ded15caf0bd2b9c854fd48690fd89a'
-
-  it('retains the retirement salt with the current matching doctrine', () => {
-    expect(
-      legacyFlowGenerationInputsHash({
-        flowFingerprint: 'f',
-        sectionKeys: ['s'],
-        interfaceFingerprints: ['i'],
-        recipeFingerprint: 'r',
-      }),
-    ).toBe(GOLDEN)
-  })
-
-  it('still moves with every input it is supposed to track', () => {
-    const base = { flowFingerprint: 'f', sectionKeys: ['s'], interfaceFingerprints: ['i'], recipeFingerprint: 'r' }
-    for (const moved of [
-      { ...base, flowFingerprint: 'f2' },
-      { ...base, sectionKeys: ['s2'] },
-      { ...base, interfaceFingerprints: ['i2'] },
-      { ...base, recipeFingerprint: 'r2' },
-    ]) {
-      expect(legacyFlowGenerationInputsHash(moved)).not.toBe(legacyFlowGenerationInputsHash(base))
-    }
-    // Order-insensitive on both sorted lists.
-    expect(
-      legacyFlowGenerationInputsHash({ ...base, sectionKeys: ['b', 'a'], interfaceFingerprints: ['y', 'x'] }),
-    ).toBe(legacyFlowGenerationInputsHash({ ...base, sectionKeys: ['a', 'b'], interfaceFingerprints: ['x', 'y'] }))
-  })
-})
-
 describe('flowGenerationInputComponents — the hash, by name', () => {
   const parts: FlowGenerationInputParts = {
     flowFingerprint: 'f',
-    sectionKeys: ['s1', 's2'],
     assignmentFingerprints: ['a'],
     interfaceFingerprints: ['i1', 'i2'],
-    webCatalogFingerprint: 'w',
     webCatalogReads: ['web/home:abc'],
     hasScenario: false,
-    prerequisiteMaterial: 'p',
-    prerequisiteShape: 'ps',
     recipeSlice: 'rs',
     roster: 'ro',
     preparation: 'pr',
@@ -151,17 +85,10 @@ describe('flowGenerationInputComponents — the hash, by name', () => {
       movedNamedInputs(base, flowGenerationInputComponents({ ...parts, ...over }))!
     expect(moved({})).toEqual([])
     expect(moved({ flowFingerprint: 'f2' })).toEqual(['flow'])
-    expect(moved({ sectionKeys: ['s1', 's3'] })).toEqual(['sections'])
-    expect(moved({ sectionKeys: ['s2', 's1'] })).toEqual([])
     expect(moved({ assignmentFingerprints: ['a2'] })).toEqual(['assignment'])
     expect(moved({ interfaceFingerprints: ['i1'] })).toEqual(['interfaces'])
-    // The whole catalog rides the LEGACY bag alone; what the flow's session
-    // read is the component.
-    expect(moved({ webCatalogFingerprint: 'w2' })).toEqual([])
+    // The web catalog enters by what the flow's session read.
     expect(moved({ webCatalogReads: ['web/home:moved'] })).toEqual(['webCatalog.reads'])
-    // The resolved STATE rides the legacy bag alone; the shape is the component.
-    expect(moved({ prerequisiteMaterial: 'p2' })).toEqual([])
-    expect(moved({ prerequisiteShape: 'ps2' })).toEqual(['prerequisites.shape'])
     expect(moved({ recipeSlice: 'rs2' })).toEqual(['recipe.slice'])
     expect(moved({ roster: 'ro2' })).toEqual(['roster'])
     expect(moved({ preparation: 'pr2' })).toEqual(['preparation.run'])
@@ -184,54 +111,43 @@ describe('flowGenerationInputComponents — the hash, by name', () => {
     const stored = flowGenerationInputComponents(parts)
     expect(movedSchemeInputs(stored, base)).toEqual([])
   })
-
-  it('folds into the hash every member the bag always carried', () => {
-    expect([...flowInterfaceFingerprintBag(parts)].sort()).toEqual(['a', 'i1', 'i2', 'p', 'w'])
-    const { webCatalogFingerprint: _none, ...noWeb } = parts
-    expect([...flowInterfaceFingerprintBag(noWeb)].sort()).toEqual(['a', 'i1', 'i2', 'p'])
-  })
 })
 
-describe('flowSettleVerdict — the three compare rules and the one legacy check', () => {
+describe('flowSettleVerdict — the compare rules', () => {
   const components = flowGenerationInputComponents({
     flowFingerprint: 'f',
-    sectionKeys: ['s1'],
     assignmentFingerprints: ['a'],
     interfaceFingerprints: ['i'],
     hasScenario: false,
-    prerequisiteMaterial: 'p',
-    prerequisiteShape: 'ps',
     recipeSlice: 'rs',
     roster: 'ro',
     preparation: 'pr',
   })
-  const legacyHash = 'sha256:' + 'a'.repeat(64)
+  const settledHash = 'sha256:' + 'a'.repeat(64)
 
   it('settles a row whose stored names all still match, ignoring the ones it retired', () => {
-    // A row from the old scheme: it carries `prompts`, `recipe.*` and the
-    // state-folding `prerequisites`, none of which exist any more, and lacks
-    // the ones the scheme gained.
-    const stored = { flow: components.flow, sections: components.sections, prompts: 'deadbeefdeadbeef', 'recipe.manifests': 'cafecafecafecafe', prerequisites: 'f00df00df00df00d' }
-    expect(flowSettleVerdict({ prior: { generationInputsHash: legacyHash, generationInputs: stored }, components, legacyHash: 'sha256:other' }))
+    // A row from the old scheme: it carries `sections`, `prompts`, `recipe.*`
+    // and the state-folding `prerequisites`, none of which exist any more, and
+    // lacks the ones the scheme gained.
+    const stored = { flow: components.flow, sections: 'ffffffffffffffff', prompts: 'deadbeefdeadbeef', 'recipe.manifests': 'cafecafecafecafe', prerequisites: 'f00df00df00df00d' }
+    expect(flowSettleVerdict({ prior: { generationInputsHash: settledHash, generationInputs: stored }, components }))
       .toEqual({ settled: true, moved: [] })
   })
 
   it('re-opens on a name both records carry that differs, and names it', () => {
-    const stored = { ...components, sections: 'ffffffffffffffff' }
-    expect(flowSettleVerdict({ prior: { generationInputsHash: legacyHash, generationInputs: stored }, components, legacyHash }))
-      .toEqual({ settled: false, moved: ['sections'] })
+    const stored = { ...components, roster: 'ffffffffffffffff' }
+    expect(flowSettleVerdict({ prior: { generationInputsHash: settledHash, generationInputs: stored }, components }))
+      .toEqual({ settled: false, moved: ['roster'] })
   })
 
-  it('checks a row with no names against the legacy hash, once, and names nothing', () => {
-    expect(flowSettleVerdict({ prior: { generationInputsHash: legacyHash }, components, legacyHash }))
-      .toEqual({ settled: true, moved: null })
-    expect(flowSettleVerdict({ prior: { generationInputsHash: 'sha256:moved' }, components, legacyHash }))
+  it('does not settle a row with a hash and no names, and names nothing', () => {
+    expect(flowSettleVerdict({ prior: { generationInputsHash: settledHash }, components }))
       .toEqual({ settled: false, moved: null })
   })
 
   it('never settles a flow nothing has authored', () => {
-    expect(flowSettleVerdict({ prior: undefined, components, legacyHash })).toEqual({ settled: false, moved: null })
-    expect(flowSettleVerdict({ prior: { generationInputsHash: null }, components, legacyHash }))
+    expect(flowSettleVerdict({ prior: undefined, components })).toEqual({ settled: false, moved: null })
+    expect(flowSettleVerdict({ prior: { generationInputsHash: null }, components }))
       .toEqual({ settled: false, moved: null })
   })
 })
@@ -272,7 +188,7 @@ describe('generateGuards — the retired pipeline runs end to end on seams alone
     const result = await runGenerate({
       repoRoot: r,
       ...flowStageSeams(r),
-      extractSession: extractSessionBy({ background: { untestable: 'design history' } }),
+      claims: claimsBy({ background: { untestable: 'design history' } }),
       flowWorkerSession: submitWorkerSessions(() => raw('relkit --version exits 0', PASSING_STEPS)),
     })
 
@@ -298,16 +214,15 @@ describe('generateGuards — a match wipeout reports the SESSION tallies too', (
     const r = seed()
     const seams = flowStageSeams(r)
 
-    // One of two docs lost (non-systemic, so extraction fails open) and one of
-    // two areas lost the same way; matching then loses every SESSION, which is
-    // what puts its kind in the run's tallies beside the pooled kinds'.
+    // One of two areas lost (non-systemic, so synthesis fails open); matching
+    // then loses every SESSION, which is what puts its kind in the run's
+    // tallies beside the pooled kind's.
     const result = await generateGuards({
       repoRoot: r,
       interfaces: seams.interfaces,
       flowsEpicSession: seams.flowsEpicSession,
       flowWorkerSession: seams.flowWorkerSession,
       recipeRunner: seams.recipeRunner,
-      claimDiffRunner: seams.claimDiffRunner,
       worldClassifyRunner: seams.worldClassifyRunner,
       matchRunner: async () => {
         throw new Error('the match session died')
@@ -315,13 +230,6 @@ describe('generateGuards — a match wipeout reports the SESSION tallies too', (
       leafSummaries: () => [
         sessionSummary(MATCH_SESSION_KIND, { ran: 1, failed: 1, firstError: 'the match session died' }),
       ],
-      extractSession: async (input) => {
-        const inner = await extractSessionBy({ background: { untestable: 'design history' } })(input)
-        return {
-          byDoc: inner.byDoc,
-          summary: sessionSummary(EXTRACT_KIND, { ran: 2, failed: 1, firstError: 'transport died' }),
-        }
-      },
       flowsAreaSession: async (input) => {
         const inner = await seams.flowsAreaSession(input)
         return {
@@ -334,28 +242,12 @@ describe('generateGuards — a match wipeout reports the SESSION tallies too', (
     expect(result.status).toBe('llm-failed')
     expect(result.reason).toContain(MATCH_SESSION_KIND)
     const byStage = new Map((result.llmFailures ?? []).map((f) => [f.stage, f]))
-    // Every kind's losses ride the abort: the leaf that died and the two
-    // pooled kinds beside it.
+    // Every kind's losses ride the abort: the leaf that died and the pooled
+    // kind beside it.
     expect(byStage.get(MATCH_SESSION_KIND)).toMatchObject({ attempts: 1, failures: 1 })
-    expect(byStage.get(EXTRACT_KIND)).toMatchObject({ attempts: 2, failures: 1 })
     expect(byStage.get(FLOWS_KIND)).toMatchObject({ attempts: 2, failures: 1 })
     // Nothing was written.
     expect(fs.existsSync(path.join(r, '.truecourse', 'scenarios', 'manifest.json'))).toBe(false)
   })
 
-  it('aborts on a systemic extraction loss before any session tally is lost', async () => {
-    const r = seed()
-
-    const result = await runGenerate({
-      repoRoot: r,
-      ...flowStageSeams(r),
-      extractSession: extractSessionOf(new Map(), { ran: 1, failed: 1, allTransport: true, firstError: 'boom' }),
-      flowsAreaSession: flowsAreaSessionOf(() => {
-        throw new Error('synthesis must not run after a systemic extraction loss')
-      }),
-    })
-
-    expect(result.status).toBe('llm-failed')
-    expect((result.llmFailures ?? []).map((f) => f.stage)).toContain(EXTRACT_KIND)
-  })
 })

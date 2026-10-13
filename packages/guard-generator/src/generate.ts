@@ -11,9 +11,7 @@ import {
 import { completeRealization } from './match.js'
 import { navigationGroundingProblem } from './proof-grounding.js'
 import { resolvePrerequisites } from '@truecourse/guard-runner'
-import { bindClaimPrerequisites, bindScenarioPrerequisites, scenarioCasePrerequisiteProblems, partitionFlowPrerequisites, flowPrerequisiteStateMaterial, flowPrerequisiteShapeFingerprint, flowInvocationGaps } from './prerequisites.js'
-import { outcomeCorrection, reconcileRemaining, type RepairIssue } from './worker-repair.js'
-import { GUARD_OBSERVATION_CAPABILITIES, isCreditsExhausted, verificationRequirements, scenarioFullFlowDefect, type GuardEvidenceProofContext, type GuardCaseEvidence } from '@truecourse/shared'
+import { isCreditsExhausted, scenarioFullFlowDefect, sectionOfSentences } from '@truecourse/shared'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
 /**
  * `guard generate` orchestration — the LLM pipeline that turns spec FLOWS into
@@ -24,9 +22,9 @@ import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
  *
  *   1. recipe   load `recipe.json`, or discover + verify one (proposal-only LLM —
  *               the one-shot deliberately KEPT).
- *   2. index    deterministic doc universe + section index + change detection.
- *   3. extract  one `guard-generate.extract` agent session per document →
- *               claims + untestable notes, anchors snapped to the live index.
+ *   2. index    deterministic doc universe + which documents changed.
+ *   3. claims   the scan's claims for the universe's documents, checked against
+ *               the live sentences and written as `scenarios/claims.json`.
  *               Claims are no longer the generation unit — they are the
  *               milestone vocabulary.
  *   4. interfaces deterministic, free: the app's own surfaces, mapped from the tree.
@@ -121,15 +119,13 @@ import {
 import {
   guardCoverageProgress,
   describeOutstandingObligations,
-  GUARD_REVIEW_POLICY_VERSION,
   scenarioMilestoneScopeDefect,
   coversFlowMilestones,
-  verificationCapabilityGap,
-  verificationCasePreparation,
   DEFAULT_AUTO_RESOLVE_ESCALATE_AFTER,
   autoResolutionKey,
   composeBlockedOnReason,
-  dismissedClaimKey,
+  bindRealizes,
+  claimIdDoc,
   firstInvalidMatchPattern,
   guardDriver,
   guardScenarioDrivers,
@@ -173,7 +169,6 @@ import {
   type GuardTestStatus,
   type GuardUnadjudicatedStage,
   milestoneOrder,
-  flowDriversToMatch,
   regexLiteral,
   scenarioMilestoneProof,
   type Interface,
@@ -181,22 +176,19 @@ import {
 } from '@truecourse/shared'
 import {
   planGuardWork,
-  collectWorkDocs,
   hasGuardUniverse,
-  sectionInputsKey,
-  legacyFlowGenerationInputsHash,
   flowGenerationInputComponents,
-  flowInterfaceFingerprintBag,
   flowSettleDigest,
   flowSettleVerdict,
   type FlowGenerationInputParts,
+  docContentHash,
   type GuardDoc,
   type SectionInput,
 } from './section-plan.js'
-import { LEGACY_WORLD_CLASSIFY_PROMPT_FINGERPRINT } from './legacy-prompt-fingerprints.js'
 import { buildOperationIndex, matchedRequestSchemas, parseOperationSection, type OperationEntry } from './openapi-enrich.js'
-import { persistExtractedClaims } from './claims-persist.js'
-import { priorExtractions } from './extract-prior.js'
+import { writeClaimsCorpus } from './claims-persist.js'
+import { claimAreaInputs, dismissedReason, oneLine, placeClaims, readSpecClaims } from './claims-input.js'
+import { readSuppressedClaims } from './suppression.js'
 import {
   resolveSectionAuth,
   recipeAuthCredentials,
@@ -216,28 +208,18 @@ import {
 } from './prompts.js'
 import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import { WorldClassifySchema, rawScenarioSchemaFor, type RawGeneratedScenario } from './schemas.js'
-import { EMPTY_CLAIM_DIFF_GATE, docContentHash, rememberDocTexts, reuseCosmeticExtractions } from './claim-diff.js'
 import {
   MATCH_SESSION_KIND,
-  type ClaimDiffRunner,
   type LeafSummaries,
   type MatchRunner,
   type RecipeRunner,
   type WorldClassifyRunner,
 } from './leaf-seams.js'
-import {
-  isSystemicSessionLoss,
-  type DocClaims,
-  type ExtractResult,
-  type ExtractSessionSeam,
-  type ReuseExtractionSeam,
-  type GuardSessionSummary,
-} from './extract.js'
+import { isSystemicSessionLoss, type GuardSessionSummary } from './sessions.js'
 import {
   synthesizeFlows,
   isFlowSynthesisWipeout,
   buildFlowAreas,
-  flowSectionKey,
   type FlowAreaDocInput,
   type FlowClaimInput,
   type FlowsAreaSessionSeam,
@@ -248,10 +230,8 @@ import {
   buildSurfaceCatalogs,
   interfaceDigest,
   matchFlow,
-  matchProviderControls,
   realizationLines,
   realizationAssignmentFingerprint,
-  partitionPlanPreparations,
   type RealizationPlan,
   type SurfaceCatalog,
 } from './match.js'
@@ -296,7 +276,6 @@ import {
 } from './serialize.js'
 
 /** Sentinel anchor for the single entry-preflight error — it belongs to no section. */
-const ENTRY_PREFLIGHT_ANCHOR = '(entry preflight)'
 
 /** One world-classify call covers at most this many flows — a single batched
  *  call over a whole corpus is the call most likely to time out, and a lost
@@ -359,7 +338,12 @@ export function looksWorldMutating(flow: { title: string; milestones: readonly s
  * section planning, interface mapping, realization matching, the build) are not
  * steps either — they run as needed to feed the chosen one.
  */
-export const GENERATE_SESSION_STEPS = ['extract', 'flows', 'worker'] as const
+/** What stands in for a recipe fingerprint when the product runs from its
+ *  world scripts: the spec side keys on it (how the product starts is not an
+ *  input to its claims), and a run of the flow tests is stamped with it. */
+export const PRODUCT_WORLD_RECIPE_FINGERPRINT = 'product-world'
+
+export const GENERATE_SESSION_STEPS = ['flows', 'worker'] as const
 export type GenerateStep = (typeof GENERATE_SESSION_STEPS)[number]
 
 export interface GeneratedScenarioInfo {
@@ -367,7 +351,6 @@ export interface GeneratedScenarioInfo {
   title: string
   /** The scenario's PRIMARY binding — its flow's first milestone's section. */
   doc: string
-  anchor: string
   /** Repo-relative path of the written `.yaml`. */
   file: string
   /** The flow this scenario realizes. */
@@ -397,14 +380,13 @@ export type { GuardBirthFinding } from '@truecourse/shared'
 export type { GuardGenerateError } from '@truecourse/shared'
 
 /**
- * A document whose claim extraction could not complete — the model returned
- * invalid output even after one corrective re-ask, or a call threw. An error
- * state, NOT an empty extraction: the doc's claims are missing from synthesis, so
- * the areas that read them are reported and re-attempt next run.
+ * A claim the scan read from a document that the repository's copy of the
+ * document no longer holds: its sentences are gone or reworded, so it enters
+ * no flow until the next scan reads the document again.
  */
 export interface GuardExtractionFailure {
   doc: string
-  /** One-line reason — the flattened Zod message or the thrown error text. */
+  /** One line naming the claim and what is missing. */
   reason: string
 }
 
@@ -440,16 +422,6 @@ export interface GuardGenerateResult {
      */
     warnings?: string[]
   }
-  sectionsTotal: number
-  /** Sections whose text moved since the last generate, plus sections no flow binds. */
-  sectionsChanged: number
-  skippedUnchanged: number
-  /** Of `sectionsChanged`, the sections whose edit the claim-diff gate judged
-   *  cosmetic: their document's prior extraction was reused and no flow
-   *  re-authored for them. Absent on the abort results. */
-  cosmeticSections?: number
-  /** Live claim-diff gate calls this run made (cache hits excluded). */
-  claimDiffCalls?: number
   /** Cached match verdicts served although the surface's authored prose had
    *  moved under them. Absent on the abort results. */
   matchContextMoved?: number
@@ -484,7 +456,6 @@ export interface GuardGenerateResult {
    * every verdict landed.
    */
   unadjudicated: GuardUnadjudicatedStage[]
-  orphaned: { doc: string; anchor: string; scenarioIds: string[] }[]
   /**
    * Birth outcomes that PASSED across both validation rounds. A birth pass is
    * written unless the fidelity reviewer flags it, so `written` differs from this
@@ -640,6 +611,14 @@ export interface GenerateGuardsOptions {
    */
   requireExistingRecipe?: boolean
   /**
+   * The product is operated by its WORLD SCRIPTS and its tests are written
+   * against it running, so nothing here needs to know how it starts or what
+   * its interfaces are. Generate then does the spec side and stops: claims are
+   * extracted, flows are synthesized, both corpora are written, and no recipe
+   * is read, derived or required.
+   */
+  productWorld?: boolean
+  /**
    * INTERNAL test seam: stop after flow synthesis, before interface matching and
    * authoring. Not a user-facing option — flow curation is `dismissedFlows` and
    * cost control is the estimate gate.
@@ -660,8 +639,6 @@ export interface GenerateGuardsOptions {
   // --- the session seams — REQUIRED since the one-shot stages retired: they
   // are THE extract / flows / author-adjudicate paths. Injected by `@truecourse/core` (the engine cannot depend on it);
   // tests inject stubs.
-  /** The claim-extraction session seam (`guard-generate.extract`, one session per doc). */
-  extractSession: ExtractSessionSeam
   /** The per-area flow-synthesis session seam (`guard-generate.flows`). */
   flowsAreaSession: FlowsAreaSessionSeam
   /** The epic-pass session seam (one session over the flow digests). */
@@ -682,18 +659,8 @@ export interface GenerateGuardsOptions {
   matchRunner: MatchRunner
   /** The batched world classification over the changed flows. */
   worldClassifyRunner: WorldClassifyRunner
-  /** The claim-diff gate's verdict on one edited section. */
-  claimDiffRunner: ClaimDiffRunner
   /** What the leaf kinds did, read at every exit — see {@link LeafSummaries}. */
   leafSummaries?: LeafSummaries
-  /**
-   * The claim-diff gate's access to the extract cache (prior-outcome lookup +
-   * reuse). Absent, the gate is skipped and every edited document re-extracts
-   * and re-authors as before — the seam belongs to whoever owns the extraction
-   * cache (core's session seams), so an injected `extractSession` with no
-   * matching seam runs gate-less.
-   */
-  reuseExtraction?: ReuseExtractionSeam
   /**
    * The incremental-authoring escape hatch: re-author every changed flow from
    * scratch instead of briefing its committed scenarios for editing. Flows whose
@@ -702,9 +669,10 @@ export interface GenerateGuardsOptions {
    */
   fromScratch?: boolean
   // --- progress hooks ---
-  onPlan?: (total: number, work: number) => void
-  /** Extraction progress, ticking per settled doc session (cache hits included). */
-  onExtractProgress?: (done: number, total: number) => void
+  /** The doc universe as planned: how many documents, and how many changed since the last generate. */
+  onPlan?: (docs: number, changed: number) => void
+  /** The claims read and placed: how many, from how many documents. */
+  onClaims?: (claims: number, docs: number) => void
   /** Interface mapping settled: how many interfaces were derived, across all surfaces. */
   onInterfaces?: (interfaces: number, surfaces: number) => void
   /** Flow synthesis progress, ticking per area as it settles. */
@@ -769,21 +737,19 @@ function defaultConcurrency(): number {
 }
 
 /**
- * The per-(flow, surface) cache-key recipe of the flow-worker session — the
- * retired one-shot `authorCacheKey`'s exact structure, with the
- * prompt fingerprint passed in. The key moves when the flow's milestone
- * composition changes, when any bound section's content key moves (text, a
- * suppressed quote, a referenced OpenAPI schema, its security context), when the
+ * The per-(flow, surface) cache-key recipe of the flow-worker session, with
+ * the stage label passed in. The key moves when the flow's milestone
+ * composition changes (a reworded sentence is a new claim id), when the
  * realization plan's interfaces move, when the recipe or the format version
- * changes, or when the session prompt changes. Nothing else re-authors.
- * Exported for `@truecourse/core`, which owns the session prompts and therefore
- * computes the keys (cache name `guard/generate`, kept from the one-shot stage).
+ * changes, or when the stage version is bumped. Nothing else re-authors.
+ * Exported for `@truecourse/core`, which owns the session and its stage version
+ * and therefore computes the keys (cache name `guard/generate`, kept from the
+ * one-shot stage).
  */
 export function workerCacheKey(
   stage: string,
   flow: Pick<GuardFlow, 'fingerprint'>,
   surface: GuardDriverId,
-  sectionKeys: readonly string[],
   interfaceFingerprints: readonly string[],
   /** The recipe the session can read: its surface's slice, the whole roster it
    *  may draw fixtures from, and every preparation profile it may choose. */
@@ -795,7 +761,6 @@ export function workerCacheKey(
     recipe,
     surface,
     flow.fingerprint,
-    [...sectionKeys].sort().join('~'),
     [...interfaceFingerprints].sort().join('~'),
   ]
   // Edit mode appends the briefed priors; absent, the key is byte-identical to
@@ -819,34 +784,20 @@ export function workerRecipeMaterial(material: {
 }
 
 /**
- * The interface bag one (flow, surface) worker key folds — under the current
- * formula, and under the retired one beside it. The run and the pre-flight
- * estimate both build it HERE: a bag either of them assembled on its own would
- * price a key the other never probes, which is how the estimate came to quote a
- * full re-author for work the run served from cache.
+ * The interface bag one (flow, surface) worker key folds. The run and the
+ * pre-flight estimate both build it HERE: a bag either of them assembled on its
+ * own would price a key the other never probes, which is how the estimate came
+ * to quote a full re-author for work the run served from cache.
  */
 export function flowWorkerKeyFingerprints(input: {
-  /** The prerequisite SHAPE the current key folds, already digested. */
-  prerequisiteShape: string
-  /** The resolved-state material the retired key folded in its place. */
-  legacyPrerequisiteMaterial: string
   /** The realization plan's assignment fingerprint. */
   assignment: string
   /** The planned interfaces' fingerprints. */
   interfaces: readonly string[]
-  /** Web only: what the session is handed, and the whole author catalog the
-   *  retired formula folded instead. */
-  web?: { handed: string; catalog: string }
-}): { fingerprints: string[]; legacyFingerprints: string[] } {
-  const common = [input.assignment, ...input.interfaces]
-  return {
-    fingerprints: [input.prerequisiteShape, ...common, ...(input.web ? [input.web.handed] : [])],
-    legacyFingerprints: [
-      input.legacyPrerequisiteMaterial,
-      ...common,
-      ...(input.web ? [input.web.catalog] : []),
-    ],
-  }
+  /** Web only: what the session is handed from the author catalog. */
+  webHanded?: string
+}): string[] {
+  return [input.assignment, ...input.interfaces, ...(input.webHanded !== undefined ? [input.webHanded] : [])]
 }
 
 // ---------------------------------------------------------------------------
@@ -861,8 +812,8 @@ export function flowWorkerKeyFingerprints(input: {
 //    red-prediction done-gate, the accepted-yaml STASH, and the ledger/finding
 //    bookkeeping. Each {@link FlowWorkerTask} closes over that.
 //  - CORE owns everything session-shaped — the system prompts, the pool, the
-//    `guard/generate` cache (key = {@link workerCacheKey} with the session
-//    prompt fingerprint), and the depth-1 fidelity CHILD (`ctx.dispatchChild`),
+//    `guard/generate` cache (key = {@link workerCacheKey} with the session's
+//    stage version), and the depth-1 fidelity CHILD (`ctx.dispatchChild`),
 //    which it hands the engine as the {@link WorkerFidelityJudge} argument of
 //    `submitScenario`.
 // ---------------------------------------------------------------------------
@@ -878,10 +829,7 @@ export interface FlowWorkerToolReport {
  *  everything here is engine-derived, so the child grounds on the same
  *  material the one-shot reviewer did. */
 export interface WorkerFidelityInput {
-  proofContext: GuardEvidenceProofContext
   flowFingerprint: string
-  /** The flow's bound section content keys (the fidelity key's section half). */
-  sectionKeys: readonly string[]
   /** The scenario's BEHAVIORAL identity — the same JSON `scenarioBehavior`
    *  string the one-shot fidelity cache keyed on. */
   scenarioBehavior: string
@@ -891,7 +839,7 @@ export interface WorkerFidelityInput {
 }
 
 export type WorkerFidelityVerdict =
-  | { kind: 'faithful'; evidence?: GuardCaseEvidence[] }
+  | { kind: 'faithful' }
   | { kind: 'flagged'; mismatch: string; confidence: 'high' | 'medium' | 'low' }
   /** The child session (or its dispatch) failed. The run reports the stage
    *  unadjudicated and keeps the candidate unpublished. */
@@ -904,7 +852,6 @@ export type WorkerFidelityJudge = (input: WorkerFidelityInput) => Promise<Worker
  *  {@link workerCacheKey} — every behavior-affecting input, nothing else. */
 export interface FlowWorkerCacheMaterial {
   flowFingerprint: string
-  sectionKeys: readonly string[]
   interfaceFingerprints: readonly string[]
   /** This surface's recipe slice. */
   recipeSlice: string
@@ -912,14 +859,6 @@ export interface FlowWorkerCacheMaterial {
   roster: string
   /** Every declared preparation profile, with its script bytes. */
   preparations: string
-  /** The whole recipe fingerprint, for the OLD key a miss falls back to.
-   *  Delete with the legacy hash. */
-  recipeFingerprint: string
-  /** {@link interfaceFingerprints} as the retired formula folded it — the
-   *  prerequisites' resolved STATE where the bag now carries their shape, and
-   *  on web the WHOLE author catalog where it now carries what the session is
-   *  handed. Absent when the two agree. Delete with the legacy hash. */
-  legacyInterfaceFingerprints?: readonly string[]
   /** `edit` when the briefing carries the flow's committed scenarios to edit;
    *  `scratch` otherwise (the key then matches every pre-edit-mode entry). */
   mode: 'scratch' | 'edit'
@@ -927,10 +866,9 @@ export interface FlowWorkerCacheMaterial {
   priorShas: readonly string[]
 }
 
+/** The fidelity judge's acceptance of one scenario, bound to the exact parsed scenario it read. */
 export interface FlowWorkerReview {
-  policyVersion: typeof GUARD_REVIEW_POLICY_VERSION
   scenarioFingerprint: string
-  caseEvidence: GuardCaseEvidence[]
 }
 
 /** One (flow, surface) work unit of the worker pool — engine closures inside. */
@@ -999,9 +937,8 @@ export interface FlowWorkerTask {
   /** Whether an accepted submission with this sha is in the engine stash — the
    *  reject gate for a `settled` outcome referencing nothing. */
   hasStash(sha: string): boolean
-  /** Live completion validation, shared by the session, fold and cache gates.
-   *  `wrappingUp` (the session's budget is spent) withholds repair requests. */
-  validateOutcome(outcome: GuardFlowWorkerOutcome, context?: { wrappingUp: boolean }): string | undefined
+  /** Live completion validation, shared by the session, fold and cache gates. */
+  validateOutcome(outcome: GuardFlowWorkerOutcome): string | undefined
   stashedReview(sha: string): FlowWorkerReview | undefined
   /** The stashed accepted yaml for the sha — what core writes into the cache
    *  entry beside a settled outcome. Returns undefined (⇒ core writes NO
@@ -1133,7 +1070,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   let mappedInterfaces: Promise<MappedSurface> | null = null
   const interfacesOnce = (): Promise<MappedSurface> => (mappedInterfaces ??= mapInterfacesSafely(repoRoot, options.interfaces))
 
-  const recipeResult = await discoverRecipe(repoRoot, recipeRunner, {
+  const recipeResult = options.productWorld ? null : await discoverRecipe(repoRoot, recipeRunner, {
     routes: async () => routesFromInterfaces((await interfacesOnce()).interfaces),
     // The datastore half of the SAME memoized pass — read only when a boot
     // verification failed, so the failure can name the dependency it died on.
@@ -1145,30 +1082,24 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     // repo, the proposer derives one from them.
     datastores: async () => (await interfacesOnce()).datastoreUrls,
   })
-  if (recipeResult.status === 'verify-failed') {
+  if (recipeResult?.status === 'verify-failed') {
     // A failed proposal call already aborts the run loudly through this channel, so
     // the recipe stage needs no systemic check of its own; the tally rides along.
     return emptyResult('recipe-failed', { reason: recipeResult.reason, llmFailures: leafTallies() })
   }
-  const recipe: Recipe = recipeResult.recipe
-  const recipeFingerprint = recipeResult.fingerprint
-  // The recipe material a flow's key folds, constant for the run: computed
-  // once here, not once per flow and again per authoring task.
-  const recipeSlices = new Map<GuardDriverId, string>()
-  const recipeSliceOf = (surface: GuardDriverId): string => {
-    let slice = recipeSlices.get(surface)
-    if (slice === undefined) recipeSlices.set(surface, (slice = flowRecipeSliceFingerprint(recipe, surface)))
-    return slice
-  }
-  const seedRoster = seedRosterFingerprint(recipe)
-  const preparationsOffer = preparationsFingerprint(repoRoot, recipe)
+  // No recipe on the product-world path: the spec side keys on the documents
+  // alone, and the run stops at flows, before anything would need one.
+  const recipe: Recipe | null = recipeResult ? recipeResult.recipe : null
+  const recipeFingerprint = recipeResult ? recipeResult.fingerprint : PRODUCT_WORLD_RECIPE_FINGERPRINT
   fact(
     'index',
-    recipeResult.status === 'exists'
-      ? `recipe: loaded ${path.relative(repoRoot, recipePath(repoRoot))}`
-      : `recipe: discovered from ${recipeResult.source}, written to ${recipeResult.wrotePath}`,
+    !recipeResult
+      ? 'recipe: none, the product runs from its world scripts'
+      : recipeResult.status === 'exists'
+        ? `recipe: loaded ${path.relative(repoRoot, recipePath(repoRoot))}`
+        : `recipe: discovered from ${recipeResult.source}, written to ${recipeResult.wrotePath}`,
   )
-  const recipeMeta: NonNullable<GuardGenerateResult['recipe']> = {
+  const recipeMeta: GuardGenerateResult['recipe'] = !recipe || !recipeResult ? undefined : {
     status: recipeResult.status,
     ...(recipe.entry ? { entry: recipe.entry } : {}),
     // Either recipe shape reports the DEFAULT server's argv — the report
@@ -1184,49 +1115,33 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       : {}),
   }
 
-  // Which workspace app serves which path, joined to the recipe's declared
-  // servers. Derived from the working tree alone (no LLM, nothing persisted, nothing
-  // fingerprinted), so it costs a directory walk and answers, per flow, "does this
-  // path's app even have a server?". A repo with one package yields an empty join
-  // and every gate below degrades to the behaviour guard had before it existed.
-  const serverIndex = buildServerRouteIndex(buildRouteManifest(repoRoot), recipe)
-  /** The server a scenario means when it stamps none — the stamping baseline. */
-  const defaultApiServer = resolveApiServers(recipe).defaultServer
-
-  // 2. Index — the deterministic section universe + spec-side change detection.
+  // 2. Index — the deterministic doc universe + which documents changed.
   const plan = planGuardWork(repoRoot, recipeFingerprint)
-  // The cross-doc OpenAPI operation index, built once from the whole
-  // section universe. api authoring matches its sections against it to inject the
-  // authoritative request-body schemas.
-  const opIndex = buildOperationIndex(plan.sections, plan.basePaths)
-  options.onPlan?.(plan.sections.length, plan.work.length)
-  for (const section of plan.work) fact('index', `${section.doc}#${section.anchor}: changed`)
-  const unchangedSections = plan.sections.length - plan.work.length
-  if (unchangedSections > 0) {
-    fact('index', `${unchangedSections} section${unchangedSections === 1 ? '' : 's'} unchanged`)
-  }
-  const orphanedSections = plan.orphaned.map((e) => ({ doc: e.doc, anchor: e.anchor, scenarioIds: e.scenarioIds }))
-  for (const orphan of orphanedSections) {
-    fact('index', `${orphan.doc}#${orphan.anchor}: orphaned, the section no longer exists`)
+  const docs = plan.docs
+  // The cross-doc OpenAPI operation index, built once from the whole universe.
+  // api authoring matches its sections against it to inject the authoritative
+  // request-body schemas.
+  const opIndex = buildOperationIndex(docs.flatMap((d) => d.sections), plan.basePaths)
+  options.onPlan?.(docs.length, plan.changedDocs.size)
+  for (const doc of plan.changedDocs) fact('index', `${doc}: changed`)
+  const unchangedDocs = docs.length - plan.changedDocs.size
+  if (unchangedDocs > 0) {
+    fact('index', `${unchangedDocs} document${unchangedDocs === 1 ? '' : 's'} unchanged`)
   }
 
   const limit = pLimit(Math.max(1, options.concurrency ?? defaultConcurrency()))
   const matchRunner = options.matchRunner
   const worldClassifyRunner = options.worldClassifyRunner
-  const claimDiffRunner = options.claimDiffRunner
 
   const coverageGaps: GuardCoverageGap[] = []
   const errors: GuardGenerateError[] = []
   const extractionFailures: GuardExtractionFailure[] = []
 
   // The user's curation (`scenarios/decisions.json`, stored per repository). A dismissed claim
-  // (identity = doc + anchor + the extracted claim's stable text) never becomes a
-  // milestone; a dismissed FLOW is dropped whole. Both settle as visible `dismissed`
-  // gaps rather than silently disappearing.
+  // (by its id) never becomes a milestone; a dismissed FLOW is dropped whole. Both
+  // settle as visible `dismissed` gaps rather than silently disappearing.
   const decisions = readGuardDecisions(repoRoot)
-  const dismissalByKey = new Map<string, GuardDismissedClaim>(
-    decisions.dismissedClaims.map((d) => [dismissedClaimKey(d.doc, d.anchor, d.title), d]),
-  )
+  const dismissalByKey = new Map<string, GuardDismissedClaim>(decisions.dismissedClaims.map((d) => [d.claimId, d]))
   const flowDismissalById = new Map(decisions.dismissedFlows.map((d) => [d.flowId, d]))
 
   // The durable auto-resolve ledger — escalation counts + the flow-taint
@@ -1267,57 +1182,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // (`GuardAutoResolvedSchema` and its readers are unchanged).
   const autoResolved: GuardAutoResolved[] = []
 
-  // 3. Extract — one (cached) read per document VIEW, across the WHOLE universe: a
-  // flow spans sections, and its area's synthesis needs the complete claim
-  // inventory, not only the changed sections'. Extraction is content-cached, so an
-  // unchanged document costs nothing.
-  const docs = collectWorkDocs(repoRoot, { ...plan, work: plan.sections })
+  // 3. Claims — what the scan read from the slice's documents, materialized
+  // into the tree as specs/claims.json. The whole universe is read: a flow
+  // spans documents, and its area's synthesis needs the complete claim
+  // inventory, not only the changed documents'.
   // Doc path → its raw text: the OpenAPI security resolution the api authoring prompt
   // carries needs the WHOLE document (schemes + the doc-level `security` fallback).
   const docText = new Map(docs.map((d) => [d.doc, d.content]))
-  const sectionByKey = new Map(plan.sections.map((s) => [flowSectionKey(s.doc, s.anchor), s]))
-
-  // THE CLAIM-DIFF GATE: an edited document whose every changed section still
-  // states the same obligations keeps its PRIOR extraction (copied under its
-  // new cache key, so the pool below hits) — no session, no reworded claims, and
-  // the flows bound to those sections are spared a re-author further down (the
-  // per-flow gate substitutes the prior fingerprints). Fail closed: no seam, no
-  // recorded prior, a new or vanished section, or one `changed` verdict leaves
-  // the document to extraction exactly as before.
-  // Every document's text, remembered under its content hash: the next
-  // generate's gate reads an edited document's OLD text from here.
-  const prerequisiteResolution = resolvePrerequisites(repoRoot, recipe.api?.externals)
-  await rememberDocTexts(repoRoot, docs)
-  const priorManifestForExtract = readManifest(repoRoot)
-  const claimDiff = options.reuseExtraction
-    ? await reuseCosmeticExtractions({
-        repoRoot,
-        docs,
-        priorManifest: priorManifestForExtract,
-        seam: options.reuseExtraction,
-        prerequisiteTargets: prerequisiteResolution.targets,
-        runner: claimDiffRunner,
-      })
-    : EMPTY_CLAIM_DIFF_GATE
-  for (const message of claimDiff.errors) errors.push({ doc: '', anchor: '', message })
-  for (const doc of claimDiff.reusedDocs) {
-    fact('extract', `${doc}: the edits are cosmetic, prior claims reused from cache`)
-  }
-  // THE PRIOR every document reconciles against when its own cache entry
-  // misses: its last extraction, with the sections whose text did not move
-  // settled — taken verbatim, never re-extracted — and the rest briefed so an
-  // unchanged sentence keeps its claim. Without it a doc edit re-extracts the
-  // whole document from scratch and every claim in it can change identity.
-  const extractPriors = options.reuseExtraction
-    ? await priorExtractions({
-        repoRoot,
-        docs,
-        priorManifest: priorManifestForExtract,
-        seam: options.reuseExtraction,
-        prerequisiteTargets: prerequisiteResolution.targets,
-        cachedPriors: claimDiff.priors,
-      })
-    : new Map<string, never>()
+  const docByPath = new Map(docs.map((d) => [d.doc, d]))
+  const prerequisiteResolution = resolvePrerequisites(repoRoot, recipe?.api?.externals)
 
   // A credential's `satisfies` naming a scheme NO OpenAPI doc in
   // the corpus declares can never bind — the matcher would silently fall through to
@@ -1325,11 +1198,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // a recipe defect, so it stops the run HERE: before the first (paid) extraction
   // call, and reported through the same `recipe-failed` channel a discovery failure
   // uses. A key present in SOME doc is fine (schemes resolve per doc).
-  const satisfiesCheck = validateCredentialSatisfies(recipeAuthCredentials(recipe), docs)
-  if (satisfiesCheck.errors.length > 0) {
-    return emptyResult('recipe-failed', { reason: satisfiesCheck.errors.join(' '), llmFailures: leafTallies() })
+  if (recipe && recipeMeta) {
+    const satisfiesCheck = validateCredentialSatisfies(recipeAuthCredentials(recipe), docs)
+    if (satisfiesCheck.errors.length > 0) {
+      return emptyResult('recipe-failed', { reason: satisfiesCheck.errors.join(' '), llmFailures: leafTallies() })
+    }
+    if (satisfiesCheck.warnings.length > 0) recipeMeta.warnings = satisfiesCheck.warnings
   }
-  if (satisfiesCheck.warnings.length > 0) recipeMeta.warnings = satisfiesCheck.warnings
 
   // The POOLED kinds' failure tallies, appended to every `llmFailures` list
   // this run reports beside the leaves' (fail-open stays visible either way).
@@ -1348,238 +1223,46 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const sessionLossHead = (s: GuardSessionSummary): string =>
     `every session of the \`${s.kind}\` kind failed (${s.failed} of ${s.ran})${s.firstError ? `. First failure: ${s.firstError}` : ''}`
 
-  // The declared dependencies: the closed vocabulary a case prerequisite may
-  // name. The extraction sessions are briefed on it and their outcomes are held
-  // to it; every fold below resolves against the same list.
-
-  // One `guard-generate.extract` session per doc, pooled +
-  // cached by the seam; the seam's fold already re-snapped every anchor.
-  // Fail-open per doc — a doc with no (or a failed) result lands in
-  // `extractionFailures` below.
-  let extractSystemicLoss: GuardSessionSummary | null = null
-  const { byDoc: extractByDoc, summary: extractSummary } = await options.extractSession({
-    docs,
-    prerequisiteTargets: prerequisiteResolution.targets,
-    priors: extractPriors,
-    onDoc: (done, total) => options.onExtractProgress?.(done, total),
-  })
-  recordSessionSummary(extractSummary)
-  if (isSystemicSessionLoss(extractSummary)) extractSystemicLoss = extractSummary
-  const extracted: { doc: (typeof docs)[number]; result: ExtractResult }[] = docs.map((doc) => ({
-    doc,
-    result: extractByDoc.get(doc.doc) ?? { ok: false, reason: 'the extraction session produced no result for this doc' },
-  }))
-  // The pool reports its cache hits as a TALLY, not per doc, so a doc's line
-  // carries the attribution only when the tally is unanimous; a mixed pool
-  // files the tally as a line of its own.
-  const extractSource =
-    extractSummary.fromCache === 0 ? ', extracted' : extractSummary.fromCache >= docs.length ? ', from cache' : ''
-  for (const { doc, result } of extracted) {
-    if (!result.ok) {
-      fact('extract', `${doc.doc}: extraction failed, ${asLine(result.reason)}`)
-      continue
-    }
-    const claims = result.data.claims.length
-    fact('extract', `${doc.doc}: ${claims} claim${claims === 1 ? '' : 's'}${extractSource}`)
-    const prior = extractPriors.get(doc.doc)
-    if (prior && extractSource !== ', from cache') {
-      const settled = prior.settledAnchors.length
-      const reextracted = doc.sections.length - settled
-      fact('extract', `${doc.doc}: ${settled} section${settled === 1 ? '' : 's'} settled from the last extraction, ${reextracted} re-extracted against ${prior.claims.length} prior claim${prior.claims.length === 1 ? '' : 's'}`)
-    }
-    if (!result.complete) fact('extract', `${doc.doc}: ${result.failedViews} extraction view(s) failed`)
-  }
-  if (extractSource === '') {
-    fact('extract', `${extractSummary.fromCache} of ${docs.length} docs from cache`)
-  }
-
-  // Claim inventory per document, plus the claim-level coverage gaps extraction
-  // itself settles (dismissed, untestable, no-claim, awaiting-driver, prep-missing).
-  const areaTagsByDoc = new Map(plan.sections.map((s) => [s.doc, s.areaTags]))
-  const extractedClaimKeys = new Set<string>()
-  const extractedDocs = new Set<string>()
-  const areaInputs: FlowAreaDocInput[] = []
-
-  for (const { doc, result } of extracted) {
-    if (!result.ok) {
-      extractionFailures.push({ doc: doc.doc, reason: result.reason })
-      continue
-    }
-    if (!result.complete) {
-      extractionFailures.push({
-        doc: doc.doc,
-        reason: `${result.failedViews} extraction view(s) failed — re-run to complete coverage for affected sections`,
-      })
-    }
-    extractedDocs.add(doc.doc)
-    for (const c of result.data.claims) {
-      extractedClaimKeys.add(dismissedClaimKey(doc.doc, c.sectionAnchor, c.claim))
-    }
-    const { claimsByAnchor, noteByAnchor } = groupExtraction(result.data)
-    const live: FlowClaimInput[] = []
-
-    for (const s of doc.sections) {
-      const claims = claimsByAnchor.get(s.anchor) ?? []
-      const note = noteByAnchor.get(s.anchor)
-      let kept = 0
-      for (const c of claims) {
-        const dismissal = dismissalByKey.get(dismissedClaimKey(s.doc, s.anchor, c.claim))
-        if (dismissal) {
-          coverageGaps.push({
-            doc: s.doc,
-            anchor: s.anchor,
-            kind: 'dismissed',
-            reason: dismissedReason(c.claim, dismissal.note),
-          })
-          continue
-        }
-        const proofDrivers = [c.driver, ...(c.alternativeDrivers ?? [])]
-        if (!proofDrivers.some(isRunnableDriver)) {
-          // A claim on a surface with no driver yet is recorded coverage honesty.
-          coverageGaps.push({ doc: s.doc, anchor: s.anchor, kind: 'awaiting-driver', driver: c.driver, reason: c.reason })
-          continue
-        }
-        if (!proofDrivers.some((driver) => isRunnableDriver(driver) && driverPrepared(recipe, driver))) {
-          // A runnable claim whose driver has no recipe preparation is an honest
-          // blocked-on gap — never composed into a flow that could only die.
-          coverageGaps.push({
-            doc: s.doc,
-            anchor: s.anchor,
-            kind: 'blocked-on',
-            reason: composeBlockedOnReason([missingPrepNoun(c.driver)], oneLine(c.claim)),
-          })
-          continue
-        }
-        kept++
-        live.push({
-          doc: s.doc,
-          anchor: s.anchor,
-          title: c.claim,
-          driver: c.driver,
-          ...(c.alternativeDrivers ? { alternativeDrivers: c.alternativeDrivers } : {}),
-          ...(c.verification ? { verification: c.verification } : {}),
-          // The extraction session's structured needs ride into flow synthesis;
-          // the one-shot path carries none.
-          ...(c.needs && c.needs.length > 0 ? { needs: c.needs } : {}),
-          // The prior sentence this claim supersedes: a committed flow's
-          // milestone still names it, and resolves to this claim through it.
-          ...(c.replaces ? { replaces: c.replaces } : {}),
-        })
-      }
-      if (claims.length === 0 && kept === 0) {
-        // No claim at all. In a COMPLETE doc that's an honest gap; in an incomplete
-        // one the section may live in a failed view — don't settle it either way.
-        if (result.complete || note) {
-          coverageGaps.push({
-            doc: s.doc,
-            anchor: s.anchor,
-            kind: note ? 'untestable' : 'no-claim',
-            reason: note?.reason ?? 'the section states no claim a runnable driver can assert',
-          })
-        }
-      }
-    }
-
-    areaInputs.push({
-      doc: doc.doc,
-      areaTags: areaTagsByDoc.get(doc.doc) ?? [],
-      outline: doc.sections.map((s) => ({ anchor: s.anchor, headingText: s.headingText, level: s.level })),
-      untestable: result.data.untestable.map((u) => ({ anchor: u.sectionAnchor, reason: u.reason })),
-      claims: live,
+  // Each claim is checked against its live document. A claim the document no
+  // longer holds the sentences of is reported, never composed; one read from a
+  // sentence a resolved conflict rejected is dropped by its key.
+  const docSet = new Set(docs.map((d) => d.doc))
+  const placement = placeClaims(
+    (readSpecClaims(repoRoot)?.claims ?? []).filter((c) => docSet.has(c.doc)),
+    (doc) => docByPath.get(doc)?.tree ?? null,
+  )
+  for (const { claim, missing } of placement.unplaced) {
+    extractionFailures.push({
+      doc: claim.doc,
+      reason: `"${oneLine(claim.statement)}" is read from ${missing.length} sentence${missing.length === 1 ? '' : 's'} the document no longer holds`,
     })
   }
+  const suppressed = new Set(readSuppressedClaims(repoRoot).map((s) => `${s.doc}\0${s.sentence}`))
+  // Claim inventory per document.
+  const inventory = claimAreaInputs({
+    docs,
+    claims: placement.live,
+    dismissals: dismissalByKey,
+    suppressed,
+  })
+  for (const line of inventory.lines) fact('extract', line)
+  const areaInputs = inventory.inputs
+  const liveClaimIds = new Set(placement.live.map((c) => c.id))
+  options.onClaims?.(placement.live.length, docs.length)
 
-  // A document that could not be extracted (or whose views did not all land)
-  // leaves nothing in the extract caches for it, so the step finished over work
-  // a replay cannot supply.
-  if (extractionFailures.length > 0) incomplete('extract')
-
-  // Extraction is the stage everything downstream reads: when EVERY extract call
-  // failed there are no claims, so synthesis, authoring, and the manifest would run
-  // over nothing and the run would report `ok` with an empty result — a run that
-  // verified nothing, indistinguishable from a clean no-op. Abort here instead,
-  // before any scenario file or manifest write: the committed scenarios and
-  // `manifest.json` stay exactly as they were, and the next run re-attempts the
-  // failed views (a failed view is never cached). The per-doc reasons ride along so
-  // the report names the affected documents.
-  if (extractSystemicLoss) {
-    return llmFailedResult(
-      {
-        recipe: recipeMeta,
-        recipeFingerprint,
-        sectionsTotal: plan.sections.length,
-        sectionsChanged: plan.work.length,
-        skippedUnchanged: plan.sections.length - plan.work.length,
-        coverageGaps,
-        errors,
-        extractionFailures,
-        orphaned: orphanedSections,
-        llmFailures: [...leafTallies(), ...sessionTallies],
-      },
-      sessionLossHead(extractSystemicLoss),
-    )
-  }
-
-  // Orphan honesty: a dismissal whose doc was extracted but whose claim text matched
-  // no live claim is stale — surfaced so it is never silently honored.
+  // Orphan honesty: a dismissal naming a claim the scan no longer reads from
+  // its document is stale — surfaced so it is never silently honored.
   const orphanedDismissals: GuardOrphanedDismissal[] = decisions.dismissedClaims
-    .filter((d) => extractedDocs.has(d.doc) && !extractedClaimKeys.has(dismissedClaimKey(d.doc, d.anchor, d.title)))
-    .map((d) => ({ doc: d.doc, anchor: d.anchor, title: d.title }))
+    .filter((d) => {
+      const doc = claimIdDoc(d.claimId)
+      return doc !== null && docSet.has(doc) && !liveClaimIds.has(d.claimId)
+    })
+    .map((d) => ({ claimId: d.claimId }))
 
-  // Single-step early return (`only: 'extract'`): the extraction pool ran (or
-  // replayed), and nothing downstream starts — not even the free interface
-  // mapping below. No corpus file is touched; the step's durable artifact is
-  // its own outcome cache, which the next step replays from.
-  if (options.only === 'extract') {
-    return {
-      status: 'ok',
-      recipe: recipeMeta,
-      recipeFingerprint,
-      sectionsTotal: plan.sections.length,
-      sectionsChanged: plan.work.length,
-      skippedUnchanged: plan.sections.length - plan.work.length,
-      // A warm re-run of this step spends nothing and has nothing to report.
-      noChanges: extractSummary.ran === 0,
-      written: [],
-      coverageGaps,
-      birthFindings: [],
-      errors,
-      extractionFailures,
-      llmFailures: [...leafTallies(), ...sessionTallies],
-      unadjudicated: [],
-      orphaned: orphanedSections,
-      birthPassed: 0,
-      orphanedDismissals,
-      orphanedFlowDismissals: [],
-      autoResolved: [],
-      flows: {
-        total: 0,
-        settled: 0,
-        unsettled: 0,
-        skipped: 0,
-        dismissed: 0,
-        orphaned: 0,
-        subsumed: 0,
-        noFlowClaims: 0,
-        unsettledAreas: [],
-      },
-      interfaces: { total: 0, bySurface: {} },
-      externalServices: [],
-      stoppedAfter: 'extract',
-    }
-  }
-
-  // Persist what extraction minted BEFORE synthesis writes the flows naming it —
-  // a flow referencing a claim `scenarios/claims.json` does not hold is a load
-  // error on every `guard run` (see claims-persist.ts). Additive-only, and a
-  // warm re-run adds nothing, so nothing is written on a no-op.
-  for (const extraction of extracted) if (extraction.result.ok) {
-    for (const claim of extraction.result.data.claims) claim.verification = bindClaimPrerequisites(claim.verification, claim.needs ?? [], prerequisiteResolution.targets)
-  }
-  persistExtractedClaims(
-    repoRoot,
-    extracted.flatMap(({ doc, result }) => (result.ok ? [{ doc: doc.doc, outcome: result.data }] : [])),
-  )
+  // The claim corpus every claim reference resolves against at load time
+  // (`scenarios/claims.json`), written whole from the scan's claims BEFORE
+  // synthesis writes the flows naming them.
+  writeClaimsCorpus(repoRoot, placement.live, new Date().toISOString())
 
   // 4. Interfaces — deterministic, free, and independent of everything spec-side.
   // Recipe discovery ranks its health path over the same walk, so on a repo it
@@ -1590,11 +1273,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // The repo's own third-party dependencies, from the same pass. They name
   // the third party in an api authoring prompt and in every blocked-on gap reason.
   const externalServices = mapped.externalServices
-  // Recipe declarations supply canonical wiring for every service, including
-  // unprovided services the source detector did not identify. Account availability
-  // comes from the same resolver used for eligibility and execution.
-  const providedExternals = prerequisiteResolution.externals.filter(e => e.state === 'provided')
-  const externalServiceHints = buildExternalServiceHints(externalServices, providedExternals, recipe, prerequisiteResolution.targets)
   // The code-truth grounding. The inbound half needs no plumbing at all: what a
   // handler reads off the request lives ON its operation in the catalog, so it
   // is read per flow from the interfaces the plan walks. The
@@ -1608,7 +1286,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // not itself walk when a SETUP step needs one (sign up, then sign in, then test
   // favorites). Empty for a repo with no api interfaces — the block simply renders not.
   const apiInterfaces = catalogs.get('api')?.interfaces ?? []
-  const authorCatalog = buildWebAuthorCatalog(catalogs.get('web')?.interfaces ?? [], serverIndex, recipe.web?.app, mapped.resources)
   // The counts describe what this run GROUNDED ON — the surface catalogs, not the
   // catalog file — which is why the total is their sum. They are read when flows
   // settle unrealized, and an entry the matcher never sees (an RPC-derived
@@ -1630,9 +1307,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // grounding — read off the surface catalogs, which already exclude
   // procedure-bearing api interfaces (`buildSurfaceCatalogs`), so no
   // tRPC-derived operation ever enters a synthesis briefing.
-  for (const input of areaInputs) for (const claim of input.claims) {
-    claim.verification = bindClaimPrerequisites(claim.verification, claim.needs ?? [], prerequisiteResolution.targets)
-  }
   const areas = buildFlowAreas(areaInputs)
   const flowsGrounding: FlowsSessionGrounding = {
     interfaces: [...catalogs].map(([surface, c]) => ({
@@ -1650,7 +1324,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     epicSession: options.flowsEpicSession,
     sessionGrounding: flowsGrounding,
     sessionDocs: docs,
-    sectionFingerprints: new Map(plan.sections.map((s) => [flowSectionKey(s.doc, s.anchor), s.fingerprint])),
     // `flows.json` is a durable output, so single-step mode writes it only when
     // the FINAL step runs — `only: 'flows'` computes the corpus, caches the
     // sessions that produced it, and leaves the committed file alone.
@@ -1677,13 +1350,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const known = {
       recipe: recipeMeta,
       recipeFingerprint,
-      sectionsTotal: plan.sections.length,
-      sectionsChanged: plan.work.length,
-      skippedUnchanged: plan.sections.length - plan.work.length,
       coverageGaps,
       errors,
       extractionFailures,
-      orphaned: orphanedSections,
       orphanedDismissals,
       llmFailures: [...leafTallies(), ...sessionTallies],
     }
@@ -1712,10 +1381,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       continue
     }
     dismissedFlowCount++
-    const primary = primarySection(flow, sectionByKey)
     coverageGaps.push({
-      doc: primary?.doc ?? flow.milestones[0].doc,
-      anchor: primary?.anchor ?? flow.milestones[0].anchor,
       kind: 'dismissed',
       flowId: flow.id,
       reason: dismissedReason(flow.title, dismissal.note),
@@ -1745,25 +1411,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     },
   }
 
-  const committedScenariosById = new Map(loadScenarios(repoRoot).scenarios.map(s => [s.id, s]))
-  const priorProofCurrent = (work: FlowWork, prior: GuardManifestScenario): boolean => {
-    const scenario = committedScenariosById.get(prior.id)
-    if (scenario && scenarioReviewFingerprint(bindScenarioPrerequisites(work.flow, scenario, prerequisiteResolution.targets)) !== scenarioReviewFingerprint(scenario)) return false
-    if (!scenario || scenarioFullFlowDefect(work.flow.milestones, scenario.steps) || prior.reviewed === false || work.prior?.flowFingerprint !== work.flow.fingerprint ||
-      scenario.flow?.fingerprint !== work.flow.fingerprint || scenarioPreparationDefect(work.flow, recipe, scenario) || scenarioCasePrerequisiteProblems(work.flow, scenario, prerequisiteResolution.targets, scenario.setup?.preparation ? recipe.preparations?.[scenario.setup.preparation]?.env : undefined, recipe).length) return false
-    if (!work.flow.bindings.every(b => scenario.binds.some(s =>
-      s.doc === b.doc && s.section === b.anchor && s.fingerprint === b.fingerprint))) return false
-    return !work.flow.milestones.some(m => m.verification?.cases) ||
-      (prior.reviewPolicyVersion === GUARD_REVIEW_POLICY_VERSION &&
-        prior.reviewedScenarioFingerprint === scenarioReviewFingerprint(scenario) &&
-        !scenarioFullFlowDefect(work.flow.milestones, scenario.steps, prior.caseEvidence ?? []))
-  }
 
   const priorManifest = readManifest(repoRoot)
   const priorFlows = new Map((priorManifest?.flows ?? []).map((f) => [f.flowId, f]))
   // Carried into the final manifest write when a degraded run cannot re-judge
   // the whole universe — see writeWorkingManifest.
-  const priorGapSections = priorManifest?.gapSections
   // A generationInputsHash that is not a real computed hash (a hand-stamped
   // sentinel from a staged corpus) can never match, so its flow re-authors on
   // EVERY generate — silently. Say so once per run; settling writes the real
@@ -1792,17 +1444,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // The flows stop — the internal `stopAfterFlows` test seam and single-step
   // mode's `only: 'flows'` share it: everything spec-side ran, nothing was
   // written (single-step mode also suppressed the `flows.json` write above).
-  if (options.stopAfterFlows || options.only === 'flows') {
+  if (options.stopAfterFlows || options.only === 'flows' || recipe === null) {
     return {
       status: 'ok',
       recipe: recipeMeta,
       recipeFingerprint,
-      sectionsTotal: plan.sections.length,
-      sectionsChanged: plan.work.length,
-      skippedUnchanged: plan.sections.length - plan.work.length,
       // Single-step mode: a warm re-run of the step spends nothing on either
       // the replayed extraction or this step's own sessions.
-      noChanges: options.only === 'flows' && extractSummary.ran === 0 && synthesis.calls === 0,
+      noChanges: options.only === 'flows' && synthesis.calls === 0,
       written: [],
       coverageGaps,
       birthFindings: [],
@@ -1811,7 +1460,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       llmFailures: [...leafTallies(), ...sessionTallies],
       // The run stops before birth, so neither adjudication stage ever ran.
       unadjudicated: [],
-      orphaned: orphanedSections,
       birthPassed: 0,
       orphanedDismissals,
       orphanedFlowDismissals,
@@ -1823,9 +1471,44 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     }
   }
 
-  // 6. Match only drivers that can verify a milestone of this flow. Recipe
-  // preparation is availability, never evidence that a flow requires that driver.
-  const surfacesByFlow = new Map(liveFlows.map((flow) => [flow.id, flowDriversToMatch(flow)]))
+  // The recipe material a flow's key folds, constant for the run: computed
+  // once here, not once per flow and again per authoring task.
+  const recipeSlices = new Map<GuardDriverId, string>()
+  const recipeSliceOf = (surface: GuardDriverId): string => {
+    let slice = recipeSlices.get(surface)
+    if (slice === undefined) recipeSlices.set(surface, (slice = flowRecipeSliceFingerprint(recipe, surface)))
+    return slice
+  }
+  const seedRoster = seedRosterFingerprint(recipe)
+  const preparationsOffer = preparationsFingerprint(repoRoot, recipe)
+  // Which workspace app serves which path, joined to the recipe's declared
+  // servers. Derived from the working tree alone (no LLM, nothing persisted, nothing
+  // fingerprinted), so it costs a directory walk and answers, per flow, "does this
+  // path's app even have a server?". A repo with one package yields an empty join
+  // and every gate below degrades to the behaviour guard had before it existed.
+  const serverIndex = buildServerRouteIndex(buildRouteManifest(repoRoot), recipe)
+  /** The server a scenario means when it stamps none — the stamping baseline. */
+  const defaultApiServer = resolveApiServers(recipe).defaultServer
+
+  // Recipe declarations supply canonical wiring for every service, including
+  // unprovided services the source detector did not identify. Account availability
+  // comes from the same resolver used for eligibility and execution.
+  const providedExternals = prerequisiteResolution.externals.filter(e => e.state === 'provided')
+  const externalServiceHints = buildExternalServiceHints(externalServices, providedExternals, recipe, prerequisiteResolution.targets)
+  const authorCatalog = buildWebAuthorCatalog(catalogs.get('web')?.interfaces ?? [], serverIndex, recipe.web?.app, mapped.resources)
+  const committedScenariosById = new Map(loadScenarios(repoRoot).scenarios.map(s => [s.id, s]))
+  const priorProofCurrent = (work: FlowWork, prior: GuardManifestScenario): boolean => {
+    const scenario = committedScenariosById.get(prior.id)
+    if (!scenario || scenarioFullFlowDefect(work.flow.milestones, scenario.steps) || prior.reviewed === false || work.prior?.flowFingerprint !== work.flow.fingerprint ||
+      scenario.flow?.fingerprint !== work.flow.fingerprint || scenarioPreparationDefect(recipe, scenario)) return false
+    return work.flow.bindings.every(b => scenario.binds.some(s => bindRealizes(s, b)))
+  }
+
+  // 6. The surfaces a flow is realized on: every runnable surface the recipe
+  // prepares — one test writer drives them all, so a flow asks for no surface
+  // in particular.
+  const preparedSurfaces = runnableDriverIds.filter((driver) => driverPrepared(recipe, driver))
+  const surfacesByFlow = new Map(liveFlows.map((flow) => [flow.id, preparedSurfaces]))
   /** One flow's match outcome, folded back in flow order. */
   interface FlowMatchResult {
     work?: FlowWork
@@ -1883,27 +1566,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       tickMatch(outcome)
     }
 
-    const primary = primarySection(flow, sectionByKey)
-    if (!primary) {
-      // Every milestone's section vanished between synthesis and here (a concurrent
-      // edit): nothing can bind, so the flow is skipped with a stated reason.
-      localErrors.push({
-        doc: flow.milestones[0].doc,
-        anchor: flow.milestones[0].anchor,
-        message: `flow "${flow.id}" binds no live section — re-run generate after re-scanning the corpus`,
-      })
-      localFacts.push(`${flow.id}: skipped, it binds no live section`)
-      return { errors: localErrors, matchCalls: localMatchCalls, matchCallErrors: localMatchCallErrors, contextMoved: localContextMoved, firstMatchError: localFirstMatchError, facts: localFacts }
-    }
-    const sections = new Map<number, SectionInput>()
-    for (const m of flow.milestones) {
-      const s = sectionByKey.get(flowSectionKey(m.doc, m.anchor))
-      if (s) sections.set(m.order, s)
-    }
-    const boundSections = [...new Set(flow.bindings.map((b) => sectionByKey.get(flowSectionKey(b.doc, b.anchor))))].filter(
-      (s): s is SectionInput => s !== undefined,
-    )
-    const sectionKeys = boundSections.map(sectionInputsKey)
+    const primary = primaryDoc(flow, docByPath)
+    const sections = milestoneSections(flow, docByPath)
 
     const plans = new Map<GuardDriverId, RealizationPlan>()
     const gaps: GuardManifestGap[] = []
@@ -1960,26 +1624,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           continue
         }
       }
-      const partition = partitionFlowPrerequisites(flow, surface, prerequisiteResolution.targets, recipe)
-      const eligibleFlow = partition.flow
-      gaps.push(...partition.gaps)
-      // Every case of the flow was refused before the matcher: no call is made,
-      // and the pair settles on the partition's own reason rather than vanishing.
-      if (!eligibleFlow.milestones.length) {
-        settlePair(surface, 'blocked', `blocked${partition.gaps[0] ? `, ${asLine(partition.gaps[0].reason)}` : ''}`)
-        continue
-      }
       localMatchCalls++
-      const outcome = await limit(() => matchFlow(repoRoot, eligibleFlow, surfaceCatalog, matchRunner, undefined, matchProviderControls(eligibleFlow, surface, prerequisiteResolution.targets, recipe)))
+      const outcome = await limit(() => matchFlow(repoRoot, flow, surfaceCatalog, matchRunner))
       if (outcome.kind === 'plan' || outcome.kind === 'gap') {
         if (outcome.contextMoved) localContextMoved++
         for (const gap of outcome.gaps) gaps.push({ surface,
           kind: gap.kind === 'mapping' ? 'no-interface' : 'blocked-on',
           reason: `Milestone ${gap.milestone}: ${gap.reason}`,
           milestones: [gap.milestone],
-          ...(gap.checks ? { obligations: gap.checks.map(caseId => ({ milestone: gap.milestone, caseId })) } : {}),
-          ...(gap.kind === 'mapping' ? { blocker: { kind: 'generation' as const, action: `Run guard interfaces author to map ${gap.checks?.join(', ') ?? gap.milestone}: ${gap.reason}. Source ${flow.milestones.find(m => m.order === gap.milestone)?.doc}#${flow.milestones.find(m => m.order === gap.milestone)?.anchor}; retain existing valid interfaces.` } } : {}),
-          ...(gap.kind === 'capability' ? { blocker: { kind: 'unsupported-capability' as const, capabilities: verificationRequirements(flow.milestones.find(m => m.order === gap.milestone)?.verification, gap.checks).filter(c => !(GUARD_OBSERVATION_CAPABILITIES[surface] ?? []).includes(c)) } } : {}),
+          ...(gap.kind === 'mapping' ? { blocker: { kind: 'generation' as const, action: `Run guard interfaces author to map milestone ${gap.milestone}: ${gap.reason}. Source ${flow.milestones.find(m => m.order === gap.milestone)?.doc} (claim ${flow.milestones.find(m => m.order === gap.milestone)?.claimId}); retain existing valid interfaces.` } } : {}),
+          ...(gap.kind === 'capability' ? { blocker: { kind: 'unsupported-capability' as const } } : {}),
         })
       }
       if (outcome.kind === 'plan') {
@@ -2009,37 +1663,24 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             continue
           }
           if (bound.kind === 'bound') serverBySurface.set(surface, bound.server)
-          const invocationGaps = flowInvocationGaps(flow, surface, recipe, serverBySurface.get(surface))
-          if (invocationGaps.length) {
-            gaps.push(...invocationGaps)
-            settlePair(surface, 'blocked', `blocked, ${asLine(invocationGaps[0].reason)}`)
-            continue
-          }
         }
-        const prepared = partitionPlanPreparations(flow, outcome.plan, preparationCatalog(recipe, repoRoot))
-        for (const row of prepared.missing) gaps.push({ surface, kind: 'blocked-on', milestones: [row.milestone],
-          obligations: [{ milestone: row.milestone, caseId: row.caseId }],
-          blocker: { kind: 'configuration', action: `Refresh Guard Setup preparations to provide a verified ${row.requirement} private starting state.` },
-          reason: `Case ${row.milestone}/${row.caseId} needs a verified ${row.requirement} preparation profile.` })
-        const complete = prepared.plan !== null && completeRealization(flow, prepared.plan)
-        if (prepared.plan && complete) plans.set(surface, prepared.plan)
-        else if (prepared.plan && !gaps.some(g => g.surface === surface)) gaps.push({ surface, kind: 'blocked-on', blocker: { kind: 'generation' }, reason: 'No single supported realization proves every milestone and selected case of this dependent flow.' })
+        const complete = completeRealization(flow, outcome.plan)
+        if (complete) plans.set(surface, outcome.plan)
+        else if (!gaps.some(g => g.surface === surface)) gaps.push({ surface, kind: 'blocked-on', blocker: { kind: 'generation' }, reason: 'No single supported realization proves every milestone of this dependent flow.' })
         // A cached verdict makes no call, which is what `calls: 0` says here.
         const cacheTag = outcome.calls === 0 ? ', from cache' : ''
-        if (prepared.plan && complete) {
-          const walked = prepared.plan.interfaces.length
+        if (complete) {
+          const walked = outcome.plan.interfaces.length
           settlePair(surface, 'matched', `matched, ${walked} interface${walked === 1 ? '' : 's'}${cacheTag}`)
-        } else if (prepared.plan) {
-          settlePair(surface, 'no match', `no match, no single supported realization proves every milestone and selected case${cacheTag}`)
         } else {
-          settlePair(surface, 'no match', `no match, every case needs a verified preparation profile${cacheTag}`)
+          settlePair(surface, 'no match', `no match, no single supported realization proves every milestone${cacheTag}`)
         }
       } else if (outcome.kind === 'gap') {
         settlePair(surface, 'no match', `no match${outcome.gaps[0] ? `, ${asLine(outcome.gaps[0].reason)}` : ''}${outcome.calls === 0 ? ' (from cache)' : ''}`)
       } else if (outcome.kind === 'error') {
         localMatchCallErrors++
         localFirstMatchError ??= outcome.reason
-        localErrors.push({ flowId: flow.id, doc: primary.doc, anchor: primary.anchor, message: `matching (${surface}) ${outcome.reason}` })
+        localErrors.push({ flowId: flow.id, doc: primary.doc, message: `matching (${surface}) ${outcome.reason}` })
         settlePair(surface, 'no match', `match failed, ${asLine(outcome.reason)}`)
       }
     }
@@ -2057,20 +1698,16 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     )
     const inputParts: FlowGenerationInputParts = {
       flowFingerprint: flow.fingerprint,
-      sectionKeys,
       assignmentFingerprints: [...plans.values()].map((p) => realizationAssignmentFingerprint(p)),
       interfaceFingerprints: [...plans.values()].flatMap((p) => p.interfaces.map((j) => j.fingerprint)),
       ...(plans.has('web')
         ? {
-            webCatalogFingerprint: catalogs.get('web')!.fingerprint,
             // What the flow's LAST session read, priced against the catalog as
             // it stands now. A flow that re-authors re-stamps this below with
             // what its new session read.
             webCatalogReads: catalogReadMaterial(authorCatalog, prior?.catalogReads ?? []),
           }
         : {}),
-      prerequisiteMaterial: flowPrerequisiteStateMaterial(flow, prerequisiteResolution.targets, recipe),
-      prerequisiteShape: flowPrerequisiteShapeFingerprint(flow, prerequisiteResolution.targets, recipe),
       hasScenario: priorScenarios.length > 0,
       // A flow with no plan is realized on no surface, so it folds the cli
       // slice as a stable stand-in: the estimate makes the same choice, and a
@@ -2079,54 +1716,17 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       roster: flowRosterFingerprint(recipe, priorScenarios),
       preparation: flowPreparationFingerprint(repoRoot, recipe, priorScenarios),
     }
-    const interfaceFingerprints = flowInterfaceFingerprintBag(inputParts)
     const inputComponents = flowGenerationInputComponents(inputParts)
     const inputsHash = flowSettleDigest(inputComponents)
-    const legacyHash = legacyFlowGenerationInputsHash({
-      flowFingerprint: flow.fingerprint,
-      sectionKeys,
-      interfaceFingerprints,
-      recipeFingerprint,
-    })
-    const settle = flowSettleVerdict({ prior, components: inputComponents, legacyHash })
+    const settle = flowSettleVerdict({ prior, components: inputComponents })
     // A settled entry that leaves a planned surface unaccounted for (no test, no
     // gap) is a hole nothing can heal: its hash skips the flow forever. Its hash is
     // DISREGARDED, so the flow re-runs here and settles honestly — no migration.
-    const invalidCaseReview = !!prior && (prior.scenarios.length > 1 || prior.scenarios.some(s =>
-      s.reviewed === false || (s.reviewPolicyVersion !== GUARD_REVIEW_POLICY_VERSION || !committedScenariosById.has(s.id) || s.reviewedScenarioFingerprint !== scenarioReviewFingerprint(committedScenariosById.get(s.id)) ||
-        scenarioPreparationDefect(flow, recipe, committedScenariosById.get(s.id)!) ||
-        scenarioCasePrerequisiteProblems(flow, committedScenariosById.get(s.id)!, prerequisiteResolution.targets, undefined, recipe).length ||
-        scenarioFullFlowDefect(flow.milestones, committedScenariosById.get(s.id)!.steps, s.caseEvidence ?? []))))
-    let changed = !settle.settled || (prior !== undefined && violatesSettleInvariant(prior)) || invalidCaseReview
-    // THE PER-FLOW CLAIM-DIFF GATE: when the only inputs that moved are bound
-    // sections the gate judged cosmetic (their prior extraction was reused, so
-    // the claims — and this flow's fingerprint — are byte-identical), the flow
-    // settles against the sections' PRIOR fingerprints and stays unchanged. The
-    // unchanged branch re-stamps the CURRENT components, so the next generate is
-    // a genuine no-op. A settle-invariant violation still wins: an unaccounted
-    // surface must re-run regardless.
-    if (changed && prior && !invalidCaseReview && prior.generationInputsHash !== null && !violatesSettleInvariant(prior) && claimDiff.cosmetic.size > 0) {
-      let substituted = false
-      const priorSectionKeys = boundSections.map((s) => {
-        const priorFingerprint = claimDiff.cosmetic.get(flowSectionKey(s.doc, s.anchor))
-        if (priorFingerprint === undefined) return sectionInputsKey(s)
-        substituted = true
-        return sectionInputsKey({ ...s, fingerprint: priorFingerprint })
-      })
-      const cosmetic =
-        substituted &&
-        flowSettleVerdict({
-          prior,
-          components: flowGenerationInputComponents({ ...inputParts, sectionKeys: priorSectionKeys }),
-          legacyHash: legacyFlowGenerationInputsHash({
-            flowFingerprint: flow.fingerprint,
-            sectionKeys: priorSectionKeys,
-            interfaceFingerprints,
-            recipeFingerprint,
-          }),
-        }).settled
-      if (cosmetic) changed = false
-    }
+    const invalidReview = !!prior && (prior.scenarios.length > 1 || prior.scenarios.some(s =>
+      s.reviewed === false || (!committedScenariosById.has(s.id) || s.reviewedScenarioFingerprint !== scenarioReviewFingerprint(committedScenariosById.get(s.id)) ||
+        scenarioPreparationDefect(recipe, committedScenariosById.get(s.id)!) ||
+        scenarioFullFlowDefect(flow.milestones, committedScenariosById.get(s.id)!.steps))))
+    let changed = !settle.settled || (prior !== undefined && violatesSettleInvariant(prior)) || invalidReview
     if (!changed && prior) {
       // Unchanged ⇒ authoring does not run, so the gaps the AUTHOR stage settled last
       // time (a refusal: "blocked on world-state the sandbox cannot provide") cannot
@@ -2142,7 +1742,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         flow,
         primary,
         sections,
-        sectionKeys,
         plans,
         serverBySurface,
         gaps,
@@ -2153,7 +1752,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         changed,
         // Only a settled row the compare re-opened has moved inputs to name; a
         // flow that was new, unsettled or re-opened by an invariant has none,
-        // and a row checked the legacy way names them as unrecorded.
+        // and a settled row with no components names them as unrecorded.
         ...(changed && prior && prior.generationInputsHash !== null && !settle.settled
           ? { movedInputs: settle.moved }
           : {}),
@@ -2200,13 +1799,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const known = {
       recipe: recipeMeta,
       recipeFingerprint,
-      sectionsTotal: plan.sections.length,
-      sectionsChanged: plan.work.length,
-      skippedUnchanged: plan.sections.length - plan.work.length,
       coverageGaps,
       errors,
       extractionFailures,
-      orphaned: orphanedSections,
       orphanedDismissals,
       orphanedFlowDismissals,
       flows: flowsReport,
@@ -2225,15 +1820,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   for (const w of works) {
     for (const gap of w.gaps) {
       coverageGaps.push({
-        doc: w.primary.doc,
-        anchor: w.primary.anchor,
-        kind: gap.kind,
+                kind: gap.kind,
         reason: gap.reason,
         flowId: w.flow.id,
         surface: gap.surface,
         ...(gap.blocker ? { blocker: gap.blocker } : {}),
         ...(gap.milestones ? { milestones: gap.milestones } : {}),
-        ...(gap.obligations ? { obligations: gap.obligations } : {}),
         ...(gap.driver ? { driver: gap.driver } : {}),
       })
     }
@@ -2310,26 +1902,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       unresolved.set(flow.id, flow)
     }
 
-    // THE RETIRED POSITIONAL CHUNKS, read once per forty flows: the old key —
-    // the prompt fingerprint over this run's slicing of this run's changed set
-    // — is exactly what shipped before per-flow verdicts, so an unchanged set
-    // finds its whole stored answer and every flow in it is written out
-    // individually. A set that moved simply misses, as it did before.
-    if (unresolved.size > 0) {
-      for (const chunk of chunksOf(classifyInputs)) {
-        if (!chunk.some((flow) => unresolved.has(flow.id))) continue
-        const stored = await getCacheEntry(repoRoot, WORLD_CLASSIFY_CACHE_NAME,
-          createHash('sha256').update(`${LEGACY_WORLD_CLASSIFY_PROMPT_FINGERPRINT}\0${JSON.stringify(chunk)}`).digest('hex'))
-        const cached = WorldClassifySchema.safeParse(stored)
-        if (!cached.success) continue
-        const mutators = new Set(cached.data.mutators)
-        for (const flow of chunk) {
-          if (!unresolved.delete(flow.id)) continue
-          await record(flow, mutators.has(flow.id))
-        }
-      }
-    }
-
     for (const chunk of chunksOf([...unresolved.values()])) {
       const known = new Set(chunk.map((f) => f.id))
       let settled = false
@@ -2357,7 +1929,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         for (const id of suspects) destructiveFlowIds.add(id)
         errors.push({
           doc: '',
-          anchor: '',
           message:
             `world classification lost a chunk of ${chunk.length} flow(s) (${lastError}) — ` +
             `the deterministic fallback scheduled ${suspects.length} suspect flow(s) into the serialized mutator tail`,
@@ -2397,7 +1968,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       for (const t of webTasks) t.errored = true
       errors.push({
         doc: webTasks[0].work.primary.doc,
-        anchor: webTasks[0].work.primary.anchor,
         message:
           `the web surface cannot be driven: ${browser.reason} — ` +
           `${webTasks.length} web flow(s) skipped, left unsettled for the next generate`,
@@ -2465,7 +2035,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       resolvedEntry: resolvedEntryMemo,
       displayEntry: recipe.entry,
       inputsFingerprint: groundInputsFingerprint(repoRoot, recipe),
-      legacyRecipeFingerprint: recipeFingerprint,
       recipeEnv: recipe.env,
       onProbesPlanned: (n) => {
         groundPlanned += n
@@ -2503,7 +2072,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       }
       errors.push({
         doc: preflight.entry,
-        anchor: ENTRY_PREFLIGHT_ANCHOR,
         // A dead entry is a REFUSAL, not an authoring miss: nothing was validated and
         // re-running changes nothing until the binary is rebuilt.
         kind: 'refusal',
@@ -2586,9 +2154,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     )
     task.work.gaps.push({ surface: task.surface, kind: 'blocked-on', reason })
     coverageGaps.push({
-      doc: task.work.primary.doc,
-      anchor: task.work.primary.anchor,
-      kind: 'blocked-on',
+            kind: 'blocked-on',
       flowId: task.work.flow.id,
       surface: task.surface,
       reason,
@@ -2635,7 +2201,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   // adjudicates it for real (re-authoring is a cache hit).
   const unadjudicatedRefs = new Set<string>()
   const unreviewedScenarioIds = new Set<string>()
-  const caseEvidenceById = new Map<string, GuardCaseEvidence[]>()
   // Failures the auto-resolve loop RETIRED this run (no committed row) — the
   // flow still re-attempts, so persist unsettles it.
   const autoRetiredRefs = new Set<string>()
@@ -2665,7 +2230,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         task.errored = true
         errors.push({
           doc: task.work.primary.doc,
-          anchor: task.work.primary.anchor,
           message: `flow worker (${task.surface}) skipped: ${message}`,
         })
         fact('author', `${task.work.flow.id} x ${task.surface}: skipped, the build failed`)
@@ -2724,6 +2288,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       const unservedByRef = new Map<string, BirthOutcome>()
       const lastExecutionErrorByRef = new Map<string, BirthOutcome>()
 
+      /** What observed a rejection: a run, a review check, or the fidelity judge. */
+      type RejectionSource = 'execution' | 'review' | 'fidelity'
       interface WorkerTaskState {
         task: AuthorTask
         /** The stable engine-assigned scenario id every attempt builds with. */
@@ -2740,11 +2306,11 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         /** The finding of an unresolved fidelity rejection — cleared when a
          *  later submission is accepted, folded as a rejection otherwise. */
         pendingFidelityFinding?: GuardBirthFinding
-        rejectionByObligation: Map<string, string>
-        repairIssues: Map<string, RepairIssue>
-        /** Obligations a correction has already asked to repair (once each). */
-        repairsAsked: Set<string>
-            }
+        /** The latest rejection recorded against each milestone, with what
+         *  observed it: a run (`execution`), a review check or the fidelity
+         *  judge. A later passing run clears only the execution-sourced ones. */
+        rejections: Map<number, { reason: string; source: RejectionSource }>
+      }
       const states = new Map<string, WorkerTaskState>()
       for (const task of runnable) {
         // EDIT MODE resolution, deterministic: the flow has a committed entry
@@ -2772,9 +2338,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           priors,
           drops: [],
           fidelityFlags: 0,
-          rejectionByObligation: new Map(),
-          repairIssues: new Map(),
-          repairsAsked: new Set(),
+          rejections: new Map(),
         })
       }
 
@@ -2800,27 +2364,21 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
        *  tool turn instead of a sandbox run. */
       const preflightDefect = (task: AuthorTask, raw: RawGeneratedScenario, requireCoverage = true): string | null => {
         // Probes may inspect prerequisites without claiming coverage. Submitted
-        // scenarios, and probes that select cases, still need valid proof tags.
-        const selectsCoverage = raw.steps.some((step) => step.milestone !== undefined || step.checks?.length)
+        // scenarios, and probes that select milestones, still need valid proof tags.
+        const selectsCoverage = raw.steps.some((step) => step.milestone !== undefined)
         const scopeDefect = requireCoverage || selectsCoverage
           ? (requireCoverage ? scenarioFullFlowDefect : scenarioMilestoneScopeDefect)(task.work.flow.milestones, raw.steps)
           : undefined
         if (scopeDefect) return scopeDefect
         for (const p of scenarioMilestoneProof(raw.steps)) {
-          const m = task.work.flow.milestones.find((m) => m.order === p.milestone)
-          const assigned = assignedMilestones(task.work.flow, task.plan).find(m => m.order === p.milestone)
-          if (!assigned || p.checks?.some(id => !assigned.verification?.cases?.some(c => c.id === id)))
-            return `Milestone ${p.milestone} selects cases outside this worker assignment.`
-          const gap = verificationCapabilityGap(m?.verification, p.driver, p.checks)
-          if (gap) return gap
+          if (!assignedMilestones(task.work.flow, task.plan).some(m => m.order === p.milestone))
+            return `Milestone ${p.milestone} is outside this worker assignment.`
         }
         for (const step of raw.steps) if ('navigate' in step) {
           const problem = navigationGroundingProblem(step.navigate, task.plan.interfaces.flatMap(i => 'path' in i.entry ? [i.entry.path] : []), [...task.work.sections.values()].map(s => s.fullText || s.ownText).join('\n'))
           if (problem) return problem
         }
-        const prerequisiteDefect = scenarioCasePrerequisiteProblems(task.work.flow, raw, prerequisiteResolution.targets, raw.setup?.preparation ? recipe.preparations?.[raw.setup.preparation]?.env : undefined, recipe)[0]
-        if (prerequisiteDefect) return prerequisiteDefect.reason
-        const preparationDefect = scenarioPreparationDefect(task.work.flow, recipe, raw)
+        const preparationDefect = scenarioPreparationDefect(recipe, raw)
         if (preparationDefect) return preparationDefect
         const composition = compositionDefectOf(raw, recipe)
         if (composition) return composition
@@ -2907,13 +2465,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             ...(task.server ? { server: task.server } : {}),
             defaultServer: defaultApiServer,
           })
-          const scenario = bindScenarioPrerequisites(task.work.flow, builtScenario, prerequisiteResolution.targets)
           return {
             candidate: {
               flow: task.work.flow,
               surface: task.surface,
-              section: task.work.primary,
-              scenario,
+              primary: task.work.primary,
+              scenario: builtScenario,
               ref: taskKey(task),
             },
           }
@@ -3103,10 +2660,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           // A replacement invalidates its prior proof even when its review failed.
           rows.delete(scenario.id)
           if (entry.fidelityUnreviewed || dropped.has(scenario.id)) continue
-          if (work.flow.milestones.some(m => m.verification?.cases) &&
-            (entry.review?.policyVersion !== GUARD_REVIEW_POLICY_VERSION ||
-              entry.review.scenarioFingerprint !== scenarioReviewFingerprint(scenario) ||
-              scenarioFullFlowDefect(work.flow.milestones, scenario.steps, entry.review.caseEvidence ?? []))) continue
           rows.set(scenario.id, { proof: scenarioMilestoneProof(scenario.steps), passing: entry.result.outcome === 'pass' })
         }
         const complete = [...rows.values()].find(r => coversFlowMilestones(work.flow.milestones, r.proof) === true)
@@ -3114,38 +2667,20 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       }
       const outstandingFeedback = (state: WorkerTaskState) => {
         const remaining = taskProgress(state).outstanding
-        const notes = [...new Set(remaining.map(o => state.rejectionByObligation.get(`${o.milestone}:${o.caseId ?? ''}`)).filter(Boolean))]
+        const notes = [...new Set(remaining.map(o => state.rejections.get(o.milestone)?.reason).filter(Boolean))]
         return describeOutstandingObligations(remaining) + (notes.length ? '\nPrevious review findings for remaining obligations:\n' + notes.join('\n') : '')
       }
+      // The milestones a rejection is recorded against: the failing step's when
+      // the run named one, else every milestone the candidate asserts.
       const rememberRejection = (state: WorkerTaskState, candidate: BirthCandidate, reason: string,
-        reasonKind: RepairIssue['reasonKind'] = 'assertion', source: RepairIssue['source'] = 'review', failedStep?: number) => {
-        const issueId = scenarioReviewFingerprint({ setup: candidate.scenario.setup ?? null, steps: candidate.scenario.steps, normalize: candidate.scenario.normalize ?? [], reasonKind, source }).slice(7, 23)
+        source: RejectionSource = 'review', failedStep?: number) => {
         const failed = failedStep ? candidate.scenario.steps[failedStep - 1] : undefined
         const proofs = failed?.milestone ? scenarioMilestoneProof([failed]) : scenarioMilestoneProof(candidate.scenario.steps)
-        for (const proof of proofs) {
-          for (const id of proof.checks ?? ['']) {
-            const key = `${proof.milestone}:${id}`
-            const fidelityFlagged = source === 'fidelity' || state.repairIssues.get(key)?.fidelityFlagged
-            state.rejectionByObligation.set(key, reason)
-            state.repairIssues.set(key, { reasonKind, evidence: reason, issueId, source, ...(fidelityFlagged ? { fidelityFlagged } : {}) })
-          }
-        }
-        return issueId
+        for (const proof of proofs) state.rejections.set(proof.milestone, { reason, source })
       }
-      // The rejected candidate's issue id, so a blocked answer can cite it without a correction round.
-      const issueLine = (issueId: string) => `issueId for these cases: ${issueId}`
-      const recordRemainingGaps = (state: WorkerTaskState, outcome?: GuardFlowWorkerOutcome) => {
-        const remainder = reconcileRemaining(taskProgress(state).outstanding, state.repairIssues, outcome?.remaining, outcome?.kind).current
-        for (const row of remainder) state.task.work.gaps.push({ surface: state.task.surface, kind: 'blocked-on', milestones: [row.milestone],
-          obligations: [{ milestone: row.milestone, ...(row.caseId ? { caseId: row.caseId } : {}) }],
-          blocker: { kind: row.reasonKind === 'preparation' ? 'configuration' : row.reasonKind === 'unsupported-capability' ? 'unsupported-capability' : 'generation' },
-          reason: `${row.milestone}/${row.caseId ?? 'legacy'}: ${row.reasonKind}: ${row.evidence}` })
-      }
-      const validateTaskOutcome = (state: WorkerTaskState, outcome: GuardFlowWorkerOutcome, wrappingUp = false): string | undefined => {
+      const validateTaskOutcome = (state: WorkerTaskState, outcome: GuardFlowWorkerOutcome): string | undefined => {
         const progress = taskProgress(state)
         if (outcome.kind === 'settled' && outcome.additionalScenarios !== undefined) return 'One flow accepts one complete test; additionalScenarios is not allowed.'
-        if ((outcome.kind === 'blocked' || outcome.kind === 'retired') && progress.outstanding.some(o => o.caseId))
-          return outcomeCorrection(reconcileRemaining(progress.outstanding, state.repairIssues, outcome.remaining, outcome.kind), state.repairsAsked, wrappingUp)
         if (outcome.kind === 'blocked' && outcome.perMilestone?.some(m => !progress.outstanding.some(o => o.milestone === m.order)))
           return 'Outcome refused: blockers must identify outstanding milestones assigned to this worker.'
         if (outcome.kind !== 'settled') return undefined
@@ -3169,7 +2704,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         unreviewed: boolean,
         note?: string,
       ): FlowWorkerToolReport => {
-        const completeDefect = scenarioFullFlowDefect(state.task.work.flow.milestones, candidate.scenario.steps, unreviewed ? undefined : caseEvidenceById.get(candidate.scenario.id) ?? [])
+        const completeDefect = scenarioFullFlowDefect(state.task.work.flow.milestones, candidate.scenario.steps)
         if (completeDefect) return { content: `refused: ${completeDefect}`, isError: true }
         if (unreviewed) { fidelityUnreviewed++; return { content: 'not accepted — UNREVIEWED: a complete test requires independent fidelity review before publication.', isError: true } }
         for (const [key, entry] of stash) if (entry.candidate.flow.id === candidate.flow.id) stash.delete(key)
@@ -3182,17 +2717,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           result,
           expectedReds: [...expectedReds],
           fidelityUnreviewed: unreviewed,
-          ...(!unreviewed ? { review: { policyVersion: GUARD_REVIEW_POLICY_VERSION,
-            scenarioFingerprint: scenarioReviewFingerprint(candidate.scenario),
-            caseEvidence: caseEvidenceById.get(candidate.scenario.id) ?? [] } } : {}),
+          ...(!unreviewed ? { review: { scenarioFingerprint: scenarioReviewFingerprint(candidate.scenario) } } : {}),
         })
         state.acceptedSha = sha
-        if (!unreviewed) for (const proof of scenarioMilestoneProof(candidate.scenario.steps)) {
-          for (const id of proof.checks ?? ['']) {
-            state.rejectionByObligation.delete(`${proof.milestone}:${id}`)
-            state.repairIssues.delete(`${proof.milestone}:${id}`)
-          }
-        }
+        if (!unreviewed) for (const proof of scenarioMilestoneProof(candidate.scenario.steps)) state.rejections.delete(proof.milestone)
         state.pendingFidelityFinding = undefined
         // A CONVERGED heal: the acceptance retracts the taint an earlier flag in
         // THIS session recorded, exactly as it retracts the pending finding — the
@@ -3223,14 +2751,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         judge: WorkerFidelityJudge,
       ): Promise<FlowWorkerToolReport> => {
         const task = state.task
-        const prerequisiteDefect = scenarioCasePrerequisiteProblems(task.work.flow, candidate.scenario, prerequisiteResolution.targets, undefined, recipe)[0]
-        if (prerequisiteDefect) return { content: `not accepted: ${prerequisiteDefect.reason}`, isError: true }
         if (expectedReds.length && (result.preparationFailure || result.blockedPrecondition)) {
-          rememberRejection(state, candidate, 'Required setup did not succeed; this execution cannot establish product drift.', 'preparation', 'execution')
+          rememberRejection(state, candidate, 'Required setup did not succeed; this execution cannot establish product drift.', 'execution')
           return { content: 'not accepted: establish the prerequisite state before attributing a failure to code or documentation drift.', isError: true }
         }
         const condensed = renderCondensedResult(result)
-        if (result.outcome !== 'pass') rememberRejection(state, candidate, condensed, result.preparationFailure ? 'preparation' : 'assertion', 'execution', result.failure?.step)
+        if (result.outcome !== 'pass') rememberRejection(state, candidate, condensed, 'execution', result.failure?.step)
         if (result.outcome !== 'pass' && result.outcome !== 'fail') {
           return {
             content: `not accepted — the confirmation run did not settle pass/fail:\n${condensed}`,
@@ -3249,27 +2775,17 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           // Step 18 — the fidelity CHILD (fresh context is the independence).
           let verdict = await judge({
             flowFingerprint: task.work.flow.fingerprint,
-            sectionKeys: task.work.sectionKeys,
             scenarioBehavior: scenarioBehavior(candidate.scenario),
-            proofContext: { milestones: task.work.flow.milestones, steps: candidate.scenario.steps },
             briefing: workerFidelityBriefing(task.work, candidate, condensed),
           })
           fact('validate', fidelityVerdictLine(candidate.scenario.id, verdict))
-          if (verdict.kind === 'faithful') {
-            const defect = scenarioFullFlowDefect(task.work.flow.milestones, candidate.scenario.steps, verdict.evidence ?? [])
-            if (defect) {
-              rememberRejection(state, candidate, defect, 'annotation')
-              return { content: `Review evidence is invalid (not a semantic fidelity rejection): ${defect}. Repair the cited annotations or obtain corrected review evidence.`, isError: true }
-            }
-            else if (verdict.evidence) caseEvidenceById.set(candidate.scenario.id, verdict.evidence)
-          }
           if (verdict.kind === 'flagged') {
             const key = autoResolutionKey(candidate.flow.id, candidate.surface)
             const firstFlag = state.fidelityFlags === 0
             state.fidelityFlags++
             taintFlow(candidate.flow.id, candidate.surface, candidate.scenario.title, verdict.mismatch)
             const finding = fidelityFinding(candidate, verdict.mismatch)
-            const issueId = rememberRejection(state, candidate, verdict.mismatch, 'assertion', 'fidelity')
+            rememberRejection(state, candidate, verdict.mismatch, 'fidelity')
             if (firstFlag && verdict.confidence === 'high' && autoResolveCount(key) < escalateAfter) {
               // The in-loop self-heal (no separate re-author round — the
               // WORKER revises); the ledger bump keeps the budget honest.
@@ -3278,7 +2794,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               return {
                 content:
                   `not accepted — the fidelity judge flagged the scenario (high confidence): ${verdict.mismatch}\n` +
-                  'Revise the scenario so it truly verifies the flagged milestone, then submit again.\n' + issueLine(issueId),
+                  'Revise the scenario so it truly verifies the flagged milestone, then submit again.',
                 isError: true,
               }
             }
@@ -3289,13 +2805,12 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             return {
               content:
                 `REJECTED — the fidelity judge flagged this candidate${firstFlag ? '' : ' too'} (${verdict.confidence}): ${verdict.mismatch}\n` +
-                'Repair the complete candidate using the current finding; partial candidates cannot be published. Keep each remaining case explicit if preparation or execution prevents completion.\n' +
-                issueLine(issueId),
+                'Repair the complete candidate using the current finding; partial candidates cannot be published.',
               isError: true,
             }
           }
           const unreviewed = verdict.kind === 'unavailable'
-          if (unreviewed) rememberRejection(state, candidate, verdict.reason, 'review-unavailable')
+          if (unreviewed) rememberRejection(state, candidate, verdict.reason)
           return acceptSubmission(
             state,
             candidate,
@@ -3334,29 +2849,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             isError: true,
           }
         }
-        if (task.work.flow.milestones.some(m => m.verification?.cases?.length)) {
-          const verdict = await judge({ flowFingerprint: task.work.flow.fingerprint,
-            sectionKeys: task.work.sectionKeys, scenarioBehavior: scenarioBehavior(candidate.scenario),
-            proofContext: { milestones: task.work.flow.milestones, steps: candidate.scenario.steps },
-            briefing: workerFidelityBriefing(task.work, candidate, condensed) +
-              '\nDECLARED EXPECTED FAILURE: review the selected assertion contract, not a claim of passing execution.' })
-          fact('validate', fidelityVerdictLine(candidate.scenario.id, verdict))
-          if (verdict.kind === 'unavailable') {
-            rememberRejection(state, candidate, verdict.reason, 'review-unavailable')
-            return acceptSubmission(state, candidate, result, expectedReds, true,
-              `Review unavailable: ${verdict.reason}. Accepted as unreviewed; required cases remain outstanding.`)
-          }
-          if (verdict.kind === 'faithful') {
-            const issue = scenarioFullFlowDefect(task.work.flow.milestones, candidate.scenario.steps, verdict.evidence ?? [])
-            if (issue) { rememberRejection(state, candidate, issue, 'annotation'); return { content: `Review evidence is invalid (not a semantic fidelity rejection): ${issue}`, isError: true } }
-          }
-          if (verdict.kind === 'flagged') {
-            state.pendingFidelityFinding = fidelityFinding(candidate, verdict.mismatch)
-            const issueId = rememberRejection(state, candidate, verdict.mismatch, 'assertion', 'fidelity')
-            return { content: `not accepted — the expected failure still needs faithful case assertions: ${verdict.mismatch}\n${issueLine(issueId)}`, isError: true }
-          }
-          if (verdict.kind === 'faithful' && verdict.evidence) caseEvidenceById.set(candidate.scenario.id, verdict.evidence)
-        }
         return acceptSubmission(state, candidate, result, expectedReds, false)
       }
 
@@ -3388,21 +2880,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         // The shared catalog, recorded per task: what this session is served is
         // what its flow's settle compare folds.
         const reads = task.surface === 'web' ? readLogFor(ref) : undefined
-        const keyFingerprints = flowWorkerKeyFingerprints({
-          prerequisiteShape: flowPrerequisiteShapeFingerprint(task.work.flow, prerequisiteResolution.targets, recipe),
-          legacyPrerequisiteMaterial: flowPrerequisiteStateMaterial(task.work.flow, prerequisiteResolution.targets, recipe),
+        const interfaceKeyFingerprints = flowWorkerKeyFingerprints({
           assignment: realizationAssignmentFingerprint(task.plan),
           interfaces: task.plan.interfaces.map((j) => j.fingerprint),
           // The web arm folds what the session is HANDED, not the whole catalog
           // it may search: one unrelated screen's readables moving used to
           // re-key every web flow.
           ...(task.surface === 'web'
-            ? {
-                web: {
-                  handed: webAuthorKeyMaterial(authorCatalog, task.plan.interfaces, task.work.flow, mapped.resources),
-                  catalog: authorCatalog.fingerprint,
-                },
-              }
+            ? { webHanded: webAuthorKeyMaterial(authorCatalog, task.plan.interfaces, task.work.flow, mapped.resources) }
             : {}),
         })
         return {
@@ -3422,13 +2907,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             : {}),
           cacheMaterial: {
             flowFingerprint: task.work.flow.fingerprint,
-            sectionKeys: task.work.sectionKeys,
-            interfaceFingerprints: keyFingerprints.fingerprints,
-            legacyInterfaceFingerprints: keyFingerprints.legacyFingerprints,
+            interfaceFingerprints: interfaceKeyFingerprints,
             recipeSlice: recipeSliceOf(task.surface),
             roster: seedRoster,
             preparations: preparationsOffer,
-            recipeFingerprint,
             mode: editMode ? 'edit' : 'scratch',
             priorShas: priorScenarios.map((p) => sha256Hex(p.yaml)),
           },
@@ -3461,7 +2943,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 ? {
                     priorScenarios,
                     movedInputs: {
-                      sections: movedSectionsFor(task.work),
                       interfaces: movedInterfacesFor(
                         task.plan,
                         priorScenarios.flatMap((p) => priorYamlById.get(p.id)?.scenario ?? []),
@@ -3509,15 +2990,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             if ('error' in built) return { content: `the scenario does not build: ${built.error}`, isError: true }
             const run = await executeOnce(built.candidate, task)
             if ('report' in run) return run.report
-            if (run.result.outcome !== 'pass') rememberRejection(state, built.candidate, renderCondensedResult(run.result), run.result.preparationFailure ? 'preparation' : 'assertion', 'execution')
+            if (run.result.outcome !== 'pass') rememberRejection(state, built.candidate, renderCondensedResult(run.result), 'execution')
             if (run.result.outcome === 'pass') for (const proof of scenarioMilestoneProof(built.candidate.scenario.steps)) {
-              for (const id of proof.checks ?? ['']) {
-                const key = `${proof.milestone}:${id}`
-                if (state.repairIssues.get(key)?.source === 'execution') {
-                  state.repairIssues.delete(key)
-                  state.rejectionByObligation.delete(key)
-                }
-              }
+              if (state.rejections.get(proof.milestone)?.source === 'execution') state.rejections.delete(proof.milestone)
             }
             const observationId = observations.record(yamlText, run.result)
             return {
@@ -3566,8 +3041,8 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             return settleSubmission(state, built.candidate, run.result, evidence.expectedReds, judge)
           },
           hasStash: (sha) => stash.get(sha)?.candidate.ref === ref,
-          validateOutcome: (outcome, context) => {
-            const defect = validateTaskOutcome(state, outcome, context?.wrappingUp)
+          validateOutcome: (outcome) => {
+            const defect = validateTaskOutcome(state, outcome)
             if (!defect) observations.clear()
             return defect
           },
@@ -3616,16 +3091,15 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             const candidates: WorkerStashEntry[] = []
             for (const { yaml: scenarioYaml, expectedReds, review } of cached) {
               const scenario = parseScenarioYaml(scenarioYaml)
-              if (!scenario || !review || review.policyVersion !== GUARD_REVIEW_POLICY_VERSION ||
+              if (!scenario || !review ||
                 review.scenarioFingerprint !== scenarioReviewFingerprint(scenario) ||
                 scenario.flow?.fingerprint !== task.work.flow.fingerprint ||
-                !task.work.flow.bindings.every(b => scenario.binds.some(s => s.doc === b.doc && s.section === b.anchor && s.fingerprint === b.fingerprint)) ||
-                scenarioFullFlowDefect(task.work.flow.milestones, scenario.steps, review.caseEvidence ?? [])) return false
-              if (scenarioReviewFingerprint(bindScenarioPrerequisites(task.work.flow, scenario, prerequisiteResolution.targets)) !== scenarioReviewFingerprint(scenario)) return false
+                !task.work.flow.bindings.every(b => scenario.binds.some(s => bindRealizes(s, b))) ||
+                scenarioFullFlowDefect(task.work.flow.milestones, scenario.steps)) return false
               const authored = rawScenarioSchemaFor(task.surface).safeParse(scenario)
               if (!authored.success || preflightDefect(task, authored.data)) return false
               const candidate: BirthCandidate = { flow: task.work.flow, surface: task.surface,
-                section: task.work.primary, scenario, ref }
+                primary: task.work.primary, scenario, ref }
               candidates.push({ candidate, yaml: scenarioYaml, expectedReds: [...expectedReds], review,
                 fidelityUnreviewed: false, result: { id: scenario.id, title: scenario.title,
                   binds: scenario.binds[0], outcome: expectedReds.length ? 'fail' : 'pass', durationMs: 0 } })
@@ -3694,7 +3168,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               usedIds.add(entry.candidate.scenario.id)
               stash.delete(sha)
               stash.set(sha, entry)
-              if (entry.review) caseEvidenceById.set(entry.candidate.scenario.id, entry.review.caseEvidence)
             }
             state.acceptedSha = stashed[0]!.sha
             return true
@@ -3825,13 +3298,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           {
             recipe: recipeMeta,
             recipeFingerprint,
-            sectionsTotal: plan.sections.length,
-            sectionsChanged: plan.work.length,
-            skippedUnchanged: plan.sections.length - plan.work.length,
             coverageGaps,
             errors,
             extractionFailures,
-            orphaned: orphanedSections,
             orphanedDismissals,
             orphanedFlowDismissals,
             flows: flowsReport,
@@ -3873,7 +3342,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             task.errored = true
             errors.push({
               doc: work.primary.doc,
-              anchor: work.primary.anchor,
               kind: 'authoring',
               flowId: work.flow.id,
               surface,
@@ -3883,7 +3351,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             continue
           }
           if (result.kind === 'failed') {
-            if (taskProgress(state).required.some(o => o.caseId)) recordRemainingGaps(state)
             if (settleIfUnserved(ref, task)) continue
             task.errored = true
             // When an execution errored, the error is built off the ENGINE's
@@ -3898,7 +3365,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
                 ? { ...errorFrom(capture), surface, message }
                 : {
                     doc: work.primary.doc,
-                    anchor: work.primary.anchor,
                     kind: 'authoring',
                     flowId: work.flow.id,
                     surface,
@@ -3913,8 +3379,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           // object root), so narrowing on `kind` no longer narrows the payload
           // fields: the `!`s below stand on the parse the loop already did.
           const outcome = result.outcome
-          if ((outcome.kind === 'blocked' || outcome.kind === 'retired') && taskProgress(state).required.some(o => o.caseId))
-            recordRemainingGaps(state, outcome)
           // A TAINTED flow whose worker completed a fresh answer (accepted
           // scenario or an honest block) overwrote the poisoned cache entry —
           // its taint clears at run end unless the session re-flagged it
@@ -3931,7 +3395,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             const incomplete = validateTaskOutcome(state, outcome)
             if (incomplete) {
               task.errored = true
-              errors.push({ doc: work.primary.doc, anchor: work.primary.anchor, kind: 'authoring',
+              errors.push({ doc: work.primary.doc, kind: 'authoring',
                 flowId: work.flow.id, surface, message: incomplete })
               fact('author', `${work.flow.id} x ${surface}: not settled, ${asLine(incomplete)}`)
               continue
@@ -3946,7 +3410,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               task.errored = true
               errors.push({
                 doc: work.primary.doc,
-                anchor: work.primary.anchor,
                 kind: 'authoring',
                 flowId: work.flow.id,
                 surface,
@@ -3963,7 +3426,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
               task.errored = true
               errors.push({
                 doc: work.primary.doc,
-                anchor: work.primary.anchor,
                 kind: 'authoring',
                 flowId: work.flow.id,
                 surface,
@@ -3996,10 +3458,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             continue
           }
           if (outcome.kind === 'blocked') {
-            if (taskProgress(state).required.some(o => o.caseId)) {
-              fact('author', `${work.flow.id} x ${surface}: blocked, its case obligations stay open`)
-              continue
-            }
             const capabilities = [
               ...new Set(outcome.perMilestone!.map((m) => m.capability.trim().toLowerCase()).filter(Boolean)),
             ]
@@ -4011,9 +3469,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             fact('author', `${work.flow.id} x ${surface}: blocked, ${blockedOn.join('; ')}`)
             work.gaps.push({ surface, kind: 'blocked-on', reason, milestones: outcome.perMilestone!.map((m) => m.order) })
             coverageGaps.push({
-              doc: work.primary.doc,
-              anchor: work.primary.anchor,
-              kind: 'blocked-on',
+                            kind: 'blocked-on',
               flowId: work.flow.id,
               surface,
               reason,
@@ -4025,7 +3481,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
             task.errored = true
             errors.push({
               doc: work.primary.doc,
-              anchor: work.primary.anchor,
               kind: 'authoring',
               flowId: work.flow.id,
               surface,
@@ -4041,12 +3496,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           // bump instead (one auto-resolution per flow per run, as on the
           // one-shot path).
           if (settleIfUnserved(ref, task)) continue
-          const remainder = reconcileRemaining(taskProgress(state).outstanding, state.repairIssues, outcome.remaining).current
-          if (taskProgress(state).required.some(o => o.caseId) && !remainder.some(o => o.reasonKind === 'assertion')) {
-            task.errored = true
-            fact('author', `${work.flow.id} x ${surface}: retired with ${remainder.length} obligation(s) still open`)
-            continue
-          }
           fact('author', `${work.flow.id} x ${surface}: retired after ${outcome.attempts} attempt(s), ${asLine(outcome.lastEvidence!)}`)
           taintFlow(work.flow.id, surface, work.flow.title, oneLine(outcome.lastEvidence!))
           if (state.pendingFidelityFinding) {
@@ -4060,13 +3509,13 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           } else {
             const finding: GuardBirthFinding = {
               doc: work.primary.doc,
-              anchor: work.primary.anchor,
               title: work.flow.title,
               step: 1,
               expected: "a scenario that verifies the flow's milestones",
               actual: `the flow worker retired the flow after ${outcome.attempts} attempt(s): ${outcome.lastEvidence}`,
               flowId: work.flow.id,
               surface,
+              claimId: work.flow.milestones[0].claimId,
               claim: work.flow.milestones[0].claimTitle,
               autoResolveEscalation: { count: autoResolveCount(key), source: 'worker' },
             }
@@ -4079,7 +3528,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       // A later transport failure cannot discard an independently verified complete test.
       const acceptedById = new Map<string, WorkerStashEntry>()
       for (const entry of stash.values()) {
-        if (entry.fidelityUnreviewed || scenarioFullFlowDefect(entry.candidate.flow.milestones, entry.candidate.scenario.steps, entry.review?.caseEvidence ?? [])) continue
+        if (entry.fidelityUnreviewed || scenarioFullFlowDefect(entry.candidate.flow.milestones, entry.candidate.scenario.steps)) continue
         acceptedById.set(entry.candidate.flow.id, entry)
       }
       for (const entry of acceptedById.values()) {
@@ -4090,7 +3539,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
         if (entry.fidelityUnreviewed) {
           unadjudicatedRefs.add(ref)
           unreviewedScenarioIds.add(candidate.scenario.id)
-          caseEvidenceById.delete(candidate.scenario.id)
           fidelityUnreviewed++
         }
         if (result.outcome === 'pass') {
@@ -4175,25 +3623,9 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
   const settleTotal = changedWorks.length
   const writeWorkingManifest = (): void => {
     const flows = [...workingManifest.values()].sort((a, b) => a.flowId.localeCompare(b.flowId))
-    // The persisted gap record: every LIVE section no flow binds, so the next
-    // planner can tell "seen and deliberately uncovered" from "never seen" —
-    // without it those sections re-enter the work set on every generate. Only a
-    // run that judged the whole universe may recompute it (no extraction
-    // failures, no unsettled areas); a degraded run carries the prior record
-    // forward so pins are never lost to a transient failure. Sections that
-    // vanished or became bound drop out naturally.
-    const wholeUniverseJudged = extractionFailures.length === 0 && synthesis.unsettled.length === 0
-    const boundKeys = new Set(flows.flatMap((f) => f.bindings.map((b) => `${b.doc}\0${b.anchor}`)))
-    const gapSections = wholeUniverseJudged
-      ? plan.sections
-          .filter((s) => !boundKeys.has(`${s.doc}\0${s.anchor}`))
-          .map((s) => ({ doc: s.doc, anchor: s.anchor, fingerprint: s.fingerprint }))
-      : (priorGapSections ?? []).filter((g) => !boundKeys.has(`${g.doc}\0${g.anchor}`))
-    // Every document extraction read, with the content hash its cache entry is
-    // keyed on — what the next generate's claim-diff gate needs to find the
-    // prior extraction of a document whose text has since moved.
+    // Every document read, with the hash of its text.
     const manifestDocs = docs.map((d) => ({ doc: d.doc, contentHash: docContentHash(d.content) }))
-    writeManifest(repoRoot, { flows, gapSections, docs: manifestDocs })
+    writeManifest(repoRoot, { flows, docs: manifestDocs })
   }
 
   // THE SETTLE INVARIANT, enforced at the one place a flow settles: an entry may
@@ -4206,7 +3638,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     if (entry.generationInputsHash === null || unaccounted.length === 0) return entry
     errors.push({
       doc: entry.bindings[0]?.doc ?? entry.flowId,
-      anchor: entry.bindings[0]?.anchor ?? '',
       message: `flow "${entry.flowId}" planned ${unaccounted.join(', ')} but recorded neither a test nor a gap there — left unsettled for the next generate`,
     })
     return { ...entry, generationInputsHash: null }
@@ -4248,47 +3679,14 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     return { hash: flowSettleDigest(components), components, catalogReads }
   }
 
-  /**
-   * An unchanged flow's committed scenarios, re-pinned to the sections the
-   * claim-diff gate judged cosmetic. A bind still at the prior fingerprint the
-   * gate settled against takes the section's current one and the file is
-   * rewritten; a review that held for the old text is re-stamped for the new,
-   * since the claims under it are byte-identical (the gate's finding). Left at
-   * the old fingerprint, the runner calls the scenario stale and never runs it.
-   */
-  const scenarioFiles = claimDiff.cosmetic.size > 0 ? scenarioFileIndex(repoRoot) : new Map<string, string>()
-  const repinCosmetic = (rows: readonly GuardManifestScenario[]): GuardManifestScenario[] =>
-    rows.map((row) => {
-      const scenario = committedScenariosById.get(row.id)
-      const file = scenarioFiles.get(row.id)
-      if (!scenario || !file) return row
-      let repinned = 0
-      const binds = scenario.binds.map((bind) => {
-        const key = flowSectionKey(bind.doc, bind.section)
-        const section = sectionByKey.get(key)
-        if (!section || claimDiff.cosmetic.get(key) !== bind.fingerprint || section.fingerprint === bind.fingerprint) return bind
-        repinned += 1
-        return { ...bind, fingerprint: section.fingerprint }
-      })
-      if (repinned === 0) return row
-      const next = { ...scenario, binds }
-      fs.writeFileSync(file, serializeScenarioYaml(next))
-      committedScenariosById.set(row.id, next)
-      fact('validate', `${row.id}: re-pinned to ${repinned} cosmetically edited section${repinned === 1 ? '' : 's'}`)
-      return row.reviewedScenarioFingerprint === scenarioReviewFingerprint(scenario)
-        ? { ...row, reviewedScenarioFingerprint: scenarioReviewFingerprint(next) }
-        : row
-    })
-
   for (const work of works) {
     if (!work.changed) {
-      // Unchanged: its committed scenarios stand (re-pinned to any section the
-      // gate judged cosmetic), its MATCH-stage gaps are re-derived (the
+      // Unchanged: its committed scenarios stand, its MATCH-stage gaps are re-derived (the
       // author-stage ones were carried forward above, since authoring does not
       // run), and its hash carries so the next generate is a no-op again.
       workingManifest.set(
         work.flow.id,
-        enforceSettleInvariant(manifestEntry(work, repinCosmetic(work.prior?.scenarios ?? []), settleRecord(work))),
+        enforceSettleInvariant(manifestEntry(work, work.prior?.scenarios ?? [], settleRecord(work))),
       )
       const carried = work.prior?.scenarios.length ?? 0
       fact(
@@ -4321,7 +3719,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     const carryPrior = (scenario: GuardManifestScenario): void => {
       if (keptIds.has(scenario.id)) return
       // A retained old test is still a test, but not proof of new requirements.
-      const { milestoneCoverage, caseEvidence, reviewedScenarioFingerprint, reviewPolicyVersion, ...rest } = scenario
+      const { milestoneCoverage, reviewedScenarioFingerprint, ...rest } = scenario
       const current = priorProofCurrent(work, scenario)
       scenarios.push(current ? scenario : rest)
       const doc = committedScenariosById.get(scenario.id)
@@ -4336,7 +3734,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       const dropsHere = dropsByRef.get(ref) ?? []
       for (const d of dropsHere) retired.push({ id: d.id, surface, reason: d.reason })
       const commit = (c: BirthCandidate, status: GuardTestStatus, finding?: GuardBirthFinding): string => {
-        const defect = scenarioFullFlowDefect(work.flow.milestones, c.scenario.steps, caseEvidenceById.get(c.scenario.id) ?? [])
+        const defect = scenarioFullFlowDefect(work.flow.milestones, c.scenario.steps)
         if (defect) throw new Error(`Refusing incomplete current test: ${defect}`)
         if (scenarios.some(s => keptIds.has(s.id))) throw new Error('Refusing a second generated test for one flow')
         const file = writeScenarioFile(repoRoot, slug, c.scenario)
@@ -4344,7 +3742,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           id: c.scenario.id,
           title: c.scenario.title,
           doc: work.primary.doc,
-          anchor: work.primary.anchor,
           file,
           flowId: work.flow.id,
           surface,
@@ -4360,7 +3757,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
           id: c.scenario.id,
           drivers: guardScenarioDrivers(c.scenario),
           milestoneCoverage: scenarioMilestoneProof(c.scenario.steps),
-          caseEvidence: caseEvidenceById.get(c.scenario.id) ?? [], reviewedScenarioFingerprint: scenarioReviewFingerprint(c.scenario), reviewPolicyVersion: GUARD_REVIEW_POLICY_VERSION,
+          reviewedScenarioFingerprint: scenarioReviewFingerprint(c.scenario),
           ...(unreviewedScenarioIds.has(c.scenario.id) ? { reviewed: false } : {}),
           status,
           ...(finding ? { diagnosis: diagnosisOf(finding, file) } : {}),
@@ -4428,28 +3825,20 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     }
     const proof = scenarios.find(s => s.status === 'passing' && s.reviewed !== false && coversFlowMilestones(work.flow.milestones, s.milestoneCoverage ?? []) === true)?.milestoneCoverage ?? []
     const passingProgress = guardCoverageProgress(work.flow.milestones, proof)
-    const isCovered = (o: { milestone: number; caseId?: string }) => !passingProgress.outstanding.some(m =>
-      m.milestone === o.milestone && (!o.caseId || m.caseId === o.caseId))
-    work.gaps = work.gaps.flatMap(g => {
-      if (g.obligations) {
-        const obligations = g.obligations.filter(o => !isCovered(o))
-        return obligations.length ? [{ ...g, obligations, milestones: [...new Set(obligations.map(o => o.milestone))] }] : []
-      }
-      return g.milestones?.every(milestone => isCovered({ milestone })) ? [] : [g]
-    })
+    const isCovered = (milestone: number) => !passingProgress.outstanding.some(m => m.milestone === milestone)
+    work.gaps = work.gaps.filter(g => !g.milestones?.every(isCovered))
     // Reviewed application failures account for authorship without claiming passing coverage.
     const authoredProof = scenarios.find(s => (s.status === 'passing' || s.status === 'failing') && s.reviewed !== false && coversFlowMilestones(work.flow.milestones, s.milestoneCoverage ?? []) === true)?.milestoneCoverage ?? []
     const outstanding = guardCoverageProgress(work.flow.milestones, authoredProof).outstanding
-    if (outstanding.length && (scenarios.length || work.flow.milestones.some(m => m.verification?.cases))) {
+    if (outstanding.length && scenarios.length) {
       unsettledFlow = true
       unsettledReasons.push(`${outstanding.length} milestone obligation(s) unverified`)
       for (const o of outstanding) {
-        if (work.gaps.some(g => g.obligations ? g.obligations.some(r => r.milestone === o.milestone && (!r.caseId || r.caseId === o.caseId)) : g.milestones?.includes(o.milestone))) continue
+        if (work.gaps.some(g => g.milestones?.includes(o.milestone))) continue
         const m = work.flow.milestones.find(m => m.order === o.milestone)!
-        work.gaps.push({ surface: m.proofDrivers?.[0] ?? [...work.plans.keys()][0] ?? 'cli',
-          kind: 'blocked-on', milestones: [m.order], obligations: [{ milestone: o.milestone, ...(o.caseId ? { caseId: o.caseId } : {}) }], blocker: { kind: 'generation' },
-          reason: o.caseId ? `Milestone ${m.order} has unverified case: ${o.caseId} (${o.claim})`
-            : `Milestone ${m.order} has no verified scenario yet: ${m.claimTitle}` })
+        work.gaps.push({ surface: [...work.plans.keys()][0] ?? 'cli',
+          kind: 'blocked-on', milestones: [m.order], blocker: { kind: 'generation' },
+          reason: `Milestone ${m.order} has no verified scenario yet: ${m.claimTitle}` })
       }
     }
     // Now the deletions: every prior id neither re-written nor carried, plus
@@ -4504,7 +3893,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     retiredFlows
       .filter((f) =>
         f.milestones.length > 0 &&
-        f.milestones.every((m) => dismissalByKey.has(dismissedClaimKey(m.doc, m.anchor, m.claimTitle))),
+        f.milestones.every((m) => dismissalByKey.has(m.claimId)),
       )
       .map((f) => f.id),
   )
@@ -4538,9 +3927,7 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
       continue
     }
     const oldFlow = retiredFlows.find(f => f.id === flowId) ?? (prior.milestones?.length ? { milestones: prior.milestones } : undefined)
-    const sourceKey = (m: GuardFlow['milestones'][number], caseId?: string) => `${m.doc}\0${m.anchor}\0${m.claimTitle}\0${caseId ?? ''}`
-    const obligations = (f: { milestones?: GuardFlow['milestones'] }) => (f.milestones ?? []).flatMap(m =>
-      m.verification?.cases?.length ? m.verification.cases.map(c => sourceKey(m, c.id)) : [sourceKey(m)])
+    const obligations = (f: { milestones?: GuardFlow['milestones'] }) => (f.milestones ?? []).map(m => m.claimId)
     const replaced = new Set(synthesis.flows.flatMap(f => {
       const entry = workingManifest.get(f.id)
       return entry?.generationInputsHash && entry.scenarios.length === 1 && coversFlowMilestones(f.milestones, entry.scenarios[0].milestoneCoverage ?? []) === true ? obligations(f) : []
@@ -4614,25 +4001,19 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     if (coverageGaps[i].flowId && liveWorkIds.has(coverageGaps[i].flowId!)) coverageGaps.splice(i, 1)
   }
   for (const work of works) for (const gap of work.gaps) coverageGaps.push({
-    doc: work.primary.doc, anchor: work.primary.anchor, flowId: work.flow.id,
+    flowId: work.flow.id,
     surface: gap.surface, kind: gap.kind, reason: gap.reason,
     ...(gap.driver ? { driver: gap.driver } : {}),
     ...(gap.blocker ? { blocker: gap.blocker } : {}),
     ...(gap.milestones ? { milestones: gap.milestones } : {}),
-    ...(gap.obligations ? { obligations: gap.obligations } : {}),
   })
 
   return {
     status: 'ok',
     recipe: recipeMeta,
     recipeFingerprint,
-    sectionsTotal: plan.sections.length,
-    sectionsChanged: plan.work.length,
-    skippedUnchanged: plan.sections.length - plan.work.length,
     // A prune rewrites a committed file, so it is never a no-op run.
     noChanges: changedWorks.length === 0 && removedFlows === 0 && prunedFlows === 0,
-    cosmeticSections: claimDiff.cosmetic.size,
-    claimDiffCalls: claimDiff.calls,
     matchContextMoved,
     retiredScenarios: retiredReport,
     written,
@@ -4642,7 +4023,6 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
     extractionFailures,
     llmFailures: [...leafTallies(), ...sessionTallies],
     unadjudicated,
-    orphaned: orphanedSections,
     birthPassed,
     orphanedDismissals,
     orphanedFlowDismissals,
@@ -4664,12 +4044,10 @@ export async function generateGuards(options: GenerateGuardsOptions): Promise<Gu
  *  whether its inputs moved since the manifest. */
 interface FlowWork {
   flow: GuardFlow
-  /** The flow's PRIMARY bound section — its first milestone's, for attribution. */
-  primary: SectionInput
-  /** Milestone order → its live section. */
+  /** The flow's PRIMARY document — its first milestone's, for attribution and filing. */
+  primary: FlowPrimaryDoc
+  /** Milestone order → the live section its claim's sentences sit in, when the document holds them. */
   sections: Map<number, SectionInput>
-  /** Every bound section's content key — the flow hash's spec half. */
-  sectionKeys: string[]
   /** The realization plan per surface that has one. */
   plans: Map<GuardDriverId, RealizationPlan>
   /**
@@ -4711,7 +4089,7 @@ function reopenedFlowsReport(changedWorks: readonly FlowWork[]): NonNullable<Gua
 /** "45 flows re-opened: 45 recipe.manifests, 0 sections, 0 interfaces". The
  *  spec and code inputs are always named, so a zero there reads as a finding. */
 function reopenedFlowsLine(reopened: NonNullable<GuardFlowsReport['reopened']>): string {
-  const counts = { sections: 0, interfaces: 0, ...reopened.byInput }
+  const counts = { flow: 0, interfaces: 0, ...reopened.byInput }
   const parts = Object.entries(counts)
     .sort(([a, x], [b, y]) => y - x || a.localeCompare(b))
     .map(([name, n]) => `${n} ${name}`)
@@ -4739,18 +4117,6 @@ function priorScenariosBySurface(work: FlowWork): Map<GuardDriverId, GuardManife
     const list = out.get(owner)
     if (list) list.push(s)
     else out.set(owner, [s])
-  }
-  return out
-}
-
-/** The bound sections whose text moved since the flow's committed entry. */
-function movedSectionsFor(work: FlowWork): { doc: string; anchor: string; heading: string }[] {
-  const priorFp = new Map((work.prior?.bindings ?? []).map((b) => [flowSectionKey(b.doc, b.anchor), b.fingerprint]))
-  const out: { doc: string; anchor: string; heading: string }[] = []
-  for (const b of work.flow.bindings) {
-    if (priorFp.get(flowSectionKey(b.doc, b.anchor)) === b.fingerprint) continue
-    const section = [...work.sections.values()].find((s) => s.doc === b.doc && s.anchor === b.anchor)
-    out.push({ doc: b.doc, anchor: b.anchor, heading: section?.headingText ?? b.anchor })
   }
   return out
 }
@@ -4821,14 +4187,33 @@ function manifestEntry(
   }
 }
 
-/** The flow's first milestone's live section — the attribution pivot. Null when no
- *  milestone's section survives in the live index. */
-function primarySection(flow: GuardFlow, byKey: ReadonlyMap<string, SectionInput>): SectionInput | null {
-  for (const m of [...flow.milestones].sort((a, b) => a.order - b.order)) {
-    const section = byKey.get(flowSectionKey(m.doc, m.anchor))
-    if (section) return section
+/** A flow's primary document: where its findings and errors are filed, and whose area its tests land under. */
+export interface FlowPrimaryDoc {
+  doc: string
+  areaTags: readonly string[]
+}
+
+/** The flow's first milestone's document — the attribution pivot. */
+function primaryDoc(flow: GuardFlow, docByPath: ReadonlyMap<string, GuardDoc>): FlowPrimaryDoc {
+  const first = [...flow.milestones].sort((a, b) => a.order - b.order)[0]
+  return { doc: first.doc, areaTags: docByPath.get(first.doc)?.areaTags ?? [] }
+}
+
+/**
+ * Milestone order → the live section its claim's sentences sit in: the text the
+ * authoring prompts quote around a claim. A milestone whose document is outside
+ * the universe, or whose sentences the document no longer holds, has none.
+ */
+function milestoneSections(flow: GuardFlow, docByPath: ReadonlyMap<string, GuardDoc>): Map<number, SectionInput> {
+  const sections = new Map<number, SectionInput>()
+  for (const m of flow.milestones) {
+    const doc = docByPath.get(m.doc)
+    if (!doc) continue
+    const section = sectionOfSentences(doc.tree, m.sentences)
+    const input = section && doc.sections.find((s) => s.anchor === section.anchor)
+    if (input) sections.set(m.order, input)
   }
-  return null
+  return sections
 }
 
 /** True when this surface reaches the matcher (runnable, prepared, catalog non-empty). */
@@ -4993,10 +4378,6 @@ function fidelityVerdictLine(scenarioId: string, verdict: WorkerFidelityVerdict)
   return `${scenarioId}: fidelity faithful`
 }
 
-function oneLine(text: string): string {
-  const t = asLine(text)
-  return t.length > 120 ? `${t.slice(0, 120)}…` : t
-}
 
 /** The whole of a reason on one line: a fact keeps every word, and the page folds it. */
 function asLine(text: string): string {
@@ -5008,17 +4389,6 @@ function asLine(text: string): string {
 function firstSentence(text: string): string {
   const stop = text.indexOf('. ')
   return stop === -1 ? text : text.slice(0, stop)
-}
-
-/** Group a doc's snapped extraction by anchor: claims per section + notes per section. */
-function groupExtraction(data: DocClaims): {
-  claimsByAnchor: Map<string, DocClaims['claims']>
-  noteByAnchor: Map<string, DocClaims['untestable'][number]>
-} {
-  const claimsByAnchor = new Map<string, DocClaims['claims']>()
-  for (const c of data.claims) pushInto(claimsByAnchor, c.sectionAnchor, c)
-  const noteByAnchor = new Map(data.untestable.map((n) => [n.sectionAnchor, n]))
-  return { claimsByAnchor, noteByAnchor }
 }
 
 /**
@@ -5064,9 +4434,6 @@ function emptyResult(
 ): GuardGenerateResult {
   return {
     status,
-    sectionsTotal: 0,
-    sectionsChanged: 0,
-    skippedUnchanged: 0,
     noChanges: false,
     written: [],
     coverageGaps: [],
@@ -5075,7 +4442,6 @@ function emptyResult(
     extractionFailures: [],
     llmFailures: [],
     unadjudicated: [],
-    orphaned: [],
     birthPassed: 0,
     orphanedDismissals: [],
     orphanedFlowDismissals: [],
@@ -5153,11 +4519,6 @@ function missingPrepNoun(driver: GuardDriverId): string {
   return key === undefined || key === 'entry' ? 'a recipe `entry`' : `a recipe \`${key}\` block`
 }
 
-/** The `dismissed` coverage-gap reason: the subject one-liner, plus the note if any. */
-function dismissedReason(subject: string, note?: string): string {
-  const base = `dismissed: ${oneLine(subject)}`
-  return note ? `${base} — ${oneLine(note)}` : base
-}
 
 // --- Worker pre-flight checkers ---------------------------------------------
 
@@ -5332,10 +4693,9 @@ function workerFidelityBriefing(work: FlowWork, candidate: BirthCandidate, captu
         const section = work.sections.get(m.order)
         return {
           order: m.order,
-          claim: m.caseIds && m.verification?.cases ? m.verification.cases.map(c => c.claim).join('; ') : m.claimTitle,
-          ...(m.verification ? { verification: m.verification } : {}),
+          claim: m.claimTitle,
           doc: m.doc,
-          sectionHeading: section?.headingText ?? m.anchor,
+          sectionHeading: section?.headingText ?? m.doc,
           sectionText: section?.fullText || section?.ownText || '',
         }
       }),
@@ -5344,11 +4704,10 @@ function workerFidelityBriefing(work: FlowWork, candidate: BirthCandidate, captu
   return [
     buildFidelityUserPrompt(ctx),
     '',
-    'SELECTED CASES: ' + JSON.stringify(scenarioMilestoneProof(candidate.scenario.steps)),
-    'PREREQUISITE ELIGIBILITY: ' + JSON.stringify({ eligible: true, requirements: candidate.scenario.prerequisites ?? [] }),
+    'ASSERTED MILESTONES: ' + JSON.stringify(scenarioMilestoneProof(candidate.scenario.steps)),
     'FULL FLOW CONTEXT (not additional claimed coverage):',
     ...work.flow.milestones.map((m) => `${m.order}. ${m.claimTitle}`),
-    'Review every flow milestone and selected source case in this one candidate; require source-grounded setup for every earlier state they depend on. Reject a broken chain, fabricated state, or a title claiming omitted coverage.',
+    'Review every flow milestone in this one candidate; require source-grounded setup for every earlier state they depend on. Reject a broken chain, fabricated state, or a title claiming omitted coverage.',
     '',
     'CONFIRMATION CAPTURE (the engine ran this scenario in a fresh sandbox just now):',
     capture,
@@ -5472,29 +4831,13 @@ function webPreparationCtx(
 }
 
 /** The same preparation contract applies to new submissions, cached and retained proof. */
-function scenarioPreparationDefect(flow: GuardFlow, recipe: Recipe, scenario: Parameters<typeof validateScenarioPreparation>[1]): string | undefined {
-  const defect = validateScenarioPreparation(recipe, scenario)
-  if (defect) return defect
-  for (const proof of scenarioMilestoneProof(scenario.steps)) {
-    const milestone = flow.milestones.find(m => m.order === proof.milestone)
-    for (const c of milestone?.verification?.cases ?? []) {
-      const preparation = verificationCasePreparation(c)
-      if (!proof.checks?.includes(c.id) || !preparation) continue
-      const profile = scenario.setup?.preparation && recipe.preparations?.[scenario.setup.preparation]
-      if (!profile || (preparation === 'empty' && profile.baseline !== 'empty'))
-        return `Case ${proof.milestone}/${c.id} requires setup.preparation selecting a verified ${preparation} private world.`
-    }
-  }
-  return undefined
+function scenarioPreparationDefect(recipe: Recipe, scenario: Parameters<typeof validateScenarioPreparation>[1]): string | undefined {
+  return validateScenarioPreparation(recipe, scenario)
 }
 
-/** Cases assigned to this worker, excluding independently blocked siblings. */
+/** The milestones the plan realizes, which is what this worker is assigned. */
 function assignedMilestones(flow: GuardFlow, plan: RealizationPlan): GuardFlow['milestones'] {
-  return flow.milestones.filter(m => plan.steps.some(s => s.milestone === m.order)).map(m => {
-    if (!m.verification?.cases) return m
-    const checks = new Set(plan.steps.filter(s => s.milestone === m.order).flatMap(s => s.checks ?? []))
-    return { ...m, verification: { ...m.verification, cases: m.verification.cases.filter(c => checks.has(c.id)) } }
-  })
+  return flow.milestones.filter(m => plan.steps.some(s => s.milestone === m.order))
 }
 /** The flow's milestones as authoring sees them, in path order. */
 function authorMilestones(work: FlowWork, plan: RealizationPlan, surface: GuardDriverId): AuthorMilestone[] {
@@ -5511,10 +4854,9 @@ function authorMilestones(work: FlowWork, plan: RealizationPlan, surface: GuardD
       const examples = section ? mineExampleBlocks(section.fullText || section.ownText) : []
       return {
         order: m.order,
-        claim: m.caseIds && m.verification?.cases ? m.verification.cases.map(c => c.claim).join('; ') : m.claimTitle,
-        ...(m.verification ? { verification: m.verification } : {}),
+        claim: m.claimTitle,
         doc: m.doc,
-        sectionHeading: section?.headingText ?? m.anchor,
+        sectionHeading: section?.headingText ?? m.doc,
         sectionText: section?.fullText || section?.ownText || '',
         ...(m.note ? { note: m.note } : {}),
         realization: [...new Set(realization)],
@@ -5712,8 +5054,7 @@ function toFinding(o: {
     ? o.candidate.flow.milestones.find((m) => m.order === failedMilestone)
     : undefined
   return {
-    doc: milestone?.doc ?? o.candidate.section.doc,
-    anchor: milestone?.anchor ?? o.candidate.section.anchor,
+    doc: milestone?.doc ?? o.candidate.primary.doc,
     scenarioId: scenario.id,
     title: scenario.title,
     step,
@@ -5727,7 +5068,7 @@ function toFinding(o: {
     // finding detail shows the commands it ran; `claim` is the dismissal identity,
     // so the detail's Dismiss action can key on it.
     yaml: serializeScenarioYaml(scenario),
-    ...(milestone ? { claim: milestone.claimTitle } : {}),
+    ...(milestone ? { claimId: milestone.claimId, claim: milestone.claimTitle } : {}),
     flowId: o.candidate.flow.id,
     surface: o.candidate.surface,
     ...(failedMilestone ? { failedMilestone } : {}),
@@ -5762,8 +5103,8 @@ function priorMilestonesPassed(scenario: GuardScenario, failingStep: number, fai
 function diagnosisOf(finding: GuardBirthFinding, file: string): GuardScenarioDiagnosis {
   return {
     doc: finding.doc,
-    anchor: finding.anchor,
     title: finding.title,
+    ...(finding.claimId !== undefined ? { claimId: finding.claimId } : {}),
     ...(finding.claim !== undefined ? { claim: finding.claim } : {}),
     step: finding.step,
     expected: finding.expected,
@@ -5794,8 +5135,7 @@ function errorFrom(o: {
 }): GuardGenerateError {
   const f = o.result.failure
   return {
-    doc: o.candidate.section.doc,
-    anchor: o.candidate.section.anchor,
+    doc: o.candidate.primary.doc,
     kind: 'birth',
     flowId: o.candidate.flow.id,
     message: `birth validation error for "${o.candidate.scenario.title}": ${f?.actual ?? 'unknown'}`,
@@ -5812,8 +5152,7 @@ function errorFrom(o: {
  *  It is the one verdict that still refuses the commit — the test is wrong. */
 function fidelityFinding(candidate: BirthCandidate, mismatch: string): GuardBirthFinding {
   return {
-    doc: candidate.section.doc,
-    anchor: candidate.section.anchor,
+    doc: candidate.primary.doc,
     kind: 'fidelity',
     scenarioId: candidate.scenario.id,
     title: candidate.scenario.title,

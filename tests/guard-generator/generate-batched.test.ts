@@ -27,7 +27,7 @@ import { type GuardScenarioResult } from '@truecourse/shared'
 import {
   FAILING_STEPS,
   PASSING_STEPS,
-  extractSessionBy,
+  claimsBy,
   makeTempRepo,
   raw,
   rmrf,
@@ -94,7 +94,7 @@ describe('generateGuards — multi-flow attribution', () => {
       repoRoot: r,
       executor: exec,
       concurrency: 4,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       // alpha passes; beta always fails → beta is committed RED, alpha green.
       flowWorkerSession: submitWorkerSessions((task) =>
         task.flowId === 'alpha' ? raw('a-good', PASSING_STEPS) : { red: raw('b-bad', FAILING_STEPS) },
@@ -107,7 +107,7 @@ describe('generateGuards — multi-flow attribution', () => {
     ])
     expect(res.birthFindings).toHaveLength(1)
     expect(res.birthFindings[0]).toMatchObject({
-      anchor: 'beta',
+      doc: 'docs/b.md',
       flowId: 'beta',
       surface: 'cli',
       title: 'b-bad',
@@ -142,13 +142,13 @@ describe('generateGuards — multi-flow attribution', () => {
       repoRoot: r,
       executor: exec,
       concurrency: 4,
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowWorkerSession: submitWorkerSessions((task) => raw(task.flowId, PASSING_STEPS)),
     })
 
     expect(res.birthFindings).toEqual([])
-    expect(res.errors.some((e) => e.anchor === 'alpha')).toBe(true)
-    expect(res.errors.some((e) => e.anchor === 'beta')).toBe(true)
+    expect(res.errors.some((e) => e.flowId === 'alpha' && e.doc === 'docs/a.md')).toBe(true)
+    expect(res.errors.some((e) => e.flowId === 'beta' && e.doc === 'docs/b.md')).toBe(true)
     expect(res.written).toEqual([])
     // Neither flow settled: an infra error leaves the work for the next generate.
     expect(readManifest(r)!.flows.every((f) => f.generationInputsHash === null)).toBe(true)

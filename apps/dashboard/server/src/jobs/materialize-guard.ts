@@ -21,7 +21,8 @@
  * The RUN job reads the same IN half (the baseline set is what it runs) and
  * leaves its own OUT: the run snapshot as the baseline run, and every
  * scenario's evidence bundle — the transcript and, for a browser run, the
- * screenshots and session video, which travel as bytes.
+ * screenshots and session video, which travel as bytes. A run of the set's
+ * flow tests leaves the same two: its snapshot, and each test's pictures.
  *
  * The recipe, the dependency catalog and the interface catalog are NOT moved
  * here: they belong to setup's bundle, which the job materializes over
@@ -40,11 +41,13 @@ import {
   writeGuardResult as writeCloneGuardResult,
 } from '@truecourse/guard-runner';
 import {
+  FlowTestsFileSchema,
   guardEvidencePaths,
   guardEvidenceVisual,
   type GuardGenerateReport,
   type GuardLatest,
 } from '@truecourse/shared';
+import { flowTestsIndexPath } from '@truecourse/shared/work-tree';
 import {
   readGuardBaselineCommit,
   readGuardDecisions,
@@ -63,7 +66,7 @@ import {
 } from '@truecourse/core/lib/guard-store';
 import {
   readGuardRunFlowSummary,
-  readGuardRunSectionSummary,
+  readGuardRunClaimSummary,
 } from '@truecourse/core/commands/guard-read';
 import { storedScenarioSetFiles } from '@truecourse/core/lib/guard-read-tree';
 import { log } from '@truecourse/core/lib/logger';
@@ -166,15 +169,21 @@ export async function persistGeneratedGuard(
  * `ref`'s commit. The paths are enumerated from both stores that carry them —
  * the report's findings AND the manifest's durable diagnoses — because a
  * no-op generate re-derives its committed rows and only the manifest still
- * points at their transcripts. A pointer whose dir holds nothing is skipped: it
- * may name a run whose tree is long gone.
+ * points at their transcripts. A flow test's accepted run is evidence of the
+ * same kind (its step pictures and session video), pointed at by the tests
+ * index. A pointer whose dir holds nothing is skipped: it may name a run whose
+ * tree is long gone, which is every test this generate kept rather than wrote.
  */
 async function persistBirthEvidence(
   ref: RepoRef,
   treeDir: string,
   report: GuardGenerateReport,
 ): Promise<void> {
-  for (const evidencePath of guardEvidencePaths({ report, manifest: readCloneManifest(treeDir) })) {
+  const paths = new Set([
+    ...guardEvidencePaths({ report, manifest: readCloneManifest(treeDir) }),
+    ...flowTestEvidencePaths(treeDir),
+  ]);
+  for (const evidencePath of paths) {
     const files = collectEvidenceFiles(treeDir, evidencePath);
     if (!files) continue;
     const scenarioSeg = evidencePath.split('/').pop()!;
@@ -190,13 +199,13 @@ async function persistBirthEvidence(
  * the evidence manifest lives on it, and the summaries are derived against the
  * run that is now stored — unless the caller hands them over (`coverage`), as
  * a pull request's check does: its flows are derived from the head's tree, and
- * its sections are nobody's trend.
+ * its claims are nobody's trend.
  */
 export async function persistGuardRun(
   ref: RepoRef,
   treeDir: string,
   run: GuardLatest,
-  opts: { provenance?: VersionProvenance; coverage?: Pick<GuardRunCoverage, 'sections' | 'flows'> } = {},
+  opts: { provenance?: VersionProvenance; coverage?: Pick<GuardRunCoverage, 'claims' | 'flows'> } = {},
 ): Promise<void> {
   // The stored record says where it ran: this is the hosted runner's run.
   const latest: GuardLatest = { ...run, run: { ...run.run, origin: 'hosted' } };
@@ -226,13 +235,62 @@ export async function persistGuardRun(
 }
 
 /**
+ * Lift a run of flow tests out of `treeDir` into the store: the snapshot as a
+ * run of `ref`'s scope, then each test's evidence (its step pictures and
+ * session video), which attaches to that run row. A test whose run kept no
+ * evidence has none stored: it held, and what it showed is what its accepted
+ * run shows. `provenance` is the generate that left the run; the run job's
+ * own opens no session and runs on no model.
+ *
+ * A run of the default branch's scope is a point of Home's trend, so its FLOW
+ * summary is written with it: every flow of the repository as this run's
+ * outcomes leave it. Its section summary is empty, since a test proves a flow
+ * and says nothing of a section. Best-effort, as every coverage summary is:
+ * the run is stored either way.
+ */
+export async function persistFlowTestRun(
+  ref: RepoRef,
+  treeDir: string,
+  run: GuardLatest,
+  provenance: VersionProvenance = { producedByRun: null, model: null },
+): Promise<void> {
+  const latest: GuardLatest = { ...run, run: { ...run.run, origin: 'hosted' } };
+  await writeGuardLatest(ref.repoKey, latest, { scope: ref.scope, provenance });
+  if (ref.scope === undefined) {
+    try {
+      const flows = await readGuardRunFlowSummary(ref.repoKey, latest);
+      if (!flows) {
+        log.warn(
+          `[Guard] no flow summary could be derived for ${ref.repoKey} run ${latest.run.runId}; it stays out of the flow trend`,
+        );
+      }
+      await writeGuardRunCoverage(ref.repoKey, {
+        runId: latest.run.runId,
+        ranAt: latest.run.ranAt,
+        commit: latest.run.commit,
+        claims: {},
+        flows: flows ?? {},
+      });
+    } catch (err) {
+      log.warn(`[Guard] the coverage of ${ref.repoKey} run ${latest.run.runId} was not recorded: ${(err as Error).message}`);
+    }
+  }
+  for (const test of latest.flowTests ?? []) {
+    if (!test.run.evidencePath) continue;
+    const files = collectEvidenceFiles(treeDir, test.run.evidencePath);
+    if (!files) continue;
+    await writeGuardEvidence(ref.repoKey, latest.run.runId, test.flowId, files);
+  }
+}
+
+/**
  * Derive and store ONE run's coverage summaries, which is what Home reads a run
- * as: its SECTIONS, which the changes widget follows, and its FLOWS, which the
+ * as: its CLAIMS, which the changes widget follows, and its FLOWS, which the
  * trend counts.
  *
- * The section summary is what puts the run in history at all — a run without one
- * (no document body to join, nothing the scenario set names) is left out and said
- * so, and nothing is guessed in its place. The flow summary is allowed to be
+ * The claim summary is what puts the run in history at all — a run without one
+ * (no claim corpus to join) is left out and said so, and nothing is guessed in
+ * its place. The flow summary is allowed to be
  * absent on its own: a repository whose flow corpus cannot be read still has a
  * run worth recording, and it is simply not a point of the flow trend. Never
  * fails the run that produced it.
@@ -242,10 +300,10 @@ export async function recordGuardRunCoverage(
   latest: GuardLatest,
 ): Promise<boolean> {
   try {
-    const sections = await readGuardRunSectionSummary(repoKey, latest);
-    if (!sections) {
+    const claims = await readGuardRunClaimSummary(repoKey, latest);
+    if (!claims) {
       log.warn(
-        `[Guard] no section summary could be derived for ${repoKey} run ${latest.run.runId}; it stays out of the trend`,
+        `[Guard] no claim summary could be derived for ${repoKey} run ${latest.run.runId}; it stays out of the trend`,
       );
       return false;
     }
@@ -261,7 +319,7 @@ export async function recordGuardRunCoverage(
       runId: latest.run.runId,
       ranAt: latest.run.ranAt,
       commit: latest.run.commit,
-      sections,
+      claims,
       flows: flows ?? {},
     });
     return true;
@@ -271,6 +329,19 @@ export async function recordGuardRunCoverage(
     );
     return false;
   }
+}
+
+/** The evidence dirs the tree's flow tests point at; none when it has no tests index. */
+function flowTestEvidencePaths(treeDir: string): string[] {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(flowTestsIndexPath(treeDir), 'utf-8'));
+  } catch {
+    return [];
+  }
+  const index = FlowTestsFileSchema.safeParse(raw);
+  if (!index.success) return [];
+  return index.data.tests.flatMap((test) => (test.run?.evidencePath ? [test.run.evidencePath] : []));
 }
 
 /**

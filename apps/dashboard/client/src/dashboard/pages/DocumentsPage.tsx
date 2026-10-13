@@ -168,7 +168,7 @@ export default function DocumentsPage() {
     const byRef = new Map(own.map((row) => [row.ref, row]));
     const moved = pulls.flatMap((pr) => {
       const refs = new Set([
-        ...pr.check.sectionsMoved.map((s) => s.doc),
+        ...pr.check.docsMoved.map((d) => d.doc),
         ...pr.check.conflictsCreated.flatMap((c) => c.docs),
       ]);
       return [...refs].flatMap((ref) => {

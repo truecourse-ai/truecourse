@@ -39,9 +39,12 @@ import { repositoryDocumentsIn, sliceCorpus } from '@truecourse/core/services/co
 import { conflictsCreated } from '@truecourse/core/services/pr-check/compare';
 import { splitRepo, type OctokitClient } from '@truecourse/github-app';
 import {
+  conflictSides,
   isForkPullRequest,
   openConflicts,
+  parseDocTree,
   pullRequestWorkspaceScope,
+  sentencesByKey,
   type CorpusConflict,
   type NotificationLevel,
   type PullRequestCheckConclusion,
@@ -167,7 +170,7 @@ export function createRepoPullRequestCheckTask(
           base: { mergeBase, commit: base, nearestWithBase: null },
           fork,
           conflictsCreated: [],
-          sectionsMoved: [],
+          docsMoved: [],
           repositoriesAffected: [],
           run: null,
           specHalf: 'not-a-source',
@@ -211,6 +214,9 @@ export function createRepoPullRequestCheckTask(
                   workspaceOrgId,
                   driver: llm.driver(),
                   transportMode: llm.mode,
+                  // On Claude Code the scan reviews the head's documents on
+                  // disk and finds conflicts by comparing facts; in API mode it pairs.
+                  ...(llm.mode === 'claude-code' ? { computer: true } : {}),
                   tracker: pipelineTracker(ctx, 'scan', CURATE_STEPS),
                   pullRequest: { repoFullName, number, headSha, checkId: opened.id, scope: workspaceScope, sourceId, documents },
                   ...(ctx.signal ? { signal: ctx.signal } : {}),
@@ -440,11 +446,11 @@ async function scanHead(input: {
 }
 
 /**
- * One created conflict as the report carries it: the doc pair with each
- * side's section anchors — this repository's own document first when one
- * side is one (the one the pull request changed, when both are), with its
- * path and its heading's line at the head, which is where the check's
- * annotation goes — and the repositories whose slices read either side.
+ * One created conflict as the report carries it: the doc pair — this
+ * repository's own document first when one side is one (the one the pull
+ * request changed, when both are), with its path and the line of its disputed
+ * sentence at the head, which is where the check's annotation goes — and the
+ * repositories whose slices read either side.
  */
 function reportConflict(
   conflict: CorpusConflict,
@@ -452,24 +458,23 @@ function reportConflict(
   repos: readonly { repoFullName: string; sourceIds: string[] }[],
 ): PullRequestCheckReport['conflictsCreated'][number] {
   const { source, documents } = scan;
-  const headings = (doc: string): string[] =>
-    (conflict.sections ?? []).filter((s) => s.doc === doc && s.heading !== null).map((s) => s.heading!);
+  const [sideA, sideB] = conflictSides(conflict.a, conflict.b, conflict.sections);
   const ownSides = [conflict.a, conflict.b]
     .map((doc) => ({ doc, parsed: parseContextDocRef(doc) }))
     .filter(({ parsed }) => parsed !== null && source !== null && parsed.sourceId === source.id);
   const own = ownSides.find(({ parsed }) => scan.changed.has(parsed!.docPath)) ?? ownSides[0];
-  const docs: [string, string] =
-    own?.doc === conflict.b ? [conflict.b, conflict.a] : [conflict.a, conflict.b];
+  // A conflict inside one doc keeps its sentences in order: there is no other doc to put first.
+  const flip = own?.doc === conflict.b && conflict.a !== conflict.b;
+  const docs: [string, string] = flip ? [conflict.b, conflict.a] : [conflict.a, conflict.b];
+  const ownSide = (flip ? sideB : sideA)[0];
   const path = own?.parsed?.docPath ?? null;
   const body = path !== null ? documents.get(path) : undefined;
-  const heading = own ? headings(own.doc)[0] : undefined;
-  const line = body !== undefined && heading !== undefined ? headingLine(body, heading) : null;
+  const line = body !== undefined && ownSide !== undefined ? sentenceLine(path!, body, ownSide.sentence) : null;
   const sourcesOf = new Set(
     [conflict.a, conflict.b].map((doc) => parseContextDocRef(doc)?.sourceId).filter((id): id is string => !!id),
   );
   return {
     docs,
-    sections: [headings(docs[0]), headings(docs[1])],
     note: conflict.note,
     area: conflict.area,
     path,
@@ -478,14 +483,8 @@ function reportConflict(
   };
 }
 
-/** The 1-based line of a markdown heading in a body, or null when it is not there. */
-function headingLine(body: string, heading: string): number | null {
-  const wanted = heading.replace(/[`*_~]/g, '').trim().toLowerCase();
-  const lines = body.split('\n');
-  for (let i = 0; i < lines.length; i += 1) {
-    const match = /^[ \t]{0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/.exec(lines[i] ?? '');
-    if (match && match[1]!.replace(/[`*_~]/g, '').trim().toLowerCase() === wanted) return i + 1;
-  }
-  return null;
+/** The 1-based line a sentence (by key) starts on in a body, or null when the body no longer holds it. */
+function sentenceLine(doc: string, body: string, sentence: string): number | null {
+  return sentencesByKey(parseDocTree(doc, body)).get(sentence)?.startLine ?? null;
 }
 

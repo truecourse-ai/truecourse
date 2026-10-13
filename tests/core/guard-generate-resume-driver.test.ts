@@ -4,7 +4,7 @@ import {
 } from '../../packages/core/src/commands/guard-in-process.js';
 import { StepTracker } from '../../packages/core/src/progress.js';
 import { resetSpecStore } from '../../packages/core/src/lib/spec-store.js';
-import { flowStageSeams, makeTempRepo, rmrf, writeCorpus, writeDoc, writeRecipe } from '../guard-generator/helpers.js';
+import { flowStageSeams, makeTempRepo, rmrf, writeClaims, writeCorpus, writeDoc, writeRecipe } from '../guard-generator/helpers.js';
 import { stubDriver } from './spec-scan-session-stub.js';
 import { installMemorySessionRuns, resetSessionRuns } from '../helpers/memory-session-runs.js';
 import { installWorkTreeGuardStore, resetGuardStore } from '../helpers/work-tree-guard-store.js';
@@ -18,6 +18,7 @@ beforeEach(() => {
   writeRecipe(repo);
   writeCorpus(repo, [{ ref: 'docs/cli.md' }]);
   writeDoc(repo, 'docs/cli.md', '## version\n`relkit --version` prints the version and exits 0.\n');
+  writeClaims(repo);
 });
 afterEach(() => {
   resetSessionRuns();
@@ -49,14 +50,4 @@ describe('resume through the generate driver', () => {
     expect(active).toEqual([]);
   });
 
-  it('reports a missing completed extraction result without constructing a session driver', async () => {
-    const { driver, calls } = stubDriver(() => { throw new Error('completed extraction must not run'); });
-    await expect(guardGenerateInProcess(repo, {
-      ...flowStageSeams(repo),
-      extractSession: undefined,
-      driver,
-      resume: { runId: 'old-run', gitRef: '', completedSteps: ['index', 'extract'] },
-    })).rejects.toThrow('Cannot resume: saved extract results are missing');
-    expect(calls).toEqual([]);
-  });
 });

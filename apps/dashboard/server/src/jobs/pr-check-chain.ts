@@ -22,7 +22,7 @@ import {
   readManifest,
 } from '@truecourse/core/lib/guard-store';
 import { readGuardRunFlowSummary } from '@truecourse/core/commands/guard-read';
-import { compareFlows, sectionsMoved } from '@truecourse/core/services/pr-check/compare';
+import { compareFlows, docsMoved } from '@truecourse/core/services/pr-check/compare';
 import { PAUSED_CHECK_OUTPUT, renderCheckOutput, updateCheck, type OctokitClient } from '@truecourse/github-app';
 import {
   isWorldBootFailure,
@@ -293,15 +293,14 @@ export async function compareWithBase(input: {
   };
   const baseManifest = await readManifest(repoFullName, { commitSha: link.baseCommit });
   const moved = baseManifest
-    ? sectionsMoved(baseManifest, headManifest).map((s) => ({
-        doc: s.doc,
-        anchor: s.anchor,
-        flows: s.flowIds.map((id) => ({ id, title: titles.get(id) ?? id })),
+    ? docsMoved(baseManifest, headManifest).map((d) => ({
+        doc: d.doc,
+        flows: d.flowIds.map((id) => ({ id, title: titles.get(id) ?? id })),
       }))
     : [];
   const reason: PullRequestCheckReason =
     newFailures.length > 0 ? 'new-failures' : input.conflictsCreated > 0 ? 'conflict' : 'clean';
-  return { reason, report: { sectionsMoved: moved, run, codeHalf: 'ran' }, guardRunId: latest.run.runId };
+  return { reason, report: { docsMoved: moved, run, codeHalf: 'ran' }, guardRunId: latest.run.runId };
 }
 
 /** The base run's flows as stored beside it, else derived from its snapshot. */

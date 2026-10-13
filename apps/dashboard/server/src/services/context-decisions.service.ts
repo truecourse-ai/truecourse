@@ -34,6 +34,7 @@ import {
   buildCorpusConflicts,
   conflictVerdictFor,
   resolveConflictId,
+  verdictNamesOneSentence,
   type CorpusConflict,
 } from '@truecourse/shared';
 import { captureAction, EVENTS } from '../observability/posthog.js';
@@ -121,14 +122,14 @@ export async function unexcludeDocument(org: string, ref: unknown): Promise<Incl
 /** The verdicts a conflict resolution may carry. */
 export const CONFLICT_VERDICTS = ['a', 'b', 'dismissed'] as const;
 
-/** A verdict on one conflict, keyed by the dispute's two sections. */
+/** A verdict on one conflict, keyed by its two sentences; the quotes ride along for display. */
 export interface ConflictVerdictRequest {
   docA?: string;
-  anchorA?: string | null;
   quoteA?: string;
+  sentenceA?: string;
   docB?: string;
-  anchorB?: string | null;
   quoteB?: string;
+  sentenceB?: string;
   verdict?: unknown;
   note?: string;
 }
@@ -142,21 +143,28 @@ export async function resolveConflict(
   request: ConflictVerdictRequest,
   checks: ConflictChecks,
 ): Promise<ConflictResolution[]> {
-  const { docA, docB, verdict } = request;
-  if (!docA || !docB || docA === docB) {
-    throw new ConflictVerdictError('docA and docB are required and must differ.');
+  const { docA, docB, sentenceA, sentenceB, verdict } = request;
+  if (!docA || !docB) throw new ConflictVerdictError('docA and docB are required.');
+  if (!sentenceA || !sentenceB) throw new ConflictVerdictError('sentenceA and sentenceB are required.');
+  // A conflict inside one document names two of its sentences; one sentence
+  // named twice is no conflict.
+  const sides = {
+    docA,
+    quoteA: request.quoteA,
+    sentenceA,
+    docB,
+    quoteB: request.quoteB,
+    sentenceB,
+  };
+  if (verdictNamesOneSentence(sides)) {
+    throw new ConflictVerdictError('The two sides name one sentence: give two different docs, or two sentences of one doc.');
   }
   if (typeof verdict !== 'string' || !(CONFLICT_VERDICTS as readonly string[]).includes(verdict)) {
     throw new ConflictVerdictError(`verdict must be one of ${CONFLICT_VERDICTS.join(', ')}.`);
   }
   const decisions = await settled(actor.org, () =>
     addWorkspaceConflictResolution(actor.org, {
-      docA,
-      anchorA: request.anchorA ?? null,
-      quoteA: request.quoteA,
-      docB,
-      anchorB: request.anchorB ?? null,
-      quoteB: request.quoteB,
+      ...sides,
       verdict: verdict as ConflictResolution['verdict'],
       resolvedAt: new Date().toISOString(),
       note: request.note,
@@ -178,21 +186,15 @@ export async function resolveConflict(
   return decisions.conflictResolutions ?? [];
 }
 
-/** Undo a conflict verdict, named by the dispute's two sections. */
+/** Undo a conflict verdict, named by its two sentences. */
 export async function unresolveConflict(
   org: string,
-  request: { docA?: string; anchorA?: string | null; docB?: string; anchorB?: string | null },
+  request: Pick<ConflictVerdictRequest, 'docA' | 'sentenceA' | 'docB' | 'sentenceB'>,
 ): Promise<ConflictResolution[]> {
-  const { docA, docB } = request;
+  const { docA, docB, sentenceA, sentenceB } = request;
   if (!docA || !docB) throw new ConflictVerdictError('docA and docB are required.');
-  const decisions = await settled(org, () =>
-    removeWorkspaceConflictResolution(org, {
-      docA,
-      docB,
-      anchorA: request.anchorA ?? null,
-      anchorB: request.anchorB ?? null,
-    }),
-  );
+  if (!sentenceA || !sentenceB) throw new ConflictVerdictError('sentenceA and sentenceB are required.');
+  const decisions = await settled(org, () => removeWorkspaceConflictResolution(org, { docA, sentenceA, docB, sentenceB }));
   return decisions.conflictResolutions ?? [];
 }
 
@@ -219,7 +221,7 @@ export async function readWorkspaceCorpus(org: string): Promise<{
 }
 
 /** One conflict of the workspace corpus, as the shared derivation classifies it. */
-export type WorkspaceConflict = CorpusConflict<CuratedCorpus['areas'][number]['overlaps'][number]>;
+export type WorkspaceConflict = CorpusConflict<CuratedCorpus['areas'][number]['conflicts'][number]>;
 
 /**
  * The workspace corpus's conflicts, each classified open or resolved by the
@@ -260,7 +262,7 @@ export async function resolveConflictById(
   await resolveConflict(
     actor,
     {
-      ...conflictVerdictFor(conflict.overlap, conflict.a, conflict.b, verdict),
+      ...conflictVerdictFor(conflict, conflict.a, conflict.b, verdict),
       ...(note ? { note } : {}),
     },
     checks,
@@ -282,8 +284,8 @@ export async function unresolveConflictById(org: string, id: string): Promise<Wo
         : 'This conflict has no verdict to withdraw.',
     );
   }
-  const { docA, anchorA, docB, anchorB } = conflict.resolution;
-  await unresolveConflict(org, { docA, anchorA, docB, anchorB });
+  const { docA, sentenceA, docB, sentenceB } = conflict.resolution;
+  await unresolveConflict(org, { docA, sentenceA, docB, sentenceB });
   return findWorkspaceConflict(org, id);
 }
 

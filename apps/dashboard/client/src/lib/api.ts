@@ -5,7 +5,6 @@ import type {
   GuardClaimIdentity,
   GuardClaimsView,
   GuardDecisions,
-  GuardDocCoverage,
   GuardFlowDetail,
   GuardFlowsView,
   GuardGenerateReport,
@@ -23,6 +22,7 @@ import type { GuardDependenciesView, GuardDependencyPatch } from '@/types/guard-
 import type {
   ContextBindingsResponse,
   ContextConnectionsResponse,
+  ContextClaimsViewResponse,
   ContextDocumentsViewResponse,
   ContextSource,
   ContextSourceCheck,
@@ -181,28 +181,27 @@ export function getSpecStaleness(repoId: string): Promise<SpecStalenessResponse>
 
 // ---------------------------------------------------------------------------
 // Corpus path (spec-scan redesign) — the curated doc corpus. Areas group docs;
-// an overlap is two same-area docs that may disagree, resolved by a
-// section-scoped verdict (pick-a-side / dismissal) or a force-exclude.
+// a conflict is two same-area docs that disagree, resolved by a
+// verdict (pick-a-side / dismissal) or a force-exclude.
 // ---------------------------------------------------------------------------
 
-export interface SpecOverlapSection {
+export interface SpecConflictSide {
   doc: string;
-  /** Heading of the conflicting section, or null when it lives in the doc's preamble. */
-  heading: string | null;
-  /** The verbatim disputed sentence, when the detector captured one — carried into a
-   *  pick-a-side verdict so the loser's claim is suppressed at guard generate. */
+  /** The disputed words — carried into a pick-a-side verdict so the loser's claim is suppressed at guard generate. */
   quote?: string;
+  /** The sentence key: with the doc, the side's identity. */
+  sentence: string;
 }
 
-/** A section-scoped conflict verdict — pick-a-side ('a'/'b') or dismissal.
- *  Identity is the unordered doc pair + each side's section anchor (+ optional quote). */
+/** A conflict verdict — pick-a-side ('a'/'b') or dismissal. Identity is each
+ *  side's doc and sentence key; the quotes ride along for display. */
 export interface SpecConflictResolution {
   docA: string;
-  anchorA: string | null;
   quoteA?: string;
+  sentenceA: string;
   docB: string;
-  anchorB: string | null;
   quoteB?: string;
+  sentenceB: string;
   verdict: 'a' | 'b' | 'dismissed';
   resolvedAt?: string;
   note?: string;
@@ -215,10 +214,10 @@ export interface SpecConflictResolution {
  * `explanation` is a human-readable account of the disagreement; `recommendation`
  * is a suggested action the user may apply. Absent on unverified/legacy flags.
  */
-export interface SpecOverlapReview {
+export interface SpecConflictReview {
   explanation: string;
   recommendation: {
-    /** 'pick-a' backs the overlap's first doc, 'pick-b' the second. */
+    /** 'pick-a' backs the conflict's first doc, 'pick-b' the second. */
     action: 'pick-a' | 'pick-b' | 'fix-doc' | 'dismiss';
     rationale: string;
     /** For `fix-doc`: the suggested doc edit the user applies themselves. */
@@ -228,18 +227,18 @@ export interface SpecOverlapReview {
   };
 }
 
-export interface SpecOverlap {
+export interface SpecConflict {
   docs: [string, string];
   note: string;
   /** The verify judge's resolution brief, when this flag was reviewed. */
-  review?: SpecOverlapReview;
-  /** Conflicting sections per doc (markdown headings), when known. */
-  sections?: SpecOverlapSection[];
+  review?: SpecConflictReview;
+  /** The sides, one per sentence: the conflict's identity. */
+  sections: SpecConflictSide[];
   /**
-   * Every area this (possibly cross-area-merged) dispute spans. Detection runs
+   * Every area this (possibly cross-area-merged) conflict spans. Detection runs
    * per area, so one disagreement on a pair sharing several areas is flagged in
    * each and merged to one record; a resolution scoped to any spanned area (or an
-   * unscoped one) clears it everywhere. Empty on older corpora.
+   * unscoped one) clears it everywhere.
    */
   areas?: string[];
 }
@@ -273,7 +272,7 @@ export interface SpecCorpusArea {
   product: string;
   concern: string;
   docRefs: string[];
-  overlaps: SpecOverlap[];
+  conflicts: SpecConflict[];
 }
 
 export interface SpecSkippedDoc {
@@ -332,7 +331,7 @@ export interface SpecCorpusResponse {
   manualIncludes?: string[];
   /** Doc refs the user force-excluded (dropped from the corpus). */
   manualExcludes?: string[];
-  /** Section-scoped conflict verdicts — the client derives resolved/dismissed/orphaned state from these. */
+  /** Conflict verdicts — the client derives resolved/dismissed/orphaned state from these. */
   conflictResolutions?: SpecConflictResolution[];
   /**
    * Workspace corpus only: a skipped-docs summary in place of `corpus.skippedDocs`
@@ -552,18 +551,6 @@ export async function getGuardReport(repoId: string, ref?: string): Promise<Guar
   }
 }
 
-/** Per-section coverage over a live spec doc; null on 404 (doc gone / no store). `ref` pins the read at a commit. */
-export async function getGuardCoverage(repoId: string, doc: string, ref?: string): Promise<GuardDocCoverage | null> {
-  try {
-    return await fetchApi<GuardDocCoverage>(
-      withRef(`/api/repos/${repoId}/guard/coverage?doc=${encodeURIComponent(doc)}`, ref),
-    );
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return null;
-    throw e;
-  }
-}
-
 /** The stored scenario inventory + recipe card, read by the flow page. `ref` pins the read at a commit. */
 export function getGuardScenarios(repoId: string, ref?: string): Promise<GuardScenarioInventory> {
   return fetchApi<GuardScenarioInventory>(withRef(`/api/repos/${repoId}/guard/scenarios`, ref));
@@ -680,11 +667,10 @@ export function getGuardDecisions(repoId: string): Promise<GuardDecisions> {
   return fetchApi<GuardDecisions>(`/api/repos/${repoId}/guard/decisions`);
 }
 
-/** The identity a dismissal keys on: doc + section anchor + the extracted claim's
- *  stable text (a finding's `claim`). Re-exported for the guard components. */
+/** The identity a dismissal keys on: the claim's id. Re-exported for the guard components. */
 export type { GuardClaimIdentity };
 
-/** Dismiss a finding's claim — writes `scenarios/decisions.json`; returns the
+/** Dismiss a claim — writes `scenarios/decisions.json`; returns the
  *  updated decisions so the caller re-derives dismissed state without a GET. */
 export function dismissGuardClaim(
   repoId: string,
@@ -696,7 +682,7 @@ export function dismissGuardClaim(
   });
 }
 
-/** Reverse a dismissal by its identity; returns the updated decisions. */
+/** Reverse a dismissal by the claim's id; returns the updated decisions. */
 export function undismissGuardClaim(
   repoId: string,
   claim: GuardClaimIdentity,
@@ -917,6 +903,11 @@ export function listContextDocuments(query: {
   );
 }
 
+/** The rows of the Claims view, folded across repositories on the server. */
+export function listContextClaims(): Promise<ContextClaimsViewResponse> {
+  return fetchApi<ContextClaimsViewResponse>('/api/context/claims');
+}
+
 /** One document's body, by the ref the corpus names it with. */
 export function getContextDoc(ref: string): Promise<{ ref: string; content: string }> {
   return fetchApi<{ ref: string; content: string }>(
@@ -1092,11 +1083,11 @@ export function removeContextExclude(ref: string): Promise<SpecDecisionAck> {
 
 export function postContextConflictResolution(payload: {
   docA: string;
-  anchorA: string | null;
   quoteA?: string;
+  sentenceA: string;
   docB: string;
-  anchorB: string | null;
   quoteB?: string;
+  sentenceB: string;
   verdict: 'a' | 'b' | 'dismissed';
   note?: string;
 }): Promise<SpecConflictAck> {
@@ -1106,11 +1097,12 @@ export function postContextConflictResolution(payload: {
   });
 }
 
+/** Withdraw a verdict, named by its conflict: the two docs and their two sentences. */
 export function deleteContextConflictResolution(payload: {
   docA: string;
-  anchorA: string | null;
+  sentenceA: string;
   docB: string;
-  anchorB: string | null;
+  sentenceB: string;
 }): Promise<SpecConflictAck> {
   return fetchApi<SpecConflictAck>('/api/context/conflict-resolution', {
     method: 'DELETE',

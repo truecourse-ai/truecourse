@@ -29,7 +29,10 @@ import {
   readGuardResultForView,
   computeGuardStaleness,
 } from '../../packages/core/src/commands/guard-read';
-import { guardManifestSections, type GuardGenerateReport } from '../../packages/shared/src/index';
+import type { GuardGenerateReport, GuardManifest } from '../../packages/shared/src/index';
+
+/** The flows a manifest lists, by id. */
+const manifestFlowIds = (manifest: GuardManifest | null): string[] => (manifest?.flows ?? []).map((f) => f.flowId);
 
 const REPO = 'acme/api';
 const DOC = 'docs/spec.md';
@@ -41,8 +44,7 @@ const yaml = (id: string, section: string): string =>
     `title: ${section} claim`,
     'binds:',
     `  - doc: ${DOC}`,
-    `    section: ${section}`,
-    '    fingerprint: "sha256:x"',
+    `    sentences: [${section}]`,
     'driver: cli',
     'steps:',
     '  - run: ["--help"]',
@@ -56,16 +58,12 @@ const RECIPE = { build: 'pnpm build', entry: ['node', 'dist/index.js'] };
 const REPORT = (over: Partial<GuardGenerateReport> = {}): GuardGenerateReport => ({
   generatedAt: '2026-07-06T00:00:00.000Z',
   status: 'ok',
-  sectionsTotal: 1,
-  sectionsChanged: 0,
-  skippedUnchanged: 1,
   noChanges: false,
   written: [],
   coverageGaps: [],
   birthFindings: [],
   errors: [],
   extractionFailures: [],
-  orphaned: [],
   ...over,
 });
 
@@ -88,9 +86,9 @@ async function saveSetFor(
     for (const [id, section, status] of ids) {
       fs.writeFileSync(path.join(src, 'core', `${id}.yaml`), yaml(id, section));
       flows.push({
-        flowId: `${DOC}#${section}`,
+        flowId: section,
         flowFingerprint: 'sha256:x',
-        bindings: [{ doc: DOC, anchor: section, fingerprint: 'sha256:x' }],
+        bindings: [{ doc: DOC, sentences: [section] }],
         scenarios: [{ id, surface: 'cli', ...(status ? { status } : {}) }],
         generationInputsHash: null,
         gaps: [],
@@ -126,17 +124,16 @@ async function makeBaselineRepo(commit: string): Promise<string> {
 /** A stored run at `commit` with a single passing scenario. */
 const RUN = (runId: string, commit: string, ranAt = '2026-07-08T00:00:00.000Z') => ({
   run: { runId, ranAt, branch: 'main', commit, recipeFingerprint: 'sha256:r' },
-  summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
+  summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0, blocked: 0 },
   scenarios: [
     {
       id: 'a1',
       title: 'alpha claim',
-      binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' },
+      binds: { doc: DOC, sentences: ['alpha'] },
       outcome: 'pass' as const,
       durationMs: 1,
     },
   ],
-  sections: [],
 });
 
 beforeEach(async () => {
@@ -165,8 +162,6 @@ describe('listGuardScenarios — commit-scoped (hosted)', () => {
 
     const a = await listGuardScenarios(REPO, 'shaA1234567');
     expect(a.scenarios.map((s) => s.id)).toEqual(['a1']);
-    // Heading text joined via the injected reader (no FS).
-    expect(a.scenarios[0]?.headingText).toBe('Alpha');
 
     const b = await listGuardScenarios(REPO, 'shaB1234567');
     expect(b.scenarios.map((s) => s.id).sort()).toEqual(['b1', 'b2']);
@@ -258,9 +253,8 @@ describe('readGuardRecipeCard via listGuardScenarios — hosted (no working tree
     // NOT compare a hash-of-nothing against it (that made stale permanently true).
     await guardStore.writeGuardLatest(REPO, {
       run: { runId: 'run-base', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'basesha11111', recipeFingerprint: 'sha256:r' },
-      summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
-      scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
-      sections: [],
+      summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0, blocked: 0 },
+      scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, sentences: ['alpha'] }, outcome: 'pass', durationMs: 1 }],
     });
     const inv = await listGuardScenarios(REPO, 'shaA1234567');
     expect(inv.recipe).not.toBeNull();
@@ -405,11 +399,11 @@ describe('coverage/status view reads — PR-head baseline fallback (hosted)', ()
       await saveSetFor(repo, 'baseline9999', [['a1', 'alpha']]);
       // Head miss → the baseline's manifest.
       const viaFallback = await readManifestForView(repo, 'prhead0000');
-      expect(guardManifestSections(viaFallback).map((s) => s.anchor)).toEqual(['alpha']);
+      expect(manifestFlowIds(viaFallback)).toEqual(['alpha']);
       // A head with its own set never falls back.
       await saveSetFor(repo, 'prhead0000', [['pr1', 'beta']]);
       const atHead = await readManifestForView(repo, 'prhead0000');
-      expect(guardManifestSections(atHead).map((s) => s.anchor)).toEqual(['beta']);
+      expect(manifestFlowIds(atHead)).toEqual(['beta']);
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
     }
@@ -450,7 +444,7 @@ describe('repo-level view reads (no ref) — baseline-anchored, never newest (ho
       await saveSetFor(repo, 'prhead0000', [['pr1', 'beta']], PR_SCOPE);
 
       const manifest = await readManifestForView(repo);
-      expect(guardManifestSections(manifest).map((s) => s.anchor)).toEqual(['alpha']);
+      expect(manifestFlowIds(manifest)).toEqual(['alpha']);
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
     }
@@ -484,12 +478,12 @@ describe('repo-level view reads (no ref) — baseline-anchored, never newest (ho
 });
 
 describe('readGuardReport — commit-scoped (hosted)', () => {
-  it('reads the generate report at the ref and joins live section headings', async () => {
+  it('reads the generate report at the ref', async () => {
     await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'shaA1234567' }, REPORT({
-      birthFindings: [{ doc: DOC, anchor: 'alpha', title: 'alpha finding', step: 1, expected: 'x', actual: 'y' }],
+      birthFindings: [{ doc: DOC, title: 'alpha finding', step: 1, expected: 'x', actual: 'y' }],
     }));
     const report = await readGuardReport(REPO, 'shaA1234567');
-    expect(report?.birthFindings[0]).toMatchObject({ anchor: 'alpha', headingText: 'Alpha' });
+    expect(report?.birthFindings[0]).toMatchObject({ doc: DOC, title: 'alpha finding' });
     // A different ref has no report of its own: it falls back to the current one.
     expect((await readGuardReport(REPO, 'othersha1234'))?.birthFindings).toHaveLength(1);
   });
@@ -516,9 +510,8 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'shaA1234567' }, REPORT());
     await guardStore.writeGuardRun(REPO, {
       run: { runId: 'run1', ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit: 'shaA1234567', recipeFingerprint: 'sha256:r' },
-      summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
-      scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
-      sections: [],
+      summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0, blocked: 0 },
+      scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, sentences: ['alpha'] }, outcome: 'pass', durationMs: 1 }],
     });
     const s = await computeGuardStaleness(REPO, 'shaA1234567');
     expect(s).toMatchObject({ hasScenarios: true, hasGenerated: true, hasRun: true, runStale: false });
@@ -529,9 +522,8 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     // A baseline run exists at ANOTHER commit — it must not make the PR head look run.
     await guardStore.writeGuardLatest(REPO, {
       run: { runId: 'run-base', ranAt: '2026-07-07T00:00:00.000Z', branch: 'main', commit: 'basesha11111', recipeFingerprint: 'sha256:r' },
-      summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
-      scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
-      sections: [],
+      summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0, blocked: 0 },
+      scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, sentences: ['alpha'] }, outcome: 'pass', durationMs: 1 }],
     });
     const s = await computeGuardStaleness(REPO, 'shaA1234567');
     expect(s).toMatchObject({ hasScenarios: true, hasRun: false, runStale: true });
@@ -577,9 +569,8 @@ describe('computeGuardStaleness — hosted (store-composed, no FS)', () => {
     await guardStore.writeGuardResult({ repoKey: REPO, commitSha: 'shaA1234567' }, REPORT({ generatedAt: '2026-07-09T00:00:00.000Z' }));
     await guardStore.writeGuardRun(REPO, {
       run: { runId: 'run1', ranAt: '2026-07-08T00:00:00.000Z', branch: 'main', commit: 'shaA1234567', recipeFingerprint: 'sha256:r' },
-      summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0 },
-      scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, section: 'alpha', fingerprint: 'sha256:x' }, outcome: 'pass', durationMs: 1 }],
-      sections: [],
+      summary: { total: 1, pass: 1, fail: 0, stale: 0, orphaned: 0, error: 0, blocked: 0 },
+      scenarios: [{ id: 'a1', title: 'alpha claim', binds: { doc: DOC, sentences: ['alpha'] }, outcome: 'pass', durationMs: 1 }],
     });
     const s = await computeGuardStaleness(REPO, 'shaA1234567');
     expect(s.runStale).toBe(true);

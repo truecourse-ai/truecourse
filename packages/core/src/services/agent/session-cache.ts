@@ -11,8 +11,8 @@
  *
  * - **Author-class sessions CACHE.** A session that produces an artifact from
  *   its inputs (interface authoring, contract extraction, scenario drafting) is
- *   a pure-enough function of those inputs — PROVIDED the key folds the prompt
- *   fingerprint plus EVERY behavior-affecting input (docs, derivations, the
+ *   a pure-enough function of those inputs — PROVIDED the key folds the stage
+ *   version plus EVERY behavior-affecting input (docs, derivations, the
  *   briefing's world). Tool calls never enter the key: they are how the session
  *   reads the inputs the key already names, not inputs of their own.
  * - **Proof-class sessions MUST NOT use this.** Verification, seed proof, auth
@@ -30,21 +30,17 @@
  */
 
 import { createHash } from 'node:crypto'
-import { getCacheEntryOrLegacy, setCacheEntry } from '@truecourse/llm'
+import { getCacheEntry, setCacheEntry } from '@truecourse/llm'
 import type { SessionOutcome } from '@truecourse/agent-loop'
 import type { z } from 'zod'
 
 export interface CachedSessionOptions<TOutcome> {
   repoRoot: string
-  /** Cache directory name, e.g. `'guard/generate'` — reuse a legacy stage's
+  /** Cache directory name, e.g. `'guard/generate'` — reuse a one-shot stage's
    *  name where its keys survive the move to sessions. */
   cacheName: string
   /** sha256 over the stage version + every behavior-affecting input. */
   key: string
-  /** The keys this kind computed before its formula changed, newest formula
-   *  first: a miss reads them in turn and re-saves the hit under `key`.
-   *  Delete with the legacy hash. */
-  legacyKeys?: readonly string[]
   /** The outcome schema of the session kind — gates a cached value on read. */
   schema: z.ZodType<TOutcome>
   /** Runs the session on a miss. Its outcome is returned as-is (and written
@@ -86,14 +82,9 @@ export async function cachedSessionOutcome<TOutcome>(
  * to re-run and overwrite, never to fail the run.
  */
 export async function readCachedSessionOutput<TOutcome>(
-  opts: Pick<CachedSessionOptions<TOutcome>, 'repoRoot' | 'cacheName' | 'key' | 'legacyKeys' | 'schema'>,
+  opts: Pick<CachedSessionOptions<TOutcome>, 'repoRoot' | 'cacheName' | 'key' | 'schema'>,
 ): Promise<TOutcome | null> {
-  const cached = await getCacheEntryOrLegacy(
-    opts.repoRoot,
-    opts.cacheName,
-    opts.key,
-    ...(opts.legacyKeys ?? []),
-  ).catch(() => null)
+  const cached = await getCacheEntry(opts.repoRoot, opts.cacheName, opts.key).catch(() => null)
   if (cached === null) return null
   const parsed = opts.schema.safeParse(cached)
   return parsed.success ? parsed.data : null
@@ -115,9 +106,8 @@ export async function storeCachedSessionOutput<TOutcome>(
  * A system prompt's fingerprint: `sha256(systemPrompt).slice(0, 16)`. NOT a
  * cache-key ingredient any more — a session's output for unchanged inputs is
  * almost always what a reworded prompt would produce too, so each kind folds a
- * hand-bumped STAGE VERSION where this used to sit, and the frozen literals in
- * `../legacy-prompt-fingerprints.js` rebuild the old keys for the fallback read.
- * It survives as the diagnostic it also always was.
+ * hand-bumped STAGE VERSION where this used to sit. It survives as the
+ * diagnostic it also always was.
  */
 export function promptFingerprint(systemPrompt: string): string {
   return createHash('sha256').update(systemPrompt, 'utf-8').digest('hex').slice(0, 16)

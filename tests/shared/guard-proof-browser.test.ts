@@ -12,7 +12,6 @@ describe('guard proof browser boundary', () => {
       write: false,
       logLevel: 'silent',
     })
-    expect(result.outputFiles[0].text).toContain('GuardCaseEvidenceSchema')
     expect(result.outputFiles[0].text).toContain('scenarioMilestoneProof')
   })
 })

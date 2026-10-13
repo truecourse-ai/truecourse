@@ -434,8 +434,7 @@ describe('only: preparations', () => {
     row.inputFingerprint = version === 'legacy'
       ? computeRecipeFingerprint(r)
       : createHash('sha256').update(version === 'postgres-v2' ? 'guard-preparations:2-postgres-database\n' : 'guard-preparations:3-verifier-inputs\n').update(computeRecipeFingerprint(r)).digest('hex');
-    // A row an older build wrote names no inputs, so its fingerprint is what
-    // the gate compares — once.
+    // A row an older build wrote names no inputs, so it is not settled.
     delete row.inputComponents;
     writeGuardSetup(r, old);
     const before = fs.readFileSync(recipePath(r), 'utf8');

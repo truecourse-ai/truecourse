@@ -7,7 +7,7 @@
  */
 
 import {
-  disputeKey,
+  conflictKey,
   openConflicts,
   type CorpusConflict,
   type CorpusLike,
@@ -51,6 +51,10 @@ export function compareFlows(base: GuardRunFlowSummary, head: GuardRunFlowSummar
   });
 }
 
+/** A flow a run proved: it succeeded, with or without healing around a renamed control. */
+const proven = (status: GuardCoveragePlainStatus | null): boolean =>
+  status === 'succeeded' || status === 'partially-succeeded';
+
 function deltaKind(
   base: GuardCoveragePlainStatus | null,
   head: GuardCoveragePlainStatus | null,
@@ -58,16 +62,18 @@ function deltaKind(
   if (head === null) return 'retired';
   if (head === 'failed') return base === 'failed' ? 'pre-existing' : 'new-failure';
   if (base === null) return 'added';
-  if (base === 'failed') return head === 'succeeded' ? 'fixed' : 'unchanged';
-  if (base === 'succeeded' && head === 'blocked') return 'newly-blocked';
-  if (head === 'succeeded' && (base === 'blocked' || base === 'never-run')) return 'newly-covered';
+  if (base === 'failed') return proven(head) ? 'fixed' : 'unchanged';
+  if (proven(base) && head === 'blocked') return 'newly-blocked';
+  if (proven(head) && (base === 'blocked' || base === 'never-run')) return 'newly-covered';
   return 'unchanged';
 }
 
 /**
  * The open conflicts of the head's corpus that the workspace's corpus does not
- * carry, by dispute identity (the doc pair and each side's section anchor).
- * The workspace corpus is its CURRENT one: a corpus has no commit dimension.
+ * carry, by conflict identity (each side's doc and sentence), so a new
+ * disagreement between two sections the workspace already has a conflict on at another
+ * point is a conflict created. The workspace corpus is its CURRENT one: a
+ * corpus has no commit dimension.
  */
 export function conflictsCreated<O extends CorpusConflict>(
   defaultCorpus: CorpusLike | null,
@@ -76,46 +82,44 @@ export function conflictsCreated<O extends CorpusConflict>(
 ): O[] {
   const known = new Set(
     (defaultCorpus ? openConflicts(defaultCorpus, decisions) : []).map((c) =>
-      disputeKey(c.a, c.b, c.sections),
+      conflictKey(c.a, c.b, c.sections),
     ),
   );
-  return prConflicts.filter((c) => !known.has(disputeKey(c.a, c.b, c.sections)));
+  return prConflicts.filter((c) => !known.has(conflictKey(c.a, c.b, c.sections)));
 }
 
-export interface SectionMoved {
+export interface DocMoved {
   doc: string;
-  anchor: string;
-  /** The flows bound to the section at the head. */
+  /** The flows bound to the document at the head whose bound sentences moved. */
   flowIds: string[];
 }
 
 /**
- * The sections both manifests bind whose text fingerprint differs between
- * them — the sections the pull request changed — each with the flows that
- * read it, which go stale with it.
+ * The documents both manifests bind where a head flow's bound sentences differ
+ * from every sentence set the base bound in that document — the documents the
+ * pull request changed under a flow — each with the flows that read it, which
+ * go stale with it.
  */
-export function sectionsMoved(base: GuardManifest | null, head: GuardManifest | null): SectionMoved[] {
-  // Every fingerprint the base bound a section under: two base flows can hold
-  // the same section at different fingerprints (one kept, one re-authored).
+export function docsMoved(base: GuardManifest | null, head: GuardManifest | null): DocMoved[] {
+  // Every sentence set the base bound a document under: two base flows can hold
+  // the same document at different sentences.
   const before = new Map<string, Set<string>>();
   for (const flow of base?.flows ?? []) {
     for (const binding of flow.bindings) {
-      const key = sectionKey(binding.doc, binding.anchor);
-      before.set(key, (before.get(key) ?? new Set()).add(binding.fingerprint));
+      before.set(binding.doc, (before.get(binding.doc) ?? new Set()).add(sentenceSetKey(binding.sentences)));
     }
   }
-  const moved = new Map<string, SectionMoved>();
+  const moved = new Map<string, DocMoved>();
   for (const flow of head?.flows ?? []) {
     for (const binding of flow.bindings) {
-      const key = sectionKey(binding.doc, binding.anchor);
-      const was = before.get(key);
-      if (was === undefined || was.has(binding.fingerprint)) continue;
-      const entry = moved.get(key) ?? { doc: binding.doc, anchor: binding.anchor, flowIds: [] };
+      const was = before.get(binding.doc);
+      if (was === undefined || was.has(sentenceSetKey(binding.sentences))) continue;
+      const entry = moved.get(binding.doc) ?? { doc: binding.doc, flowIds: [] };
       if (!entry.flowIds.includes(flow.flowId)) entry.flowIds.push(flow.flowId);
-      moved.set(key, entry);
+      moved.set(binding.doc, entry);
     }
   }
-  return [...moved.values()].sort((a, b) => sectionKey(a.doc, a.anchor).localeCompare(sectionKey(b.doc, b.anchor)));
+  return [...moved.values()].sort((a, b) => a.doc.localeCompare(b.doc));
 }
 
-const sectionKey = (doc: string, anchor: string): string => `${doc}\0${anchor}`;
+const sentenceSetKey = (sentences: readonly string[]): string => [...sentences].sort().join('\0');

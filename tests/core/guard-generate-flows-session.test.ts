@@ -5,8 +5,8 @@
  * What is pinned here is the SESSION half — the defs through the real
  * `runAgentLoop`, the `check_flows` validator tool, the briefings (claims,
  * outlines, grounding), the cache keys, and the refusal the seam's
- * `rejectOutput` derives. The engine's FOLD (snapping, coverage, subsumption,
- * identity, the wipeout guard) is pinned in `tests/guard-generator/flows.test.ts`
+ * `rejectOutput` derives. The engine's FOLD (claim resolution, coverage,
+ * subsumption, identity, the wipeout guard) is pinned in `tests/guard-generator/flows.test.ts`
  * against the same checker — the two must agree, and the parity case below says
  * so explicitly.
  *
@@ -21,14 +21,11 @@ import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
-import { buildDocSectionIndex } from '@truecourse/guard-runner'
 import {
   checkEpicSet,
   checkFlowSet,
-  collectWorkDocs,
   flowAreaClaimsMaterial,
   flowAreaOutlinesMaterial,
-  flowSectionKey,
   generateGuards,
   isFlowSetClean,
   planGuardWork,
@@ -40,7 +37,7 @@ import {
   type FlowsSessionGrounding,
   type GuardDoc,
 } from '@truecourse/guard-generator'
-import { interfaceFingerprint, type GuardFlow, type Interface } from '@truecourse/shared'
+import { claimId, interfaceFingerprint, parseDocTree, sentenceKey, type GuardFlow, type Interface } from '@truecourse/shared'
 import { runAgentLoop, type SessionRunInput } from '../../packages/agent-loop/src/index'
 import {
   FLOWS_EPIC_SESSION_PROMPT_FINGERPRINT,
@@ -51,7 +48,6 @@ import {
   FLOWS_SESSION_KIND,
   FLOWS_SESSION_PROMPT_FINGERPRINT,
   FLOWS_STAGE_VERSION,
-  flowsSessionLegacyCacheKey,
   FLOWS_SESSION_SYSTEM_PROMPT,
   flowSetRefusalReason,
   flowsEpicSessionBriefing,
@@ -61,13 +57,12 @@ import {
   flowsSessionCacheKey,
   flowsSessionDef,
   flowsSessionWorkItem,
-  type FlowsCheckerContext,
 } from '../../packages/core/src/services/guard-generate/index'
 import { buildGuardDocUniverse } from '../../packages/core/src/services/guard-generate/index'
 import { memoryPersistence, stubDriver, outcome } from './spec-scan-session-stub'
 import {
   DEFAULT_INTERFACES,
-  extractSessionBy,
+  claimsBy,
   flowsAreaSessionOf,
   interfacesOf,
   makeTempRepo,
@@ -90,7 +85,8 @@ function repo(): string {
 }
 
 // ---------------------------------------------------------------------------
-// One real, indexed document — anchors and fingerprints a run would bind.
+// One real document — the sentences its claims are read from, and the outline
+// the session reads it by.
 // ---------------------------------------------------------------------------
 
 const DOC = 'docs/tasks.md'
@@ -110,23 +106,28 @@ const CONTENT = [
   '`relkit done <id>` marks the task complete.',
 ].join('\n')
 
-const INDEX = buildDocSectionIndex(DOC, CONTENT)
-const anchorOf = (heading: string): string => INDEX.sections.find((s) => s.headingText === heading)!.anchor
+const TREE = parseDocTree(DOC, CONTENT)
+const anchorOf = (heading: string): string => TREE.sections.find((s) => s.headingText === heading)!.anchor
 const CREATE = anchorOf('Creating tasks')
 const LIST = anchorOf('Listing tasks')
-const DONE = anchorOf('Completing tasks')
-const SECTION_KEYS = new Set(INDEX.sections.map((s) => flowSectionKey(DOC, s.anchor)))
-const FINGERPRINTS = new Map(INDEX.sections.map((s) => [flowSectionKey(DOC, s.anchor), s.fingerprint]))
 
 const ADD = '`relkit add <title>` creates a task and prints its id'
 const LS = '`relkit list` prints one line per open task'
 const FIN = '`relkit done <id>` marks the task complete'
 
-function claim(anchor: string, title: string, over: Partial<FlowClaimInput> = {}): FlowClaimInput {
-  return { doc: DOC, anchor, title, driver: 'cli', ...over }
+/** The key of the fixture sentence a claim title opens. */
+const sentencesFor = (title: string): string[] => {
+  const s = TREE.sentences.find((x) => x.text.includes(title))!
+  return [sentenceKey(s.text, s.repeat)]
 }
 
-const CLAIMS: FlowClaimInput[] = [claim(CREATE, ADD), claim(LIST, LS), claim(DONE, FIN)]
+function claim(title: string, over: Partial<FlowClaimInput> = {}): FlowClaimInput {
+  const sentences = sentencesFor(title)
+  return { id: claimId(DOC, sentences), doc: DOC, title, sentences, ...over }
+}
+
+const CLAIMS: FlowClaimInput[] = [claim(ADD), claim(LS), claim(FIN)]
+const [C_ADD, C_LS, C_FIN] = CLAIMS
 
 const AREA: FlowSynthesisArea = {
   areaId: 'tasks',
@@ -134,12 +135,15 @@ const AREA: FlowSynthesisArea = {
   docs: [
     {
       doc: DOC,
-      outline: INDEX.sections.map((s) => ({ anchor: s.anchor, headingText: s.headingText, level: s.level })),
+      outline: TREE.sections.map((s) => ({ anchor: s.anchor, headingText: s.headingText, level: s.level })),
     },
   ],
 }
 
-const ms = (anchor: string, claimTitle: string, order: number) => ({ doc: DOC, anchor, claimTitle, order })
+/** A draft milestone naming a claim by id, as the session emits it. */
+const ms = (c: FlowClaimInput | string, order: number) => ({ claimId: typeof c === 'string' ? c : c.id, order })
+/** A committed milestone of an existing flow. */
+const kept = (c: FlowClaimInput, order: number) => ({ order, doc: DOC, claimId: c.id, claimTitle: c.title, sentences: [...c.sentences] })
 
 /** The full lifecycle path — every required claim accounted for. */
 const LIFECYCLE: FlowSet = {
@@ -147,16 +151,14 @@ const LIFECYCLE: FlowSet = {
     {
       title: 'Create, list and complete a task',
       goal: 'A user adds a task, sees it, and completes it.',
-      milestones: [ms(CREATE, ADD, 1), ms(LIST, LS, 2), ms(DONE, FIN, 3)],
+      milestones: [ms(C_ADD, 1), ms(C_LS, 2), ms(C_FIN, 3)],
     },
   ],
   noFlowClaims: [],
 }
 
-const CHECKER: FlowsCheckerContext = { sectionKeys: SECTION_KEYS, catalogNames: new Set<string>() }
-
 function universeOf(r: string): { universe: ReturnType<typeof buildGuardDocUniverse>; docs: GuardDoc[] } {
-  const docs = collectWorkDocs(r, planGuardWork(r))
+  const docs = planGuardWork(r).docs
   return { universe: buildGuardDocUniverse(docs), docs }
 }
 
@@ -194,7 +196,7 @@ describe('guard-generate.flows — the area session through the loop', () => {
         {
           title: 'Invented',
           goal: 'asserts something extraction never produced',
-          milestones: [ms(CREATE, '`relkit archive` hides a task from every list', 1)],
+          milestones: [ms('claim::docs/tasks.md::archive', 1)],
         },
       ],
       noFlowClaims: [],
@@ -209,7 +211,7 @@ describe('guard-generate.flows — the area session through the loop', () => {
     })
     const { persistence } = memoryPersistence()
     const settled = await runAgentLoop<FlowSet>({
-      def: flowsSessionDef({ area: AREA, universe, checker: CHECKER }),
+      def: flowsSessionDef({ area: AREA, universe }),
       workItem: flowsSessionWorkItem(AREA.areaId),
       initialMessages: [flowsSessionBriefing(AREA, undefined)],
       driver,
@@ -219,7 +221,7 @@ describe('guard-generate.flows — the area session through the loop', () => {
 
     expect(first!.isError).toBe(true)
     expect(first!.content).toContain('matched no claim')
-    expect(first!.content).toContain('relkit archive')
+    expect(first!.content).toContain('claim::docs/tasks.md::archive')
     expect(second!.isError).toBeUndefined()
     expect(second!.content).toContain('produce it as the outcome')
     expect(settled.status).toBe('completed')
@@ -233,19 +235,15 @@ describe('guard-generate.flows — the area session through the loop', () => {
       title: 'Create, list and complete a task',
       goal: 'A user adds a task, sees it, and completes it.',
       fingerprint: 'sha256:f',
-      milestones: [
-        { order: 1, doc: DOC, anchor: CREATE, claimTitle: ADD },
-        { order: 2, doc: DOC, anchor: LIST, claimTitle: LS },
-        { order: 3, doc: DOC, anchor: DONE, claimTitle: FIN },
-      ],
-      bindings: [{ doc: DOC, anchor: CREATE, fingerprint: 'sha256:s' }],
+      milestones: [kept(C_ADD, 1), kept(C_LS, 2), kept(C_FIN, 3)],
+      bindings: [{ doc: DOC, sentences: CLAIMS.flatMap((c) => c.sentences) }],
       composedOf: [],
       synthesisInputsHash: 'sha256:i',
     }
     // The same journey, shortened, re-emitted with no id and no retirement.
     const reinvented: FlowSet = {
-      flows: [{ title: 'Add and list', goal: 'Reinvented.', milestones: [ms(CREATE, ADD, 1), ms(LIST, LS, 2)] }],
-      noFlowClaims: [{ doc: DOC, anchor: DONE, claimTitle: FIN, reason: 'not a user path' }],
+      flows: [{ title: 'Add and list', goal: 'Reinvented.', milestones: [ms(C_ADD, 1), ms(C_LS, 2)] }],
+      noFlowClaims: [{ claimId: C_FIN.id, reason: 'not a user path' }],
     }
     const continued: FlowSet = { flows: [{ ...reinvented.flows[0], id: existing.id }], noFlowClaims: reinvented.noFlowClaims }
     let refused: { content: string; isError?: boolean } | undefined
@@ -257,7 +255,7 @@ describe('guard-generate.flows — the area session through the loop', () => {
     })
     const { persistence } = memoryPersistence()
     const settled = await runAgentLoop<FlowSet>({
-      def: flowsSessionDef({ area: AREA, universe, checker: CHECKER, prior: [existing] }),
+      def: flowsSessionDef({ area: AREA, universe, prior: [existing] }),
       workItem: flowsSessionWorkItem(AREA.areaId),
       initialMessages: [flowsSessionBriefing(AREA, undefined, [existing])],
       driver,
@@ -277,7 +275,7 @@ describe('guard-generate.flows — the area session through the loop', () => {
   it('refuses an outcome produced without `check_flows`, exactly once', async () => {
     const r = docRepo()
     const { universe } = universeOf(r)
-    const def = flowsSessionDef({ area: AREA, universe, checker: CHECKER })
+    const def = flowsSessionDef({ area: AREA, universe })
     expect(def.outcomePrecondition?.tool).toBe('check_flows')
 
     const stub = stubDriver(async () => outcome(LIFECYCLE))
@@ -299,7 +297,7 @@ describe('guard-generate.flows — the area session through the loop', () => {
   it('the area session reads sections; the epic session has only its checker', async () => {
     const r = docRepo()
     const { universe } = universeOf(r)
-    const area = flowsSessionDef({ area: AREA, universe, checker: CHECKER })
+    const area = flowsSessionDef({ area: AREA, universe })
     expect(area.tools.map((t) => t.name).sort()).toEqual(['check_flows', 'read_section'])
     expect(area.budget).toEqual({ turns: 12, maxResumes: 1, tokenCeiling: 150_000 })
     expect(FLOWS_SESSION_BUDGET).toEqual(area.budget)
@@ -313,7 +311,7 @@ describe('guard-generate.flows — the area session through the loop', () => {
   it('`read_section` opens an area doc by anchor and names the outline when it cannot', async () => {
     const r = docRepo()
     const { universe } = universeOf(r)
-    const def = flowsSessionDef({ area: AREA, universe, checker: CHECKER })
+    const def = flowsSessionDef({ area: AREA, universe })
     const tool = def.tools.find((t) => t.name === 'read_section')!
     const ctx = { workItem: '', signal: new AbortController().signal, dispatchChild: () => {
       throw new Error('unused')
@@ -334,47 +332,40 @@ describe('guard-generate.flows — the area session through the loop', () => {
 // ---------------------------------------------------------------------------
 
 describe('checkFlowSet — the tool and the fold agree', () => {
-  it('accepts a paraphrased-but-containable milestone (no defect, snapped in the fold)', async () => {
-    const paraphrased: FlowSet = {
-      flows: [
-        {
-          title: 'Create and list',
-          goal: 'a user adds a task and sees it',
-          // Case, whitespace and a trailing period the model added; the second
-          // is a unique containment match inside its section.
-          milestones: [ms(CREATE, `  ${ADD.toUpperCase()}.  `, 1), ms(LIST, '`relkit list` prints one line', 2)],
-        },
-      ],
-      noFlowClaims: [{ doc: DOC, anchor: DONE, claimTitle: FIN, reason: 'a later path covers it' }],
+  it('accepts milestones that name given claims by id, and the fold binds them to the inventory', async () => {
+    const byId: FlowSet = {
+      flows: [{ title: 'Create and list', goal: 'a user adds a task and sees it', milestones: [ms(C_ADD, 1), ms(C_LS, 2)] }],
+      noFlowClaims: [{ claimId: C_FIN.id, reason: 'a later path covers it' }],
     }
-    const report = checkFlowSet(paraphrased, { area: AREA, ...CHECKER })
+    const report = checkFlowSet(byId, { area: AREA })
     expect(report.unknownReferences).toEqual([])
     expect(report.uncoveredClaims).toEqual([])
     expect(isFlowSetClean(report)).toBe(true)
     expect(flowSetRefusalReason(report)).toBeNull()
 
-    // The fold snaps back to the inventory's canonical text.
     const r = repo()
     const res = await synthesizeFlows({
       repoRoot: r,
       areas: [AREA],
-      areaSession: flowsAreaSessionOf(() => paraphrased),
+      areaSession: flowsAreaSessionOf(() => byId),
       epicSession: noEpicSessions,
-      sectionFingerprints: FINGERPRINTS,
       now: () => new Date('2026-01-01T00:00:00.000Z'),
     })
     expect(res.unsettled).toEqual([])
-    expect(res.flows[0].milestones.map((m) => m.claimTitle)).toEqual([ADD, LS])
+    expect(res.flows[0].milestones.map((m) => [m.claimId, m.claimTitle, m.sentences])).toEqual([
+      [C_ADD.id, ADD, C_ADD.sentences],
+      [C_LS.id, LS, C_LS.sentences],
+    ])
   })
 
-  it('names an unknown milestone, and the fold refuses the same area for it', async () => {
+  it('names a milestone that cites a claim by its text instead of its id, and the fold refuses the area for it', async () => {
     const dirty: FlowSet = {
-      flows: [{ title: 'Invented', goal: 'g', milestones: [ms(CREATE, 'relkit archive hides a task', 1)] }],
+      flows: [{ title: 'Invented', goal: 'g', milestones: [ms(ADD, 1)] }],
       noFlowClaims: [],
     }
-    const report = checkFlowSet(dirty, { area: AREA, ...CHECKER })
+    const report = checkFlowSet(dirty, { area: AREA })
     expect(report.unknownReferences).toHaveLength(1)
-    expect(report.unknownReferences[0]).toContain('relkit archive')
+    expect(report.unknownReferences[0]).toContain(ADD)
     expect(isFlowSetClean(report)).toBe(false)
     expect(flowSetRefusalReason(report)).toContain('flow synthesis refused: 1 milestone(s) matched no claim')
 
@@ -384,7 +375,6 @@ describe('checkFlowSet — the tool and the fold agree', () => {
       areas: [AREA],
       areaSession: flowsAreaSessionOf(() => dirty),
       epicSession: noEpicSessions,
-      sectionFingerprints: FINGERPRINTS,
     })
     expect(res.flows).toEqual([])
     expect(res.unsettled[0].areaId).toBe('tasks')
@@ -394,10 +384,10 @@ describe('checkFlowSet — the tool and the fold agree', () => {
 
   it('names an unaccounted REQUIRED claim, and the fold refuses for it too', async () => {
     const partial: FlowSet = {
-      flows: [{ title: 'Create only', goal: 'g', milestones: [ms(CREATE, ADD, 1)] }],
+      flows: [{ title: 'Create only', goal: 'g', milestones: [ms(C_ADD, 1)] }],
       noFlowClaims: [],
     }
-    const report = checkFlowSet(partial, { area: AREA, ...CHECKER })
+    const report = checkFlowSet(partial, { area: AREA })
     expect(report.uncoveredClaims).toHaveLength(2)
     expect(flowSetRefusalReason(report)).toContain('2 claim(s) left unaccounted')
 
@@ -407,46 +397,14 @@ describe('checkFlowSet — the tool and the fold agree', () => {
       areas: [AREA],
       areaSession: flowsAreaSessionOf(() => partial),
       epicSession: noEpicSessions,
-      sectionFingerprints: FINGERPRINTS,
     })
     expect(res.unsettled[0].reason).toContain('claim(s) left unaccounted')
-  })
-
-  it('does NOT count a non-runnable claim toward coverage', () => {
-    const withTui: FlowSynthesisArea = { ...AREA, claims: [...CLAIMS, claim(LIST, 'the board shows one card per task', { driver: 'tui' })] }
-    const report = checkFlowSet(LIFECYCLE, { area: withTui, ...CHECKER })
-    expect(report.uncoveredClaims).toEqual([])
-    expect(isFlowSetClean(report)).toBe(true)
-  })
-
-  it('reports unbindable milestones and unbound needs as OBSERVATIONS only', () => {
-    const area: FlowSynthesisArea = {
-      ...AREA,
-      claims: [
-        claim(CREATE, ADD, { needs: [{ kind: 'credential', name: 'github-token' }] }),
-        claim(LIST, LS),
-        claim(DONE, FIN),
-      ],
-    }
-    const report = checkFlowSet(LIFECYCLE, {
-      area,
-      // The `Creating tasks` section has left the live index.
-      sectionKeys: new Set([flowSectionKey(DOC, LIST), flowSectionKey(DOC, DONE)]),
-      catalogNames: new Set(['a-project']),
-    })
-    expect(report.unbindable).toHaveLength(1)
-    expect(report.unbindable[0]).toContain(CREATE)
-    expect(report.unboundNeeds).toHaveLength(1)
-    expect(report.unboundNeeds[0]).toContain('github-token')
-    // Neither refuses.
-    expect(isFlowSetClean(report)).toBe(true)
-    expect(flowSetRefusalReason(report)).toBeNull()
   })
 
   it('the tool renders refusals as isError and observations as notes', async () => {
     const r = docRepo()
     const { universe } = universeOf(r)
-    const def = flowsSessionDef({ area: AREA, universe, checker: CHECKER })
+    const def = flowsSessionDef({ area: AREA, universe })
     const tool = def.tools.find((t) => t.name === 'check_flows')!
     const ctx = { workItem: '', signal: new AbortController().signal, dispatchChild: () => {
       throw new Error('unused')
@@ -460,7 +418,7 @@ describe('checkFlowSet — the tool and the fold agree', () => {
     const dup: FlowSet = {
       flows: [
         ...LIFECYCLE.flows,
-        { title: 'Create and list', goal: 'g', milestones: [ms(CREATE, ADD, 1), ms(LIST, LS, 2)] },
+        { title: 'Create and list', goal: 'g', milestones: [ms(C_ADD, 1), ms(C_LS, 2)] },
       ],
       noFlowClaims: [],
     }
@@ -470,7 +428,7 @@ describe('checkFlowSet — the tool and the fold agree', () => {
     expect(noted.content).not.toContain('the engine will drop it')
 
     const bad = await tool.execute(
-      { flows: [{ title: 'x', goal: 'g', milestones: [ms(CREATE, 'nothing like a claim here', 1)] }], noFlowClaims: [] },
+      { flows: [{ title: 'x', goal: 'g', milestones: [ms('claim::docs/tasks.md::nothing', 1)] }], noFlowClaims: [] },
       ctx,
     )
     expect(bad.isError).toBe(true)
@@ -483,8 +441,8 @@ describe('checkFlowSet — the tool and the fold agree', () => {
 // ---------------------------------------------------------------------------
 
 const DIGESTS: FlowDigest[] = [
-  { ref: 'F1', areaId: 'tasks', title: 'Create a task', goal: 'g', milestones: [{ doc: DOC, anchor: CREATE, claimTitle: ADD }] },
-  { ref: 'F2', areaId: 'accounts', title: 'List tasks', goal: 'g', milestones: [{ doc: DOC, anchor: LIST, claimTitle: LS }] },
+  { ref: 'F1', areaId: 'tasks', title: 'Create a task', goal: 'g', milestones: [{ doc: DOC, claimId: C_ADD.id, claimTitle: ADD, sentences: [...C_ADD.sentences] }] },
+  { ref: 'F2', areaId: 'accounts', title: 'List tasks', goal: 'g', milestones: [{ doc: DOC, claimId: C_LS.id, claimTitle: LS, sentences: [...C_LS.sentences] }] },
 ]
 
 describe('checkEpicSet', () => {
@@ -496,7 +454,7 @@ describe('checkEpicSet', () => {
             title: 'Onboard',
             goal: 'g',
             composedOf: ['F1', 'F2'],
-            milestones: [{ doc: DOC, anchor: CREATE, claimTitle: ADD, order: 1 }, { doc: DOC, anchor: DONE, claimTitle: FIN, order: 2 }],
+            milestones: [ms(C_ADD, 1), ms(C_FIN, 2)],
           },
         ],
       },
@@ -504,12 +462,12 @@ describe('checkEpicSet', () => {
       CLAIMS,
     )
     expect(unknownReferences).toHaveLength(1)
-    expect(unknownReferences[0]).toContain(FIN)
+    expect(unknownReferences[0]).toContain(C_FIN.id)
   })
 
   it('reports the det DROP rules as notes, never refusals', () => {
     const fewRefs = checkEpicSet(
-      { epics: [{ title: 'Thin', goal: 'g', composedOf: ['F1'], milestones: [{ doc: DOC, anchor: CREATE, claimTitle: ADD, order: 1 }] }] },
+      { epics: [{ title: 'Thin', goal: 'g', composedOf: ['F1'], milestones: [ms(C_ADD, 1)] }] },
       DIGESTS,
       CLAIMS,
     )
@@ -517,7 +475,7 @@ describe('checkEpicSet', () => {
     expect(fewRefs.notes[0]).toContain('fewer than two known flows')
 
     const fewMilestones = checkEpicSet(
-      { epics: [{ title: 'Thin', goal: 'g', composedOf: ['F1', 'F2'], milestones: [{ doc: DOC, anchor: CREATE, claimTitle: ADD, order: 1 }] }] },
+      { epics: [{ title: 'Thin', goal: 'g', composedOf: ['F1', 'F2'], milestones: [ms(C_ADD, 1)] }] },
       DIGESTS,
       CLAIMS,
     )
@@ -568,22 +526,8 @@ describe('flowsSessionBriefing', () => {
     expect(briefing).toContain('DOCUMENT OUTLINES')
     expect(briefing).toContain(`${CREATE} — Creating tasks`)
     expect(briefing).toContain('CLAIMS IN THIS AREA')
-    expect(briefing).toContain(`claim: ${ADD}`)
-    expect(briefing).toContain('account: required')
+    expect(briefing).toContain(`claimId: ${C_ADD.id}\ndoc: ${DOC}\nclaim: ${ADD}`)
     expect(briefing).toContain('Check the draft with `check_flows`')
-  })
-
-  it('marks a non-runnable claim optional', () => {
-    const area: FlowSynthesisArea = { ...AREA, claims: [claim(LIST, 'the board shows a card', { driver: 'tui' })] }
-    expect(flowsSessionBriefing(area, undefined)).toContain('account: optional')
-  })
-
-  it('renders a claim’s needs inline', () => {
-    const area: FlowSynthesisArea = {
-      ...AREA,
-      claims: [claim(CREATE, ADD, { needs: [{ kind: 'credential', name: 'github-token' }, { kind: 'fixture', name: 'sample-repo' }] })],
-    }
-    expect(flowsSessionBriefing(area, undefined)).toContain('needs: credential github-token; fixture sample-repo')
   })
 
   it('renders the grounding block and caps digests at 40 per surface', () => {
@@ -610,11 +554,8 @@ describe('flowsSessionBriefing', () => {
       goal: 'A user adds a task, sees it, and completes it.',
       startingState: { stepCreatable: ['a task'], seedable: [], supplied: [] },
       fingerprint: 'sha256:f',
-      milestones: [
-        { order: 2, doc: DOC, anchor: LIST, claimTitle: LS },
-        { order: 1, doc: DOC, anchor: CREATE, claimTitle: ADD, caseIds: ['c1'] },
-      ],
-      bindings: [{ doc: DOC, anchor: CREATE, fingerprint: 'sha256:s' }],
+      milestones: [kept(C_LS, 2), kept(C_ADD, 1)],
+      bindings: [{ doc: DOC, sentences: [...C_ADD.sentences, ...C_LS.sentences] }],
       composedOf: [],
       synthesisInputsHash: 'sha256:i',
     }
@@ -622,20 +563,20 @@ describe('flowsSessionBriefing', () => {
     expect(briefing).toContain('EXISTING FLOWS OF THIS AREA — 1 flow(s)')
     expect(briefing).toContain('id: create-list-and-complete-a-task')
     expect(briefing).toContain('startingState: {"stepCreatable":["a task"],"seedable":[],"supplied":[]}')
-    // Milestones in path order, with the case selection.
-    expect(briefing.indexOf(`1. ${DOC}#${CREATE} — ${ADD} [caseIds: c1]`)).toBeLessThan(briefing.indexOf(`2. ${DOC}#${LIST} — ${LS}`))
+    // Milestones in path order.
+    expect(briefing.indexOf(`1. ${C_ADD.id} — ${ADD}`)).toBeLessThan(briefing.indexOf(`2. ${C_LS.id} — ${LS}`))
     expect(flowsSessionBriefing(AREA, undefined)).not.toContain('EXISTING FLOWS')
   })
 
   it('renders the existing no-flow decisions with their reasons, and the refusal names one dropped in silence', () => {
-    const decision = { doc: DOC, anchor: LIST, claimTitle: LS, reason: 'a static property, not a user path' }
+    const decision = { claimId: C_LS.id, reason: 'a static property, not a user path' }
     expect(flowsSessionBriefing(AREA, undefined)).not.toContain('EXISTING NO-FLOW DECISIONS')
     const briefing = flowsSessionBriefing(AREA, undefined, [], [decision])
     expect(briefing).toContain('EXISTING NO-FLOW DECISIONS OF THIS AREA — 1 claim(s) deliberately in no flow.')
-    expect(briefing).toContain(`  ${DOC}#${LIST} — ${LS} — a static property, not a user path`)
+    expect(briefing).toContain(`  ${C_LS.id} — a static property, not a user path`)
 
-    const dropped: FlowSet = { flows: [{ title: 'Create and finish', goal: 'g', milestones: [ms(CREATE, ADD, 1), ms(DONE, FIN, 2)] }], noFlowClaims: [] }
-    const report = checkFlowSet(dropped, { area: AREA, ...CHECKER, priorNoFlow: [decision] })
+    const dropped: FlowSet = { flows: [{ title: 'Create and finish', goal: 'g', milestones: [ms(C_ADD, 1), ms(C_FIN, 2)] }], noFlowClaims: [] }
+    const report = checkFlowSet(dropped, { area: AREA, priorNoFlow: [decision] })
     expect(report.unaccountedNoFlow).toHaveLength(1)
     expect(flowSetRefusalReason(report)).toContain('1 existing no-flow decision(s) left unaccounted')
   })
@@ -644,7 +585,7 @@ describe('flowsSessionBriefing', () => {
     const briefing = flowsEpicSessionBriefing(DIGESTS)
     expect(briefing).toContain('--- F1  (area: tasks)')
     expect(briefing).toContain('title: Create a task')
-    expect(briefing).toContain(`1. ${DOC}#${CREATE} — ${ADD}`)
+    expect(briefing).toContain(`1. ${C_ADD.id} — ${ADD}`)
     expect(briefing).not.toContain('relkit list` prints one line per open task, newest first')
   })
 })
@@ -660,9 +601,6 @@ describe('the session cache keys', () => {
       `flows-v${FLOWS_STAGE_VERSION}::${AREA.areaId}::${sha(flowAreaClaimsMaterial(AREA))}::${sha(flowAreaOutlinesMaterial(AREA))}`,
     )
     expect(flowsSessionCacheKey(AREA)).toBe(expected)
-    // The old key stays computable, so a synthesized area is not re-synthesized
-    // on the way over.
-    expect(flowsSessionLegacyCacheKey(AREA)).not.toBe(expected)
   })
 
   it('is the same key whatever the existing flows are — they supply identity, not an answer', () => {
@@ -678,20 +616,6 @@ describe('the session cache keys', () => {
     expect(flowsSessionCacheKey({ ...AREA, areaId: 'other' })).not.toBe(base)
     expect(flowsSessionCacheKey({ ...AREA, claims: CLAIMS.slice(0, 2) })).not.toBe(base)
     expect(flowsSessionCacheKey({ ...AREA, docs: [{ ...AREA.docs[0], outline: AREA.docs[0].outline.slice(1) }] })).not.toBe(base)
-  })
-
-  it('moves when a claim gains needs, and not otherwise', () => {
-    const base = flowsSessionCacheKey(AREA)
-    const withNeeds: FlowSynthesisArea = {
-      ...AREA,
-      claims: [claim(CREATE, ADD, { needs: [{ kind: 'credential', name: 'github-token' }] }), claim(LIST, LS), claim(DONE, FIN)],
-    }
-    expect(flowsSessionCacheKey(withNeeds)).not.toBe(base)
-    // An EMPTY needs array is the same as none — a one-shot-era inventory keys
-    // byte-identically to before needs existed.
-    const emptyNeeds: FlowSynthesisArea = { ...AREA, claims: CLAIMS.map((c) => ({ ...c, needs: [] })) }
-    expect(flowAreaClaimsMaterial(emptyNeeds)).toBe(flowAreaClaimsMaterial(AREA))
-    expect(flowsSessionCacheKey(emptyNeeds)).toBe(base)
   })
 
   it('the claims material is order-independent and sorted', () => {
@@ -715,15 +639,14 @@ describe('the session cache keys', () => {
 })
 
 describe('the flows system prompts', () => {
-  it('keeps the binding rule: a milestone COPIES a given claim', () => {
-    expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('COPIES one given claim')
+  it('keeps the binding rule: a milestone names a given claim by its id', () => {
+    expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('Each milestone names one given claim by its `claimId`, copied VERBATIM')
     expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('Never invent or rewrite a claim')
     expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('Milestones still come ONLY from the claims')
   })
 
   it('states the coverage honesty rule', () => {
     expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('# Coverage honesty')
-    expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('account: required')
     expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('noFlowClaims')
     expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('One flow has ONE coherent goal')
   })
@@ -772,7 +695,7 @@ describe('the procedure gate', () => {
       repoRoot: r,
       stopAfterFlows: true,
       interfaces: interfacesOf(r, plainApiInterface(), procedureInterface()),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowsAreaSession: async (input) => {
         grounding = input.grounding
         return flowsAreaSessionOf(() => ({ flows: [], noFlowClaims: [] }))(input)
@@ -794,7 +717,7 @@ describe('the procedure gate', () => {
       repoRoot: r,
       stopAfterFlows: true,
       interfaces: DEFAULT_INTERFACES(r),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       flowsAreaSession: async (input) => {
         docs = input.docs
         return flowsAreaSessionOf(() => ({ flows: [], noFlowClaims: [] }))(input)
@@ -822,10 +745,10 @@ describe('the flow-synthesis wipeout', () => {
     const res = await generateGuards({
       repoRoot: r,
       interfaces: DEFAULT_INTERFACES(r),
-      extractSession: extractSessionBy({}),
+      claims: claimsBy({}),
       // Every area answers with a draft the fold refuses.
       flowsAreaSession: flowsAreaSessionOf(() => ({
-        flows: [{ title: 'Invented', goal: 'g', milestones: [{ doc: DOC, anchor: CREATE, claimTitle: 'nothing like a claim', order: 1 }] }],
+        flows: [{ title: 'Invented', goal: 'g', milestones: [ms('claim::docs/tasks.md::nothing', 1)] }],
         noFlowClaims: [],
       })),
       flowsEpicSession: noEpicSessions,
@@ -839,24 +762,12 @@ describe('the flow-synthesis wipeout', () => {
 })
 
 
-describe('flow obligation boundaries', () => {
-  it('rejects a flow mixing browser behavior with internal storage guarantees', () => {
-    const claims = CLAIMS.map((c, i) => ({ ...c, verification: i === 0
-      ? { scope: 'web' as const, method: 'behavior' as const, observable: 'Visible task' }
-      : { scope: 'implementation' as const, method: 'datastore' as const, observable: 'Stored representation' } }))
-    const check = checkFlowSet(LIFECYCLE, { area: { ...AREA, claims }, sectionKeys: SECTION_KEYS, catalogNames: new Set() })
-    expect(isFlowSetClean(check)).toBe(false)
-    expect(check.unknownReferences.join(' ')).toContain('verification')
-  })
-})
-
-it('briefs the composer with complete case, source, condition and preparation metadata', () => {
-  const verification: NonNullable<FlowClaimInput['verification']> = { scope: 'web', method: 'behavior', observable: 'Empty ledger', cases: [
-    { id: 'empty-ledger', claim: 'Empty ledger total is zero', method: 'behavior', requires: ['browser'], conditions: ['fresh-state'], preparation: 'empty' },
-  ] }
-  const briefing = flowsSessionBriefing({ ...AREA, claims: [{ ...CLAIMS[0], driver: 'web', verification }] }, undefined)
-  expect(briefing).toContain(`verification: ${JSON.stringify(verification)}`)
+it('briefs the composer with each claim, its id and its document', () => {
+  const briefing = flowsSessionBriefing({ ...AREA, claims: [CLAIMS[0]] }, undefined)
+  expect(briefing).toContain(`claim: ${CLAIMS[0].title}`)
   expect(briefing).toContain(`doc: ${DOC}`)
-  expect(briefing).toContain(`anchor: ${CLAIMS[0].anchor}`)
-  expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('upstream defects')
+  expect(briefing).toContain(`claimId: ${CLAIMS[0].id}`)
+  // A documented failure state is a milestone, never a reason to leave a claim out.
+  expect(FLOWS_SESSION_SYSTEM_PROMPT).toContain('Failure states are milestones')
+  expect(FLOWS_SESSION_SYSTEM_PROMPT).not.toContain('no user path reaches')
 })

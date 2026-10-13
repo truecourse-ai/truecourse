@@ -33,6 +33,9 @@ export interface CreditsGate {
  * rather than a second one beside it. A run the store no longer holds (a
  * repository disconnected and reconnected under the same name) opens a fresh
  * one instead of failing a job over its own history.
+ *
+ * A run the store can no longer write (another process took it, or its storage
+ * failed) fails the job there and then, through the job's own signal.
  */
 export async function dashboardActivity<P extends OnboardingJobPayload, T>(
   ctx: JobContext<P>,
@@ -47,6 +50,8 @@ export async function dashboardActivity<P extends OnboardingJobPayload, T>(
   const untap = tracker.tap(progress => {
     if (progress.steps) run.setChecklist(progress.steps);
   });
+  // A run that can no longer be recorded is not worked on unseen: the job stops, failed.
+  const unhear = run.onFailure?.(error => ctx.fail(error));
   try {
     tracker.start('clone');
     const result = await execute(run, tracker);
@@ -63,7 +68,7 @@ export async function dashboardActivity<P extends OnboardingJobPayload, T>(
     });
     await run.flush?.();
     throw error;
-  } finally { untap(); }
+  } finally { untap(); unhear?.(); }
 }
 
 /** The run this job writes into: the one it is carrying on, else a new one. */

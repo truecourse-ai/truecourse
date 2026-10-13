@@ -24,6 +24,7 @@ import { registerJob, type JobTask, type StartWorker } from '@truecourse/jobs';
 import { manifestPath, scenariosDir, dependenciesLocalPath, API_SERVER_BOOT_EXPECTED } from '@truecourse/guard-runner';
 import {
   GUARD_FORMAT_VERSION,
+  sentenceKey,
   type GuardGenerateReport,
   type GuardLatest,
   type PullRequestCheckRecord,
@@ -91,6 +92,8 @@ let engines: {
 let seen: { setupHadOverlays: boolean | null; scanned: boolean };
 /** The checks a disconnect or a boot reap asked to settle, by pull request number. */
 let cancelledChecks: number[];
+/** The mode the check's own LLM runs in. */
+let checkLlmMode: WorkspaceLlm['mode'];
 
 const testLlm = {
   mode: 'api',
@@ -156,13 +159,9 @@ const report = (): GuardGenerateReport => ({
   noChanges: false,
   written: [],
   birthFindings: [],
-  sectionsTotal: 0,
-  sectionsChanged: 0,
-  skippedUnchanged: 0,
   coverageGaps: [],
   errors: [],
   extractionFailures: [],
-  orphaned: [],
 });
 
 /** A run of the one-flow set, with scenario a1 at `outcome`. */
@@ -174,13 +173,12 @@ function latestOf(runId: string, commit: string, outcome: 'pass' | 'fail' | 'err
       {
         id: 'a1',
         title: 'create an org',
-        binds: { doc: 'docs/orgs.md', section: 'orgs', fingerprint: 'sha256:x' },
+        binds: { doc: 'docs/orgs.md', sentences: ['orgs'] },
         outcome,
         durationMs: 1,
         ...(failure ? { failure: { step: 1, ...failure } } : {}),
       },
     ],
-    sections: [],
   } as GuardLatest;
 }
 
@@ -191,7 +189,7 @@ async function storeBase(commit = BASE): Promise<void> {
   fs.mkdirSync(orgs, { recursive: true });
   fs.writeFileSync(
     path.join(orgs, 'a1.yaml'),
-    ['id: a1', 'title: create an org', 'binds:', '  - doc: docs/orgs.md', '    section: orgs', '    fingerprint: "sha256:x"', 'steps:', '  - run: ["--help"]', '    expect:', '      exit: 0', ''].join('\n'),
+    ['id: a1', 'title: create an org', 'binds:', '  - doc: docs/orgs.md', '    sentences: [orgs]', 'steps:', '  - run: ["--help"]', '    expect:', '      exit: 0', ''].join('\n'),
   );
   fs.writeFileSync(
     manifestPath(dir),
@@ -201,7 +199,7 @@ async function storeBase(commit = BASE): Promise<void> {
         {
           flowId: 'f1',
           flowFingerprint: 'sha256:f',
-          bindings: [{ doc: 'docs/orgs.md', anchor: 'orgs', fingerprint: 'sha256:x' }],
+          bindings: [{ doc: 'docs/orgs.md', sentences: ['orgs'] }],
           scenarios: [{ id: 'a1', drivers: ['cli'] }],
           interfaces: [],
           generationInputsHash: null,
@@ -215,7 +213,7 @@ async function storeBase(commit = BASE): Promise<void> {
   await saveGuardSetupBundle(ref, { '.truecourse/scenarios/recipe.json': JSON.stringify({ build: 'true', api: { serve: ['node', 'server.mjs'], healthPath: '/health' } }) + '\n' });
   const run = latestOf(`run-${commit}`, commit, 'pass');
   await writeGuardLatest(REPO, run);
-  await writeGuardRunCoverage(REPO, { runId: run.run.runId, ranAt: run.run.ranAt, commit, sections: {}, flows: { f1: 'succeeded' } });
+  await writeGuardRunCoverage(REPO, { runId: run.run.runId, ranAt: run.run.ranAt, commit, claims: {}, flows: { f1: 'succeeded' } });
 }
 
 function pr(over: Partial<PullRequestRecord> = {}): PullRequestRecord {
@@ -297,7 +295,7 @@ function mountJobs(): JobsMount {
         if (stopped) cancelledChecks.push(stopped.number);
         await pulls.settleCheck(checkId, { conclusion: 'neutral', reason });
       },
-      startLlm: async () => testLlm,
+      startLlm: async () => ({ ...testLlm, mode: checkLlmMode }),
       runScan: (opts) => engines.scan(opts),
     },
   });
@@ -323,6 +321,7 @@ beforeEach(async () => {
   changedFiles = [];
   seen = { setupHadOverlays: null, scanned: false };
   cancelledChecks = [];
+  checkLlmMode = 'api';
   engines = {
     setup: async (repoRoot) => {
       seen.setupHadOverlays = fs.existsSync(dependenciesLocalPath(repoRoot));
@@ -332,7 +331,7 @@ beforeEach(async () => {
     run: async () => ({ status: 'ok', latest: latestOf('run-head', HEAD, 'pass') }) as never,
     scan: async () => {
       seen.scanned = true;
-      return { corpus: { version: 3, generatedAt: '', docs: [], areas: [], skippedDocs: [] } } as never;
+      return { corpus: { version: 6, generatedAt: '', docs: [], areas: [], skippedDocs: [] } } as never;
     },
   };
   await db.delete(schema.guardRuns);
@@ -367,10 +366,10 @@ beforeEach(async () => {
   // The repository reads one document of the workspace corpus: generate needs a slice.
   await setContextBindings(ORG, REPO, [SOURCE]);
   await saveWorkspaceSpec({ workspaceOrgId: ORG }, 'corpus', {
-    version: 3,
+    version: 6,
     generatedAt: '',
     docs: [{ ref: `context/${SOURCE}/docs/orgs.md`, kind: 'prd', lastTouched: '', areaTags: ['p/c'], sourceId: SOURCE }],
-    areas: [{ id: 'p/c', product: 'p', concern: 'c', docRefs: [`context/${SOURCE}/docs/orgs.md`], overlaps: [] }],
+    areas: [{ id: 'p/c', product: 'p', concern: 'c', docRefs: [`context/${SOURCE}/docs/orgs.md`], conflicts: [] }],
     skippedDocs: [],
   } as CuratedCorpus);
   jobs = mountJobs();
@@ -518,7 +517,7 @@ describe('the pull request check', () => {
     });
     changedFiles = ['docs/orgs.md', 'src/index.ts'];
     const disputed: CuratedCorpus = {
-      version: 3,
+      version: 6,
       generatedAt: '',
       docs: [
         { ref: `context/${SOURCE}/docs/orgs.md`, kind: 'prd', lastTouched: '', areaTags: ['p/c'], sourceId: SOURCE },
@@ -530,13 +529,13 @@ describe('the pull request check', () => {
           product: 'p',
           concern: 'c',
           docRefs: [`context/${SOURCE}/docs/orgs.md`, `context/${SOURCE}/docs/other.md`],
-          overlaps: [
+          conflicts: [
             {
               docs: [`context/${SOURCE}/docs/orgs.md`, `context/${SOURCE}/docs/other.md`],
               note: 'one org vs many',
               sections: [
-                { doc: `context/${SOURCE}/docs/orgs.md`, heading: 'Orgs', quote: 'An org can be created.' },
-                { doc: `context/${SOURCE}/docs/other.md`, heading: 'Limits', quote: 'Only one org.' },
+                { doc: `context/${SOURCE}/docs/orgs.md`, quote: 'An org can be created.', sentence: sentenceKey('An org can be created.') },
+                { doc: `context/${SOURCE}/docs/other.md`, quote: 'Only one org.', sentence: sentenceKey('Only one org.') },
               ],
               areas: [],
             },
@@ -559,18 +558,17 @@ describe('the pull request check', () => {
     expect(settled.report?.conflictsCreated).toEqual([
       {
         docs: [`context/${SOURCE}/docs/orgs.md`, `context/${SOURCE}/docs/other.md`],
-        sections: [['Orgs'], ['Limits']],
         note: 'one org vs many',
         area: 'p/c',
         path: 'docs/orgs.md',
-        line: 1,
+        line: 3,
         blocksRepositories: [REPO],
       },
     ]);
-    // The conflict is annotated on the changed document's heading line, and the
-    // check links to Context's conflicts filtered to the pull request.
+    // The conflict is annotated on the line of the changed document's disputed
+    // sentence, and the check links to Context's conflicts filtered to the pull request.
     expect((lastGithubUpdate()!.output as { annotations: unknown[] }).annotations).toEqual([
-      { path: 'docs/orgs.md', start_line: 1, end_line: 1, annotation_level: 'failure', message: expect.stringContaining('one org vs many') },
+      { path: 'docs/orgs.md', start_line: 3, end_line: 3, annotation_level: 'failure', message: expect.stringContaining('one org vs many') },
     ]);
     expect(lastGithubUpdate()!.details_url).toBe('https://app/context/conflicts?pr=acme%2Fwidgets%237');
     // Nothing of the code half ran.
@@ -591,7 +589,7 @@ describe('the pull request check', () => {
     engines.scan = async () =>
       ({
         corpus: {
-          version: 3,
+          version: 6,
           generatedAt: '',
           docs: [other, orgs].map((ref) => ({ ref, kind: 'prd', lastTouched: '', areaTags: ['p/c'], sourceId: SOURCE })),
           areas: [
@@ -601,13 +599,13 @@ describe('the pull request check', () => {
               concern: 'c',
               docRefs: [other, orgs],
               // The unchanged document is the conflict's first side.
-              overlaps: [
+              conflicts: [
                 {
                   docs: [other, orgs],
                   note: 'one org vs many',
                   sections: [
-                    { doc: other, heading: 'Limits', quote: 'Only one org.' },
-                    { doc: orgs, heading: 'Orgs', quote: 'An org can be created.' },
+                    { doc: other, quote: 'Only one org.', sentence: sentenceKey('Only one org.') },
+                    { doc: orgs, quote: 'An org can be created.', sentence: sentenceKey('An org can be created.') },
                   ],
                   areas: [],
                 },
@@ -619,9 +617,32 @@ describe('the pull request check', () => {
       }) as never;
 
     const settled = await check();
-    expect(settled.report?.conflictsCreated).toMatchObject([{ docs: [orgs, other], path: 'docs/orgs.md', line: 1 }]);
+    expect(settled.report?.conflictsCreated).toMatchObject([{ docs: [orgs, other], path: 'docs/orgs.md', line: 3 }]);
     expect((lastGithubUpdate()!.output as { annotations: { path: string }[] }).annotations.map((a) => a.path)).toEqual([
       'docs/orgs.md',
+    ]);
+  });
+
+  it('on Claude Code the head’s scan is handed a computer and compares facts; in API mode it pairs', async () => {
+    await storeBase();
+    await context.createSource(ORG, {
+      id: SOURCE,
+      kind: 'repository',
+      title: REPO,
+      config: { repoFullName: REPO, installationId: 5, include: ['docs/**'], exclude: [], branch: 'main' },
+    });
+    changedFiles = ['docs/orgs.md'];
+    const asked: Array<{ computer?: boolean }> = [];
+    engines.scan = async (opts) => {
+      asked.push({ computer: opts.computer });
+      return { corpus: { version: 6, generatedAt: '', docs: [], areas: [], skippedDocs: [] } } as never;
+    };
+    await check();
+    checkLlmMode = 'claude-code';
+    await check(pr({ number: 8, headSha: 'c'.repeat(40) }));
+    expect(asked).toEqual([
+      { computer: undefined },
+      { computer: true },
     ]);
   });
 
@@ -892,7 +913,7 @@ describe('the pull request check', () => {
   it('a chain with nothing to run settles on the conflicts the head created', async () => {
     await storeBase();
     await setContextBindings(ORG, REPO, []);
-    const conflict = { docs: ['a', 'b'] as [string, string], sections: [[], []] as [string[], string[]], note: 'n', path: null, line: null, blocksRepositories: [] };
+    const conflict = { docs: ['a', 'b'] as [string, string], note: 'n', path: null, line: null, blocksRepositories: [] };
     engines.setup = async () => {
       const open = await pulls.activeCheck(REPO, 7);
       await pulls.updateCheck(open!.id, { report: { ...open!.report!, conflictsCreated: [conflict] } });

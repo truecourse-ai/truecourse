@@ -3,7 +3,7 @@
  * `curateInProcess`: the estimate gate, model resolution, transport selection
  * and progress wiring live in one place.
  *
- * Steps: index (deterministic section plan) → extract (claim-extraction
+ * Steps: index (deterministic document plan) → extract (claim-extraction
  * sessions) → interfaces → flows (synthesis sessions) → match (a one-turn
  * session per flow×surface) → author (the flow-worker session pool) →
  * validate (per-flow settling). Birth
@@ -14,6 +14,18 @@
  * to Flow setup: derivation now exists in exactly one place.
  */
 
+import { composeProjectName } from '@truecourse/guard-generator';
+import { tallyFlowTestRun, type FlowTestStatus, type GuardLatest } from '@truecourse/shared';
+import {
+  FLOW_TEST_FIDELITY_SESSION_KIND,
+  FLOW_TEST_SESSION_KIND,
+  flowTestRunLatest,
+  runFlowTestStage,
+  runStoredFlowTests,
+  type FlowTestRunOutcome,
+  type FlowTestStageResult,
+} from '../services/product-world/index.js';
+export { readFlowTests, type FlowTestRunOutcome } from '../services/product-world/index.js';
 import {
   generateGuards,
   corpusOpenApiDocs,
@@ -21,9 +33,6 @@ import {
   validateCredentialSatisfies,
   type SatisfiesDiagnostics,
   type GuardGenerateResult,
-  type ExtractSessionSeam,
-  type ReuseExtractionSeam,
-  type ClaimDiffRunner,
   type RecipeRunner,
   type WorldClassifyRunner,
   type FlowsAreaSessionSeam,
@@ -69,7 +78,6 @@ import { getModelPrices } from '../services/llm/model-prices.js';
 import { estimateGuardTokens } from '../services/llm/spec-estimate.js';
 import { mapInterfaces } from '../services/interface.service.js';
 import {
-  CLAIM_DIFF_SESSION_KIND,
   MATCH_SESSION_KIND,
   WORLD_CLASSIFY_SESSION_KIND,
   createGuardGenerateLeafSessions,
@@ -77,7 +85,6 @@ import {
 import { createRecipeProposeSession } from '../services/guard-setup/recipe-propose.js';
 import {
   createGuardGenerateSessionSeams,
-  EXTRACT_SESSION_KIND,
   FIDELITY_SESSION_KIND,
   FLOW_WORKER_SESSION_KIND,
   FLOWS_SESSION_KIND,
@@ -95,7 +102,7 @@ import { withEstimatePhase, type EstimatePhase, type StepTracker } from '../prog
 export { EstimateDeclined } from './spec-in-process.js';
 
 /**
- * The corpus has unresolved within-area overlaps — thrown by the guard-generate
+ * The corpus has unresolved conflicts — thrown by the guard-generate
  * gate before any LLM/build work. Carries the full open-conflict list (never
  * truncated) so the dashboard can return it; `message` is the assembled
  * multi-line text.
@@ -112,7 +119,7 @@ export class OpenConflictsError extends Error {
 export function formatOpenConflictsMessage(conflicts: CorpusConflict[]): string {
   const lines: string[] = [
     `${conflicts.length} open spec conflict${conflicts.length === 1 ? '' : 's'} must be resolved before guard generate.`,
-    'Extracting both sides of an unresolved overlap births a red finding that is really the dispute.',
+    'Extracting both sides of an unresolved conflict births a red finding that is really the conflict.',
     '',
   ];
   for (const c of conflicts) {
@@ -128,10 +135,10 @@ export function formatOpenConflictsMessage(conflicts: CorpusConflict[]): string 
 }
 
 /**
- * The guard-generate gate: an unresolved within-area overlap means two docs make
+ * The guard-generate gate: an unresolved conflict means two docs make
  * contradictory claims, and extracting BOTH births a paid "finding" that is
- * really the dispute. Read the corpus + decisions and fail before any LLM/build
- * work (and before the estimate) when any overlap is still open. No corpus at all
+ * really the conflict. Read the corpus + decisions and fail before any LLM/build
+ * work (and before the estimate) when any conflict is still open. No corpus at all
  * is NOT a conflict — the downstream no-docs path reports that.
  *
  * Reads the corpus + decisions out of the run's work tree — the ones the
@@ -151,8 +158,8 @@ function assertNoOpenConflicts(repoRoot: string): void {
 
 /** Stable step taxonomy for the guard generate progress UI. */
 export const GUARD_GENERATE_STEPS = [
-  { key: 'index', label: 'Indexing sections' },
-  { key: 'extract', label: 'Extracting claims' },
+  { key: 'index', label: 'Indexing documents' },
+  { key: 'extract', label: 'Reading claims' },
   { key: 'interfaces', label: 'Mapping interfaces' },
   { key: 'flows', label: 'Synthesizing flows' },
   { key: 'match', label: 'Matching flows' },
@@ -165,14 +172,26 @@ export const GUARD_GENERATE_STEPS = [
  * checklist so a surface reading run.json can file every session under its
  * step. The fidelity judge is a child the flow worker dispatches, so it rides
  * the author step with its parent; the world classification decides how the
- * workers are scheduled, so it rides there too; the claim-diff gate runs
- * before extraction and rides the extract step. A step listed empty is
+ * workers are scheduled, so it rides there too. A step listed empty is
  * deterministic and owns no session. A kind no step claims is shown under its
  * own raw id, after the list.
  */
+/**
+ * The checklist of a product-world generate: the spec side, then the product
+ * brought up once, bare, then one session per flow that writes the flow's test
+ * and the seed it starts from against it.
+ */
+export const WORLD_GENERATE_STEPS = [
+  { key: 'index', label: 'Indexing documents' },
+  { key: 'extract', label: 'Reading claims' },
+  { key: 'flows', label: 'Synthesizing flows' },
+  { key: 'world', label: 'Bringing the product up' },
+  { key: 'author', label: 'Writing tests' },
+] as const;
+
 const GUARD_GENERATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
   index: [],
-  extract: [CLAIM_DIFF_SESSION_KIND, EXTRACT_SESSION_KIND],
+  extract: [],
   interfaces: [],
   flows: [FLOWS_SESSION_KIND],
   match: [MATCH_SESSION_KIND],
@@ -180,11 +199,20 @@ const GUARD_GENERATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
   validate: [],
 };
 
+/** The same, for {@link WORLD_GENERATE_STEPS}: the flow-test sessions are the author step's. */
+const WORLD_GENERATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
+  index: [],
+  extract: [],
+  flows: [FLOWS_SESSION_KIND],
+  world: [],
+  author: [FLOW_TEST_SESSION_KIND, FLOW_TEST_FIDELITY_SESSION_KIND],
+};
+
 /**
  * Which LLM stage(s) each guard step covers — so a step line shows the model +
  * live tokens/$ of the work it's doing (the scan/contracts convention). Recipe
- * discovery rides `index` (the section-indexing window), extraction rides
- * `extract`, synthesis rides `flows`, realization matching rides `match`, and
+ * discovery rides `index` (the document-indexing window), reading the claims
+ * rides `extract` and spends nothing, synthesis rides `flows`, realization matching rides `match`, and
  * per-(flow, surface) authoring rides `author` (stage `guard.generate`). Interface
  * mapping is deterministic tree derivation — no stage, no spend. Birth EXECUTION
  * is deterministic sandbox work, but the one evidence-retry per birth-failed flow
@@ -195,6 +223,21 @@ const GUARD_GENERATE_STEP_SESSION_KINDS: Record<string, readonly string[]> = {
 
 export interface GuardGenerateInProcessOptions {
   tracker?: StepTracker;
+  /**
+   * Generate against a PRODUCT WORLD: after flows are synthesized, the
+   * repository's world scripts bring the product up and one session per flow
+   * writes its Playwright test, and the seed that test starts from, against
+   * it. No recipe is read, no interface is mapped and no scenario is authored. `worldKey` is the world's identity on
+   * this host, the same one setup proved the scripts under. The checklist is
+   * {@link WORLD_GENERATE_STEPS}. Needs the Claude Code backend.
+   *
+   * Every test the repository already has is run again at this commit, and one
+   * that moved is opened again. `commit` is the commit the tree is at, which an
+   * accepted status and the stage's run are stamped with; `fetchCommit` brings
+   * the commit a moved test was accepted on into the tree, so its session can
+   * diff against it.
+   */
+  productWorld?: { worldKey?: string; commit?: string | null; fetchCommit?: (commit: string) => Promise<boolean> };
   /** Restore this interrupted run's completed stages without repeating their LLM work. */
   resume?: GuardGenerateResume;
   /**
@@ -257,7 +300,6 @@ export interface GuardGenerateInProcessOptions {
   // sessions in `createGuardGenerateLeafSessions`) ---
   recipeRunner?: RecipeRunner;
   matchRunner?: MatchRunner;
-  claimDiffRunner?: ClaimDiffRunner;
   worldClassifyRunner?: WorldClassifyRunner;
   /**
    * Session-seam overrides — tests inject stubs here. Unset, production wires
@@ -265,11 +307,6 @@ export interface GuardGenerateInProcessOptions {
    * by the engine, which is why a run with no session driver is refused up
    * front unless every seam is injected.
    */
-  extractSession?: ExtractSessionSeam;
-  /** The claim-diff gate's extract-cache access; unset, production wires the
-   *  cache-backed seam beside `extractSession`. Absent entirely (an injected
-   *  `extractSession` with no `reuseExtraction`), the gate is skipped. */
-  reuseExtraction?: ReuseExtractionSeam;
   flowsAreaSession?: FlowsAreaSessionSeam;
   flowsEpicSession?: FlowsEpicSessionSeam;
   flowWorkerSession?: FlowWorkerSessionSeam;
@@ -309,6 +346,14 @@ export async function estimateGuard(
 
 export interface GuardGenerateInProcessResult {
   guard: GuardGenerateResult;
+  /** What the flow-test stage did, on a product-world generate that reached it. */
+  flowTests?: FlowTestStageResult;
+  /**
+   * How the repository's flow tests ran at this commit, as a run of it: the
+   * kept tests' rerun, and the accepted run of each test written or repaired
+   * here. Absent when the stage ran no test.
+   */
+  flowTestRun?: GuardLatest;
   /**
    * The sessions-store scratch dir this run used, under the runtime directory —
    * what a stepwise run is inspected through. The record exists from the first
@@ -344,7 +389,7 @@ export async function guardGenerateInProcess(
     if (!progress.steps) return;
     run.setChecklist(
       progress.steps.map((step) => {
-        const kinds = GUARD_GENERATE_STEP_SESSION_KINDS[step.key];
+        const kinds = (options.productWorld ? WORLD_GENERATE_STEP_SESSION_KINDS : GUARD_GENERATE_STEP_SESSION_KINDS)[step.key];
         return kinds ? { ...step, sessionKinds: [...kinds] } : step;
       }),
     );
@@ -358,7 +403,7 @@ export async function guardGenerateInProcess(
   let resumeFailure: GuardGenerateResumeError | undefined;
   try {
     // Hard-fail on unresolved spec conflicts BEFORE the estimate — never ask to
-    // spend, then fail. Extracting both sides of an open overlap births noise.
+    // spend, then fail. Extracting both sides of an open conflict births noise.
     assertNoOpenConflicts(repoRoot);
 
     // Pre-flight cost estimate + confirm, before any LLM call. No stages ⇒ nothing
@@ -413,7 +458,7 @@ export async function guardGenerateInProcess(
     if (options.signal?.aborted) throw new GuardGenerateAborted();
   };
 
-  const STEPS: string[] = GUARD_GENERATE_STEPS.map((s) => s.key);
+  const STEPS: string[] = (options.productWorld ? WORLD_GENERATE_STEPS : GUARD_GENERATE_STEPS).map((s) => s.key);
   let cur = 0;
   const advanceTo = (key: string): void => {
     throwIfAborted();
@@ -524,14 +569,8 @@ export async function guardGenerateInProcess(
     // Single-step mode: the seams enforce the cache-only replay of every step
     // before the chosen one (the engine enforces the stop after it).
     ...(options.only ? { only: options.only } : {}),
-    ...(options.resume ? { replaySteps: (['extract', 'flows'] as const).filter(step => restored.has(step)) } : {}),
+    ...(options.resume ? { replaySteps: (['flows'] as const).filter(step => restored.has(step)) } : {}),
   });
-  const extractSession = options.extractSession ?? sessionSeams.extractSession;
-  // An injected extraction seam owns no cache, so the production reuse seam
-  // would address entries the injected seam never wrote: the gate only rides
-  // with the seam it was injected beside, or with production extraction.
-  const reuseExtraction =
-    options.reuseExtraction ?? (options.extractSession ? undefined : sessionSeams?.reuseExtraction);
   const flowsAreaSession = options.flowsAreaSession ?? sessionSeams.flowsAreaSession;
   const flowsEpicSession = options.flowsEpicSession ?? sessionSeams.flowsEpicSession;
   const flowWorkerSession = options.flowWorkerSession ?? sessionSeams.flowWorkerSession;
@@ -554,18 +593,17 @@ export async function guardGenerateInProcess(
       requireExistingRecipe: options.requireExistingRecipe ?? false,
       recipeRunner: options.recipeRunner ?? refuseRestored('index', leafRecipe.runner),
       matchRunner: options.matchRunner ?? refuseRestored('match', leafSessions.matchRunner),
-      claimDiffRunner:
-        options.claimDiffRunner ?? refuseRestored('extract', leafSessions.claimDiffRunner),
       worldClassifyRunner: options.worldClassifyRunner ?? leafSessions.worldClassifyRunner,
       leafSummaries: () => [...leafSessions.summaries(), leafRecipe.summary()],
-      extractSession,
-      ...(reuseExtraction ? { reuseExtraction } : {}),
       flowsAreaSession,
       flowsEpicSession,
       flowWorkerSession,
+      ...(options.productWorld ? { productWorld: true } : {}),
+      // A product world needs no map of the product's interfaces: the session
+      // that writes a flow's test has the product itself in front of it.
       interfaces:
         options.interfaces ??
-        (async () => {
+        (options.productWorld ? undefined : async () => {
           // ONE working-tree analysis feeds every half: the interface catalog, the
           // repo's detected third-party dependencies, and the code-truth grounding
           // authoring needs.
@@ -585,23 +623,17 @@ export async function guardGenerateInProcess(
       ...(options.stopAfterFlows ? { stopAfterFlows: true } : {}),
       ...(options.only ? { only: options.only } : {}),
       ...(options.fromScratch ? { fromScratch: true } : {}),
-      onPlan: (total, work) => {
+      onPlan: (docs, changed) => {
         throwIfAborted();
         // Indexing is an instant deterministic pass — mark it done with its result
         // detail immediately (recipe-discovery usage rides its tag), never a live phase.
-        tracker?.done('index', `${work} of ${total} section${total === 1 ? '' : 's'} changed`);
+        tracker?.done('index', `${changed} of ${docs} document${docs === 1 ? '' : 's'} changed`);
         cur = STEPS.indexOf('extract');
-        // No detail yet — the seam's initial onDoc(0, total) supplies the
-        // "docs 0/N" counter the moment the pool is planned.
         if (!restored.has('extract')) tracker?.start('extract');
       },
-      onExtractProgress: (done, total) => {
+      onClaims: (claims, docs) => {
         advanceTo('extract');
-        if (done >= total) {
-          tracker?.done('extract', `${total} doc${total === 1 ? '' : 's'}`);
-        } else {
-          tracker?.detail('extract', `docs ${done}/${total}`);
-        }
+        tracker?.done('extract', `${claims} claim${claims === 1 ? '' : 's'} from ${docs} doc${docs === 1 ? '' : 's'}`);
       },
       onInterfaces: (interfaces, surfaces) => {
         // Interface mapping is deterministic and free — it completes as one step with
@@ -706,6 +738,94 @@ export async function guardGenerateInProcess(
       tracker?.done(STEPS[cur], `stopped after ${guard.stoppedAfter}`);
       if (!options.sessionRun) finishRun('completed');
       return { guard, sessionsRunDir: run.dir };
+    }
+
+    // A product world: the spec side is done, now the tests. The product comes
+    // up once, one session per flow writes that flow's test and seed against
+    // it, and it goes down again. The report describes the spec side; the tests are in
+    // the tree's tests directory with their own index.
+    if (options.productWorld) {
+      advanceTo('world');
+      const flowTests = await runFlowTestStage({
+        repoRoot,
+        worldId: composeProjectName(options.productWorld.worldKey ?? path.basename(path.resolve(repoRoot))),
+        runId: run.runId,
+        acquire: acquireSessionContext,
+        ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.productWorld.commit ? { commit: options.productWorld.commit } : {}),
+        ...(options.productWorld.fetchCommit ? { fetchCommit: options.productWorld.fetchCommit } : {}),
+        onPhase: (phase) => {
+          if (phase === 'tests') advanceTo('author');
+          else {
+            tracker?.detail(
+              'world',
+              phase === 'build' ? 'building the checkout' : phase === 'up' ? 'starting the product' : 'running the kept tests',
+            );
+          }
+        },
+        onProgress: ({ done, total, passing, failing, blocked, unsettled }) =>
+          tracker?.detail(
+            'author',
+            `flows ${done}/${total} · ${passing} passing · ${failing} failing · ${blocked} blocked${unsettled ? ` · ${unsettled} unsettled` : ''}`,
+          ),
+      });
+      throwIfAborted();
+      persistGuardReport(repoRoot, guard);
+      if (flowTests.status === 'world-failed') {
+        const reason = `the product did not come up (${flowTests.stage}): ${flowTests.reason}`;
+        tracker?.error('world', firstLine(reason) ?? 'the product did not come up');
+        finishRun('failed', { error: { message: reason, kind: 'world' } });
+        return { guard, flowTests, sessionsRunDir: run.dir };
+      }
+      if (flowTests.status === 'rerun-failed') {
+        const reason = `the kept tests could not be run: ${flowTests.reason}`;
+        tracker?.error('world', firstLine(reason) ?? 'the kept tests could not be run');
+        finishRun('failed', { error: { message: reason, kind: 'world' } });
+        return { guard, flowTests, sessionsRunDir: run.dir };
+      }
+      if (flowTests.status === 'no-flows') {
+        for (let i = cur; i < STEPS.length; i++) tracker?.done(STEPS[i], 'no flows to test');
+      } else {
+        const count = (status: FlowTestStatus): number => flowTests.tests.filter((t) => t.status === status).length;
+        const withCopyDrift = flowTests.tests.filter((t) => t.copyDrift?.length).length;
+        const { moved, judged } = flowTests;
+        // How the kept tests stood at this commit, and the groups one change
+        // moved the same way: the sizes say whether a change is moving many
+        // tests at once.
+        const signatures = new Map<string, typeof moved>();
+        for (const m of moved) signatures.set(m.signature, [...(signatures.get(m.signature) ?? []), m]);
+        for (const [signature, group] of signatures) {
+          tracker?.fact(
+            'world',
+            `${group.length} kept test${group.length === 1 ? '' : 's'} moved on "${signature}": ${group.map((m) => `${m.flowId} (${m.reason}, ${m.settled})`).join(', ')}`,
+          );
+        }
+        if (judged.read > 0) {
+          tracker?.fact(
+            'world',
+            `${judged.read} kept test${judged.read === 1 ? '' : 's'} read against the documents: ${judged.flagged} flagged${judged.unavailable ? `, ${judged.unavailable} without a verdict` : ''}`,
+          );
+        }
+        for (const { flowId, reason } of flowTests.unsettled) tracker?.fact('author', `${flowId}: unsettled, ${reason}`);
+        tracker?.done('world', moved.length > 0 ? `${moved.length} kept test${moved.length === 1 ? '' : 's'} moved` : undefined);
+        tracker?.done(
+          'author',
+          `${flowTests.tests.length} flow${flowTests.tests.length === 1 ? '' : 's'} · ${count('passing')} passing · ${count('failing')} failing · ${count('blocked')} blocked${withCopyDrift ? ` · ${withCopyDrift} with copy drift` : ''} · ${flowTests.authored} opened this run`,
+        );
+      }
+      if (!options.sessionRun) finishRun('completed');
+      if (flowTests.status === 'ok' && flowTests.run && flowTests.run.results.length > 0) {
+        const { branch, commit } = await resolveGuardRepoRef(repoRoot);
+        const flowTestRun = flowTestRunLatest({
+          runId: flowTests.run.runId,
+          ranAt: flowTests.run.ranAt,
+          branch,
+          commit: options.productWorld.commit ?? commit,
+          flowTests: flowTests.run.results,
+        });
+        return { guard, flowTests, flowTestRun, sessionsRunDir: run.dir };
+      }
+      return { guard, flowTests, sessionsRunDir: run.dir };
     }
 
     // Mark every remaining step done with a closing detail.
@@ -819,16 +939,12 @@ export function buildOpenConflictsReport(
     generatedAt,
     status: 'open-conflicts',
     reason: error.message,
-    sectionsTotal: 0,
-    sectionsChanged: 0,
-    skippedUnchanged: 0,
     noChanges: false,
     written: [],
     coverageGaps: [],
     birthFindings: [],
     errors: [],
     extractionFailures: [],
-    orphaned: [],
   };
 }
 
@@ -1014,6 +1130,54 @@ export async function guardRunInProcess(
     }
     return result;
   }
+}
+
+export interface GuardFlowTestRunInProcessOptions {
+  tracker?: StepTracker;
+  /** The world's identity on this host, the same one setup proved the scripts under. */
+  worldKey: string;
+  signal?: AbortSignal;
+}
+
+/**
+ * Run a repository's stored flow tests, driving a tracker through
+ * {@link GUARD_RUN_STEPS}: `build` while the checkout is built and the product
+ * brought up, `run` while the tests run. Like a scenario run it needs no model.
+ * Returns the stage's result untouched; the caller decides how to store it.
+ */
+export async function guardFlowTestRunInProcess(
+  repoRoot: string,
+  options: GuardFlowTestRunInProcessOptions,
+): Promise<FlowTestRunOutcome> {
+  const { tracker } = options;
+  const { branch, commit } = await resolveGuardRepoRef(repoRoot);
+  const outcome = await runStoredFlowTests({
+    repoRoot,
+    worldId: composeProjectName(options.worldKey),
+    branch,
+    commit,
+    ...(options.signal ? { signal: options.signal } : {}),
+    onPhase: (phase, tests) => {
+      if (phase === 'build') tracker?.start('build', 'building the checkout');
+      else if (phase === 'up') tracker?.detail('build', 'starting the product');
+      else {
+        tracker?.done('build');
+        tracker?.start('run', `${tests} test${tests === 1 ? '' : 's'}`);
+      }
+    },
+  });
+  if (outcome.status === 'ok') {
+    const t = tallyFlowTestRun(outcome.latest.flowTests ?? []);
+    tracker?.done(
+      'run',
+      `${t.run} test${t.run === 1 ? '' : 's'} · ${t.passed} passed · ${t.failed} failed · ${t.seedFailed} seed failed · ${t.nowFailing} now failing · ${t.nowPassing} now passing`,
+    );
+  } else if (outcome.status === 'world-failed') {
+    tracker?.error('build', `the product did not come up (${outcome.stage}): ${firstLine(outcome.reason) ?? ''}`);
+  } else if (outcome.status === 'run-failed') {
+    tracker?.error('run', firstLine(outcome.reason) ?? 'the tests did not run');
+  }
+  return outcome;
 }
 
 /**

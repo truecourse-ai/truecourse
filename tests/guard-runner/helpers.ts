@@ -3,8 +3,7 @@ import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { GuardApiScenario, GuardSandboxScenario, GuardScenario } from '@truecourse/shared'
-import { buildDocSectionIndex } from '@truecourse/guard-runner'
+import { parseDocTree, sectionSentences, sentenceKey, type DocTree, type GuardApiScenario, type GuardBinds, type GuardSandboxScenario, type GuardScenario } from '@truecourse/shared'
 
 /** Absolute path to the realistic fixture CLI (`relkit`). */
 export const FIXTURE_BIN = fileURLToPath(
@@ -13,9 +12,10 @@ export const FIXTURE_BIN = fileURLToPath(
 
 /**
  * A shared spec doc the engine tests bind to so their scenarios resolve as
- * `match` (a run only executes scenarios whose bound section is present and
- * unchanged). It carries one heading path per anchor the tests use; `writeRecipe`
- * seeds it, and {@link specBinds} returns the live binding for a given anchor.
+ * `match` (a run only executes scenarios whose bound sentences are still in the
+ * document). It carries one heading path per section name the tests use;
+ * `writeRecipe` seeds it, and {@link specBinds} returns the live binding to a
+ * section's sentences.
  */
 export const SPEC_DOC_PATH = 'docs/spec.md'
 
@@ -28,7 +28,7 @@ const SPEC_ANCHORS = [
   'same/section',
 ] as const
 
-/** Emit a markdown doc whose section index yields exactly `anchors`. */
+/** Emit a markdown doc whose tree yields exactly the sections named by `anchors`. */
 function buildSpecDoc(anchors: readonly string[]): string {
   const lines: string[] = []
   const emitted = new Set<string>()
@@ -46,16 +46,40 @@ function buildSpecDoc(anchors: readonly string[]): string {
 }
 
 const SPEC_DOC = buildSpecDoc(SPEC_ANCHORS)
-const SPEC_INDEX = buildDocSectionIndex(SPEC_DOC_PATH, SPEC_DOC)
+const SPEC_TREE = parseDocTree(SPEC_DOC_PATH, SPEC_DOC)
 
-/** The live binding list (doc + anchor + fingerprint) for sections of the shared doc. */
+/** The live binding list for sections of the shared doc, one bind per section's sentences. */
 export function specBinds(...sections: string[]): GuardScenario['binds'] {
-  return sections.map((section) => {
-    const s = SPEC_INDEX.byAnchor.get(section)
-    if (!s) throw new Error(`shared spec doc has no section "${section}"`)
-    return { doc: SPEC_DOC_PATH, section, fingerprint: s.fingerprint }
-  }) as GuardScenario['binds']
+  return sections.map((section) => sectionBind(SPEC_TREE, section)) as GuardScenario['binds']
 }
+
+/**
+ * A live bind to the sentences of one section of a document (by the section's
+ * anchor in the tree): the keys of every sentence of its own text, so any edit
+ * to one of them reads stale and anything else changing around them does not.
+ */
+export function sectionBind(tree: DocTree, anchor: string): GuardBinds {
+  const t = tree.sections.find((x) => x.anchor === anchor)
+  if (!t) throw new Error(`${tree.doc} has no section "${anchor}"`)
+  const sentences = sectionSentences(tree, t).map((x) => sentenceKey(x.text, x.repeat))
+  if (sentences.length === 0) throw new Error(`section "${anchor}" of ${tree.doc} has no sentence`)
+  return { doc: tree.doc, sentences }
+}
+
+/**
+ * A bind to a shared-doc section as authored against older text: one of its
+ * sentences the doc no longer holds, so the runner reads it stale.
+ */
+export function staleSpecBind(section: string): GuardBinds {
+  return staleBind(specBinds(section)[0])
+}
+
+/** `live` as authored against older text: one sentence the doc no longer holds. */
+export function staleBind(live: GuardBinds): GuardBinds {
+  return { ...live, sentences: [...live.sentences, 'sentence:authored-against-older-text'] }
+}
+
+export { parseDocTree }
 
 /** Seed the shared spec doc into a repo (idempotent). */
 export function writeSpecDoc(repo: string): void {

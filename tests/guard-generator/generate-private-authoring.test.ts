@@ -3,13 +3,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
 import { scenarioReviewFingerprint } from '@truecourse/shared/guard-proof-node'
-import { GUARD_REVIEW_POLICY_VERSION, type GuardScenario } from '@truecourse/shared'
+import type { GuardScenario } from '@truecourse/shared'
 import type { GuardExecutor } from '@truecourse/guard-runner'
 import { qualifyFixtureRecipe } from '../guard-runner/preparation-qualification-fixture.js'
 import {
   makeTempRepo, rmrf, writeApiRecipe, writeCorpus, writeDoc, extractSessionBy,
   interfacesOf, apiInterface, rawApi, PASSING_API_STEPS, runGenerate,
   scenarioYaml, stampMilestones, sessionSummary, FIXTURE_API_SERVER,
+  claimsBy,
 } from './helpers.js'
 
 const repos: string[] = []
@@ -37,7 +38,7 @@ function seed() {
   return r
 }
 
-const extraction = () => extractSessionBy({
+const extraction = () => claimsBy({
   list: [{ driver: 'api', claim: 'GET /todos returns 200 with the list', reason: 'HTTP status + body' }],
 })
 
@@ -55,7 +56,7 @@ describe('prepared mutator execution boundary', () => {
       })) } } as never
     }
     const result = await runGenerate({
-      repoRoot: r, executor, extractSession: extraction(),
+      repoRoot: r, executor, claims: extraction(),
       interfaces: interfacesOf(r, apiInterface('GET', '/todos')),
       worldClassifyRunner: async flows => ({ mutators: flows.map(f => f.id) }),
       flowWorkerSession: async ({ tasks, epicTasks, preparedMutatorTasks = [], mutatorTasks }) => {
@@ -79,10 +80,7 @@ describe('prepared mutator execution boundary', () => {
           // A previously accepted shared-state scenario has a valid review and
           // unchanged cache identity. It must still obey the current pool gate.
           const scenario = structuredClone(executedScenario!)
-          const cached = (s: GuardScenario) => [{ yaml: yaml.dump(s), expectedReds: [], review: {
-            policyVersion: GUARD_REVIEW_POLICY_VERSION,
-            scenarioFingerprint: scenarioReviewFingerprint(s), caseEvidence: [],
-          } }]
+          const cached = (s: GuardScenario) => [{ yaml: yaml.dump(s), expectedReds: [], review: { scenarioFingerprint: scenarioReviewFingerprint(s) } }]
           expect(await task.confirmCached(cached(scenario))).toBe(true)
           expect(executions).toBe(2)
           delete scenario.setup
@@ -109,7 +107,7 @@ describe('prepared mutator execution boundary', () => {
     const r = seed()
     let invocations = 0
     await runGenerate({
-      repoRoot: r, extractSession: extraction(),
+      repoRoot: r, claims: extraction(),
       interfaces: interfacesOf(r, apiInterface('GET', '/todos')),
       worldClassifyRunner: async flows => ({ mutators: flows.map(f => f.id) }),
       flowWorkerSession: async ({ preparedMutatorTasks = [], mutatorTasks }) => {

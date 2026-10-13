@@ -5,7 +5,6 @@ import {
   buildOperationIndex,
   matchOperationsForSection,
   matchedRequestSchemas,
-  matchedSchemaFingerprint,
   type SectionInput,
 } from '@truecourse/guard-generator'
 
@@ -16,20 +15,17 @@ function opSection(
   method: string,
   path: string,
   operation: Record<string, unknown>,
-  fingerprint = `sha256:${anchor}`,
 ): SectionInput {
   return {
     doc: 'api/openapi.yaml',
     anchor,
-    fingerprint,
     headingText: `${method.toUpperCase()} ${path}`,
     level: 0,
+    startLine: 1,
+    ownEndLine: 1,
     ownText: '',
     fullText: canonicalStringify({ method, path, operation }),
     areaTags: [],
-    suppressionFingerprint: '',
-    endpointSchemaFingerprint: '',
-    securityFingerprint: '',
   }
 }
 
@@ -38,15 +34,13 @@ function mdSection(anchor: string, fullText: string): SectionInput {
   return {
     doc: 'docs/api.md',
     anchor,
-    fingerprint: `sha256:${anchor}`,
     headingText: anchor,
     level: 2,
+    startLine: 1,
+    ownEndLine: 1,
     ownText: fullText,
     fullText,
     areaTags: [],
-    suppressionFingerprint: '',
-    endpointSchemaFingerprint: '',
-    securityFingerprint: '',
   }
 }
 
@@ -88,10 +82,10 @@ describe('parseOperationSection', () => {
 })
 
 describe('buildOperationIndex', () => {
-  it('keeps only the operation sections across docs and carries their fingerprints', () => {
+  it('keeps only the operation sections across docs', () => {
     const index = buildOperationIndex([POST_TODOS, mdSection('overview', '## Overview'), GET_TODOS])
     expect(index.map((e) => e.anchor)).toEqual(['paths/post-todos', 'paths/get-todos'])
-    expect(index.find((e) => e.anchor === 'paths/post-todos')?.fingerprint).toBe('sha256:paths/post-todos')
+    expect(index.map((e) => e.doc)).toEqual(['api/openapi.yaml', 'api/openapi.yaml'])
   })
 })
 
@@ -155,9 +149,9 @@ describe('matchOperationsForSection', () => {
       expect(matched.map((e) => e.anchor)).toEqual(['paths/post-bk'])
     })
 
-    it('does not match prose that hits neither form (byte-identity for unmatched)', () => {
+    it('does not match prose that hits neither form', () => {
       expect(matchOperationsForSection(mdSection('c', 'Clients `POST /api/v2/bookings`.'), based)).toEqual([])
-      expect(matchedSchemaFingerprint(mdSection('c', 'Clients `POST /api/v2/bookings`.'), based)).toBe('')
+      expect(matchedRequestSchemas(mdSection('c', 'Clients `POST /api/v2/bookings`.'), based)).toEqual([])
     })
 
     it('keeps the ambiguity-skip when the base-pathed path collides with another op', () => {
@@ -195,26 +189,5 @@ describe('matchedRequestSchemas — base-pathed rendering', () => {
     const bare = buildOperationIndex([POST])
     const out = matchedRequestSchemas(mdSection('c', 'Create with `POST /bookings`.'), bare)
     expect(out.map((e) => `${e.method} ${e.path}`)).toEqual(['POST /bookings'])
-  })
-})
-
-describe('matchedSchemaFingerprint', () => {
-  const index = buildOperationIndex([POST_TODOS, GET_TODOS, PATCH_TODO])
-
-  it('is empty for a section with no write-op match (byte-identity guarantee)', () => {
-    expect(matchedSchemaFingerprint(mdSection('c', 'A `GET /v2/bookings` lists them.'), index)).toBe('')
-    expect(matchedSchemaFingerprint(mdSection('c', 'No endpoints here at all.'), index)).toBe('')
-  })
-
-  it('is non-empty for a section matching a write op, and moves when the op fingerprint changes', () => {
-    const section = mdSection('c', 'Create with `POST /v2/bookings`.')
-    const fp1 = matchedSchemaFingerprint(section, index)
-    expect(fp1).toMatch(/^sha256:/)
-    const changed = buildOperationIndex([
-      { ...POST_TODOS, fingerprint: 'sha256:post-todos-v2' },
-      GET_TODOS,
-      PATCH_TODO,
-    ])
-    expect(matchedSchemaFingerprint(section, changed)).not.toBe(fp1)
   })
 })

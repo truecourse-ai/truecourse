@@ -16,7 +16,7 @@ import { autoResolutionKey } from '@truecourse/shared'
 import { readGuardAutoResolutions, writeGuardAutoResolutions, loadScenarios } from '@truecourse/guard-runner'
 import {
   PASSING_STEPS,
-  extractSessionBy,
+  claimsBy,
   makeTempRepo,
   raw,
   rmrf,
@@ -54,7 +54,7 @@ function seed(): string {
   return r
 }
 
-const versionCliBgUntestable = extractSessionBy({ background: { untestable: 'design history' } })
+const versionCliBgUntestable = claimsBy({ background: { untestable: 'design history' } })
 const KEY = autoResolutionKey('version', 'cli')
 const EVIDENCE = 'no scenario asserts the exact version line the section quotes'
 
@@ -64,7 +64,7 @@ describe('the worker-fed auto-resolution ledger', () => {
     const run = () =>
       runGenerate({
         repoRoot: r,
-        extractSession: versionCliBgUntestable,
+        claims: versionCliBgUntestable,
         flowWorkerSession: submitWorkerSessions(() => ({ retired: { attempts: 3, lastEvidence: EVIDENCE } })),
         escalateAutoResolveAfter: 2,
       })
@@ -95,7 +95,7 @@ describe('the worker-fed auto-resolution ledger', () => {
     })
     await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: submitWorkerSessions(() => raw('now green', PASSING_STEPS)),
     })
     expect(loadScenarios(r).scenarios.map((s) => s.id)).toEqual(['version'])
@@ -106,7 +106,7 @@ describe('the worker-fed auto-resolution ledger', () => {
     const r = seed()
     await runGenerate({
       repoRoot: r,
-      extractSession: versionCliBgUntestable,
+      claims: versionCliBgUntestable,
       flowWorkerSession: submitWorkerSessions(() => raw('green', PASSING_STEPS)),
     })
     const ledger = readGuardAutoResolutions(r)

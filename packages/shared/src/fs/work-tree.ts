@@ -14,11 +14,11 @@
  * materialize and collect) never spell a segment themselves.
  *
  *   specs/corpus.json              the curated document corpus
+ *   specs/claims.json              every claim the scan read from the documents
  *   specs/decisions.json           the curation the corpus was folded with
  *   guard/LATEST.json              the current run state
  *   guard/runs/<runId>.json        per-run snapshots
  *   guard/history.json             per-run summaries, append-only
- *   guard/sections/<runId>.json    a run's per-section summary
  *   guard/result.json              the last `guard generate` report
  *   guard/setup.json               the last `guard setup` record
  *   guard/interfaces.json          the derived interface catalog
@@ -37,6 +37,15 @@
  *   scenarios/claims.json          the extracted claim corpus
  *   scenarios/decisions.json       the dismissals generate honors
  *   scenarios/dependencies.json    the dependency catalog
+ *   world/build.sh                 install and build the product, once per checkout
+ *   world/up.sh                    bring the whole product up and write world.json
+ *   world/down.sh                  stop the product and discard its data
+ *   world/world.json               the running product: its URL and what its installation made
+ *   world/logs/                    what the three scripts and their servers printed
+ *   scenarios/tests/<flow>.spec.ts   one Playwright test per flow
+ *   scenarios/tests/<flow>.seed.ts   the data that test starts from, created when it runs
+ *   scenarios/tests/tests.json       flow → test map, with what each one proved
+ *   scenarios/tests/results/         a test run's report, traces and videos
  *   scenarios/dependencies.local.json  this run's registered instances
  *   scenarios/externals.local.json     this run's external-service secrets
  *   scenarios/<area>/*.yaml        the scenarios themselves
@@ -53,12 +62,15 @@ const SPECS_DIR = 'specs';
 const GUARD_DIR = 'guard';
 const SCENARIOS_DIR = 'scenarios';
 const RUNS_DIR = 'runs';
-const SECTIONS_DIR = 'sections';
 const EVIDENCE_DIR = 'evidence';
 const CACHE_DIR = '.cache';
+const WORLD_DIR = 'world';
+const TESTS_DIR = 'tests';
+const TEST_RESULTS_DIR = 'results';
 const LOGS_DIR = 'logs';
 
 const CORPUS_FILE = 'corpus.json';
+const SPEC_CLAIMS_FILE = 'claims.json';
 const SPEC_DECISIONS_FILE = 'decisions.json';
 const LATEST_FILE = 'LATEST.json';
 const HISTORY_FILE = 'history.json';
@@ -81,6 +93,10 @@ const CLAIMS_FILE = 'claims.json';
 const DEPENDENCIES_FILE = 'dependencies.json';
 const DEPENDENCIES_LOCAL_FILE = 'dependencies.local.json';
 const EXTERNALS_LOCAL_FILE = 'externals.local.json';
+const WORLD_STATE_FILE = 'world.json';
+const TESTS_INDEX_FILE = 'tests.json';
+const FLOW_TEST_SUFFIX = '.spec.ts';
+const FLOW_SEED_SUFFIX = '.seed.ts';
 
 /** `<workDir>/.truecourse` — the root of one run's tree. */
 export function workTreeDir(workDir: string): string {
@@ -99,6 +115,11 @@ export function corpusFilePath(workDir: string): string {
 
 export function specDecisionsPath(workDir: string): string {
   return path.join(specsDir(workDir), SPEC_DECISIONS_FILE);
+}
+
+/** The claims the scan read from the corpus's documents. */
+export function specClaimsFilePath(workDir: string): string {
+  return path.join(specsDir(workDir), SPEC_CLAIMS_FILE);
 }
 
 // --- guard run store --------------------------------------------------------
@@ -122,14 +143,6 @@ export function guardRunPath(workDir: string, runId: string): string {
 
 export function guardHistoryPath(workDir: string): string {
   return path.join(guardDir(workDir), HISTORY_FILE);
-}
-
-export function guardSectionsDir(workDir: string): string {
-  return path.join(guardDir(workDir), SECTIONS_DIR);
-}
-
-export function guardSectionsPath(workDir: string, runId: string): string {
-  return path.join(guardSectionsDir(workDir), `${runId}.json`);
 }
 
 export function guardResultPath(workDir: string): string {
@@ -257,6 +270,71 @@ export function dependenciesLocalPath(workDir: string): string {
 /** The same, for the base URLs and keys of the recipe's external services. */
 export function externalsLocalPath(workDir: string): string {
   return path.join(scenariosDir(workDir), EXTERNALS_LOCAL_FILE);
+}
+
+// --- the product world -------------------------------------------------------
+
+/** The three scripts a product is operated by, in the order a run uses them. */
+export const WORLD_SCRIPTS = ['build', 'up', 'down'] as const;
+export type WorldScript = (typeof WORLD_SCRIPTS)[number];
+
+export function worldDir(workDir: string): string {
+  return path.join(workTreeDir(workDir), WORLD_DIR);
+}
+
+export function worldScriptPath(workDir: string, script: WorldScript): string {
+  return path.join(worldDir(workDir), `${script}.sh`);
+}
+
+/** What `up.sh` writes once the product answers: its URL and accounts. */
+export function worldStatePath(workDir: string): string {
+  return path.join(worldDir(workDir), WORLD_STATE_FILE);
+}
+
+export function worldLogsDir(workDir: string): string {
+  return path.join(worldDir(workDir), LOGS_DIR);
+}
+
+// --- flow tests ---------------------------------------------------------------
+
+/** Inside the scenario corpus, so the tests are stored and versioned with the flows they prove. */
+export function flowTestsDir(workDir: string): string {
+  return path.join(scenariosDir(workDir), TESTS_DIR);
+}
+
+/** Whether `rel`, a path inside the scenario corpus, is a flow test, its seed, or the flow → test map. */
+export function isFlowTestCorpusFile(rel: string): boolean {
+  const [dir, name, ...rest] = rel.split('/');
+  if (dir !== TESTS_DIR || rest.length > 0 || name === undefined) return false;
+  return name === TESTS_INDEX_FILE || name.endsWith(FLOW_TEST_SUFFIX) || name.endsWith(FLOW_SEED_SUFFIX);
+}
+
+/** The Playwright spec that proves one flow. */
+export function flowTestPath(workDir: string, flowId: string): string {
+  return path.join(flowTestsDir(workDir), flowTestFileName(flowId));
+}
+
+/** A flow's spec file name, which is also how a test run's report names it. */
+export function flowTestFileName(flowId: string): string {
+  return `${sanitizeSegment(flowId)}${FLOW_TEST_SUFFIX}`;
+}
+
+/** The module that creates what one flow's test starts from. */
+export function flowSeedPath(workDir: string, flowId: string): string {
+  return path.join(flowTestsDir(workDir), flowSeedFileName(flowId));
+}
+
+export function flowSeedFileName(flowId: string): string {
+  return `${sanitizeSegment(flowId)}${FLOW_SEED_SUFFIX}`;
+}
+
+export function flowTestsIndexPath(workDir: string): string {
+  return path.join(flowTestsDir(workDir), TESTS_INDEX_FILE);
+}
+
+/** A test run's own output: the report, and a trace and video per test. */
+export function flowTestResultsDir(workDir: string): string {
+  return path.join(flowTestsDir(workDir), TEST_RESULTS_DIR);
 }
 
 // --- derived ----------------------------------------------------------------

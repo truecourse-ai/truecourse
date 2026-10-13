@@ -5,10 +5,11 @@
  * statuses); everything a user READS about a status is derived here, so one state
  * can never wear two words:
  *
- *  - the FIVE WORDS of coverage ({@link GUARD_FLOW_STATUS_WORD}, owned by
- *    `@truecourse/shared`), Succeeded / Failed / Blocked / Not testable /
- *    Never run. Every section, flow, counter, filter and
- *    chip wears one of them and nothing else ({@link guardStatusWord});
+ *  - the WORDS of coverage ({@link GUARD_FLOW_STATUS_WORD}, owned by
+ *    `@truecourse/shared`), Succeeded / Partially succeeded / Failed / Blocked /
+ *    Not testable / Never run. Every section, flow, counter, filter and
+ *    chip wears one of them and nothing else ({@link guardStatusWord}).
+ *    Partially succeeded is a flow's alone: a section never wears it;
  *  - ONE SENTENCE table (the per-gap-kind copy behind {@link guardGapNeed}), what
  *    a state concretely NEEDS, in the words a user would use ("needs credentials
  *    and network access", "awaiting web driver", "no code path does this"), shown
@@ -42,6 +43,7 @@ import {
   parseBlockedOnCapabilities,
 } from '@truecourse/shared';
 import type {
+  FlowTestRunResult,
   GuardCoveragePlainStatus,
   GuardDriverId,
   GuardFlowGap,
@@ -49,12 +51,12 @@ import type {
   GuardNeedsSetup,
   GuardOutcome,
   GuardResultStage,
-  GuardSectionCoverageStatus,
+  GuardCoverageStatus,
   GuardTestStatus,
 } from '@truecourse/shared';
 
 /**
- * A coverage state in plain words, the five, and the Flows-list filter domain.
+ * A coverage state in plain words, and the Flows-list filter domain.
  * The domain lives in `@truecourse/shared`; this alias is the client's local
  * name for it.
  */
@@ -181,12 +183,12 @@ const VOCAB = {
   // the coverage record rather than a verdict about the repo, which is why its word
   // is Blocked and its sentence says what closes it.
   unguarded: { sentence: 'nothing accounts for this yet' },
-} satisfies Record<GuardSectionCoverageStatus, GuardStatusVocab>;
+} satisfies Record<GuardCoverageStatus, GuardStatusVocab>;
 
-// Compile-time backstop: a new `GuardSectionCoverageStatus` (a new outcome,
+// Compile-time backstop: a new `GuardCoverageStatus` (a new outcome,
 // driver, or gap kind) with no entry above makes `_UnmappedStatus` non-`never`
 // and fails the build, a state the UI can't name never ships.
-type _UnmappedStatus = Exclude<GuardSectionCoverageStatus, keyof typeof VOCAB>;
+type _UnmappedStatus = Exclude<GuardCoverageStatus, keyof typeof VOCAB>;
 const _allStatusesNamed: _UnmappedStatus extends never ? true : never = true;
 void _allStatusesNamed;
 
@@ -196,7 +198,7 @@ void _allStatusesNamed;
  * of its own, its five-word status still speaks for it, and throws under test so
  * the mapping is fixed rather than papered over.
  */
-function vocab(status: GuardSectionCoverageStatus): GuardStatusVocab {
+function vocab(status: GuardCoverageStatus): GuardStatusVocab {
   const entry: GuardStatusVocab | undefined = VOCAB[status];
   if (entry) return entry;
   if (import.meta.env.MODE === 'test') throw new Error(`Guard status with no plain status: ${status}`);
@@ -207,22 +209,22 @@ function vocab(status: GuardSectionCoverageStatus): GuardStatusVocab {
 export const guardPlainStatus = guardCoveragePlainStatus;
 
 /** The one WORD a status wears on a coverage surface, wherever it appears. */
-export function guardStatusWord(status: GuardSectionCoverageStatus): string {
+export function guardStatusWord(status: GuardCoverageStatus): string {
   return GUARD_FLOW_STATUS_WORD[guardPlainStatus(status)];
 }
 
 /** The state's own name, for a surface that must tell siblings apart, the
  *  five-word status unless this state needs naming apart from them. */
-export function guardStatusLabel(status: GuardSectionCoverageStatus): string {
+export function guardStatusLabel(status: GuardCoverageStatus): string {
   return vocab(status).label ?? guardStatusWord(status);
 }
 
 /** The longer explainer, for the states whose name doesn't say what happened. */
-export function guardStatusHint(status: GuardSectionCoverageStatus): string | undefined {
+export function guardStatusHint(status: GuardCoverageStatus): string | undefined {
   return vocab(status).hint;
 }
 
-/** A flow's plain status, one of the five, derived once in `@truecourse/shared`
+/** A flow's plain status, derived once in `@truecourse/shared`
  *  so the server's flow view and the Flows page can never disagree about a flow. */
 export const guardFlowPlainStatus = sharedFlowPlainStatus;
 
@@ -240,15 +242,31 @@ export const guardFlowPlainStatus = sharedFlowPlainStatus;
  */
 export const GUARD_TEST_VERDICT_WORD: Record<GuardFlowPlainStatus, string> = {
   succeeded: 'Passing',
+  'partially-succeeded': 'Passing',
   failed: 'Failing',
   blocked: GUARD_COVERAGE_STATUS_WORD.blocked,
   'not-testable': GUARD_COVERAGE_STATUS_WORD['not-testable'],
   'never-run': GUARD_COVERAGE_STATUS_WORD['never-run'],
 };
 
+/**
+ * One test's OUTCOME in a run of the stored flow tests, as a status: the word a
+ * run page's row, header and verdict all say. A seed that did not hold is red
+ * like any error, and a skipped test is grey, since it reached no verdict.
+ */
+export const FLOW_TEST_OUTCOME_STATUS: Record<
+  FlowTestRunResult['outcome'],
+  { plain: GuardFlowPlainStatus; word: string }
+> = {
+  pass: { plain: 'succeeded', word: 'Passed' },
+  fail: { plain: 'failed', word: 'Failed' },
+  'seed-failed': { plain: 'failed', word: 'Seed failed' },
+  skipped: { plain: 'not-testable', word: 'Skipped' },
+};
+
 /** A stored test's status and which execution decided it. */
 export interface GuardTestStatusView {
-  status: GuardSectionCoverageStatus;
+  status: GuardCoverageStatus;
   plain: GuardFlowPlainStatus;
   /** True when no run covers the test and its BIRTH execution decided the status. */
   birth: boolean;
@@ -268,11 +286,11 @@ export function guardTestStatusView(test: {
   /** The status the generate stored it with (absent on hand-written work). */
   committed?: GuardTestStatus;
   /** Overrides the derivation when the server already resolved both (flow rows). */
-  status?: GuardSectionCoverageStatus;
+  status?: GuardCoverageStatus;
   stage?: GuardResultStage;
 }): GuardTestStatusView {
   const neverRun = test.outcome == null && test.committed === 'never-run';
-  const status: GuardSectionCoverageStatus =
+  const status: GuardCoverageStatus =
     test.status ??
     test.outcome ??
     (test.committed === 'failing' ? 'fail' : neverRun ? 'never-run' : 'guarded');
@@ -530,10 +548,6 @@ export function guardNeedsSetupCta(needsSetup: GuardNeedsSetup): string {
  * who has no banner in front of them.
  */
 export const GUARD_NEEDS_SETUP_NEXT = `A real or sandbox account both work, provide one, then re-run ${GUARD_REGENERATE_ACTION} to author these tests.`;
-
-/** The work that DRAFTS a seed, the one action a missing-data gap with no
- *  `api.seed` has, named once for every surface that offers it. */
-export const GUARD_SEED_INIT_ACTION = 'Flow setup';
 
 /**
  * What this gap concretely NEEDS, in plain words, the sentence half of the pair.

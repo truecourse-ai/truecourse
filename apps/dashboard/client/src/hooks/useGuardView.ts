@@ -1,22 +1,18 @@
 /**
- * Guard's bidirectional-navigation primitive. `openSpecSection` jumps from a
- * drift, a scenario, a milestone, or a birth finding to the highlighted spec
- * section: it names the coverage destination and writes `?doc=`+`?section=` in ONE
- * param update so the writes never race (and drops the `?result` tab selection
- * the Runs view was showing). `openGuardFlow` / `openGuardInterface` are the same
- * jump in the other direction, a section's flow row to the flow's own page, a
- * flow's interface into the Interfaces tab, and `openSpecDoc` / `openSpecSources`
- * connect the Sources page to the doc viewer and back.
- *
- * Which RESULT tab is open is owned by `useGuardTabs('result', …)` (the shared
- * preview/pin tab model), not here, this hook only owns the jump OUT of the view.
+ * Guard's bidirectional-navigation primitive. `openSpecDoc` jumps from a
+ * drift, a scenario, a milestone, or a birth finding to the document it was
+ * read from: it names the coverage destination and writes `?doc=` in ONE param
+ * update so the writes never race (and drops the `?result` tab selection the
+ * Runs view was showing). `openGuardFlow` / `openGuardInterface` are the same
+ * jump in the other direction, a claim's flow row to the flow's own page, a
+ * flow's interface into the Interfaces tab, and `openSpecSources` the sources
+ * a document came from.
  */
 
 import { useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 export interface GuardViewState {
-  openSpecSection: (doc: string, section: string) => void;
   /**
    * Jump to the Coverage tab with no specific selection, the route the Runs-tab
    * blocked note takes ("resolve the conflicts on Coverage"). Lands the tab; the
@@ -61,26 +57,6 @@ function clearGuardSelections(q: URLSearchParams): void {
 
 export function useGuardView(): GuardViewState {
   const [, setParams] = useSearchParams();
-
-  const openSpecSection = useCallback(
-    (doc: string, section: string) => {
-      setParams((prev) => {
-        const q = new URLSearchParams(prev);
-        // Name the coverage destination (the translation lands it on Context,
-        // where the doc surface lives).
-        q.set('section', 'guard');
-        q.set('tab', 'coverage');
-        clearGuardSelections(q);
-        // Land on the doc, dropping any active conflict tab so it doesn't win
-        // the coverage read and shadow the jumped-to section.
-        q.delete('conflict');
-        q.set('doc', doc);
-        q.set('section', section);
-        return q;
-      });
-    },
-    [setParams],
-  );
 
   const openSpecCoverage = useCallback(() => {
     setParams((prev) => {
@@ -165,7 +141,6 @@ export function useGuardView(): GuardViewState {
   );
 
   return {
-    openSpecSection,
     openSpecCoverage,
     openSpecDoc,
     openSpecSources,

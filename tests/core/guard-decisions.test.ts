@@ -31,9 +31,7 @@ import type {
 
 function claim(over: Partial<GuardDismissedClaim> = {}): GuardDismissedClaim {
   return {
-    doc: 'docs/cli.md',
-    anchor: 'version',
-    title: 'the --version flag prints the semver',
+    claimId: 'claim::docs/cli.md::version',
     dismissedAt: '2026-07-08T00:00:00.000Z',
     ...over,
   };
@@ -72,7 +70,7 @@ describe('guard decisions over the file store', () => {
     const next = await dismissGuardClaim(repo, claim({ note: 'documented elsewhere' }));
     expect(next.dismissedClaims).toHaveLength(1);
     expect((await readGuardDecisions(repo)).dismissedClaims[0]).toMatchObject({
-      anchor: 'version',
+      claimId: 'claim::docs/cli.md::version',
       note: 'documented elsewhere',
     });
   });
@@ -155,16 +153,16 @@ describe('guard decisions over the hosted store', () => {
   });
 
   it('a dismissal lands on the repository row and reads back', async () => {
-    await dismissGuardClaim(REPO, claim({ anchor: 'a' }));
-    await dismissGuardClaim(REPO, claim({ anchor: 'b' }));
-    expect((await readGuardDecisions(REPO)).dismissedClaims.map((c) => c.anchor)).toEqual(['a', 'b']);
+    await dismissGuardClaim(REPO, claim({ claimId: 'a' }));
+    await dismissGuardClaim(REPO, claim({ claimId: 'b' }));
+    expect((await readGuardDecisions(REPO)).dismissedClaims.map((c) => c.claimId)).toEqual(['a', 'b']);
   });
 
   it('un-dismissing removes it from the repository row', async () => {
-    await dismissGuardClaim(REPO, claim({ anchor: 'a' }));
-    await dismissGuardClaim(REPO, claim({ anchor: 'b' }));
-    await undismissGuardClaim(REPO, claim({ anchor: 'a' }));
-    expect((await readGuardDecisions(REPO)).dismissedClaims.map((c) => c.anchor)).toEqual(['b']);
+    await dismissGuardClaim(REPO, claim({ claimId: 'a' }));
+    await dismissGuardClaim(REPO, claim({ claimId: 'b' }));
+    await undismissGuardClaim(REPO, claim({ claimId: 'a' }));
+    expect((await readGuardDecisions(REPO)).dismissedClaims.map((c) => c.claimId)).toEqual(['b']);
   });
 
   it('flow dismissals ride the same row', async () => {
