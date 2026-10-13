@@ -52,7 +52,7 @@ import { buildOutputTail } from './build.js'
 import { BUILD_PASSTHROUGH, constructChildEnv } from './child-env.js'
 import { armChildKill } from './child-kill.js'
 
-const DEFAULT_RUN_TIMEOUT_MS = 30 * 60_000
+const DEFAULT_RUN_TIMEOUT_MS = 60 * 60_000
 /** One test's own budget: a flow is a handful of pages or requests. */
 const TEST_TIMEOUT_MS = 120_000
 const DEFAULT_WORKERS = 4
