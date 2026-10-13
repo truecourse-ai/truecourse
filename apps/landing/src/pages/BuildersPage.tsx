@@ -11,7 +11,7 @@ import { Who } from '@/builders/Who';
 import { Check } from '@/builders/icons';
 import { BuiltWith } from '@/builders/BuiltWith';
 import { Header } from '@/builders/Header';
-import { AskForm, APP_WORRY } from '@/builders/AskForm';
+import { AskForm, APP_WORRY, CTO_NEED } from '@/builders/AskForm';
 import { useSectionViews } from '@/builders/useSectionViews';
 import { heroFor, useHeroCopy, useHeroScene } from '@/builders/heroCopy';
 import { MorningScene } from '@/builders/scenes/MorningScene';
@@ -28,9 +28,8 @@ import stylesheet from '@/builders/builders.css?url';
 /**
  * The AI CTO page, for professionals who build their own apps with AI: a page of
  * its own, outside the main site's header and footer. Its ask is a free app
- * checkup, which the Reddit ads' path leads with a question about what
- * worries the visitor about their app, and it records how far down each
- * visitor reads.
+ * checkup, which the ad pages lead with a question in the hero, and it
+ * records how far down each visitor reads.
  */
 
 export const links: LinksFunction = () => [{ rel: 'stylesheet', href: stylesheet }];
@@ -138,7 +137,13 @@ export default function BuildersPage() {
               </Reveal>
             </div>
             <Reveal className="bs-hero-scene" delay={300} rise>
-              {hero.ask ? <AskForm question={APP_WORRY} /> : scene === 'growth' ? <GrowthScene /> : <MorningScene />}
+              {hero.ask ? (
+                <AskForm question={hero.ask === 'cto-need' ? CTO_NEED : APP_WORRY} />
+              ) : scene === 'growth' ? (
+                <GrowthScene />
+              ) : (
+                <MorningScene />
+              )}
             </Reveal>
           </div>
         </section>
