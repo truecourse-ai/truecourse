@@ -227,7 +227,8 @@ class ReleaseTests(unittest.TestCase):
     def test_environment_validates_database_and_keeps_existing_key(self):
         values = {name: 'configured' for name in vm.SECRET_NAMES}
         values.update(DATABASE_URL='postgresql://user:password@managed-dev.postgres.database.azure.com/app?sslmode=require',
-                      TRUECOURSE_SECRET_KEY='original-key-' * 4, TRUECOURSE_MAX_CONCURRENCY='8')
+                      TRUECOURSE_SECRET_KEY='original-key-' * 4, TRUECOURSE_MAX_CONCURRENCY='8',
+                      TRUECOURSE_LLM_TRANSPORT='claude-code')
         absent = {'SENTRY_DSN', 'TRUECOURSE_MAX_API_CONCURRENCY'}
         def secret(url, **kwargs):
             name = url.split('/secrets/')[1].split('?')[0].upper().replace('-', '_')
@@ -249,6 +250,24 @@ class ReleaseTests(unittest.TestCase):
             self.assertNotIn('WORKOS_AUTHKIT_DOMAIN', env)
             self.assertNotIn('TRUECOURSE_MCP_URL', env)
             absent.discard('WORKOS_AUTHKIT_DOMAIN')
+            self.assertEqual(env['DISABLE_AUTOUPDATER'], '1')
+            self.assertEqual(env['TRUECOURSE_LLM_TRANSPORT'], 'claude-code')
+            # Operator mode and its key come as a pair, or not at all.
+            absent.add('ANTHROPIC_API_KEY')
+            with self.assertRaisesRegex(RuntimeError, 'go together'):
+                vm.application_env(CONFIG, IMAGE)
+            absent.add('TRUECOURSE_LLM_TRANSPORT')
+            env = vm.application_env(CONFIG, IMAGE)
+            self.assertNotIn('TRUECOURSE_LLM_TRANSPORT', env)
+            self.assertNotIn('ANTHROPIC_API_KEY', env)
+            absent.discard('TRUECOURSE_LLM_TRANSPORT')
+            with self.assertRaisesRegex(RuntimeError, 'go together'):
+                vm.application_env(CONFIG, IMAGE)
+            absent.discard('ANTHROPIC_API_KEY')
+            values['TRUECOURSE_LLM_TRANSPORT'] = 'api'
+            with self.assertRaisesRegex(RuntimeError, 'claude-code or absent'):
+                vm.application_env(CONFIG, IMAGE)
+            values['TRUECOURSE_LLM_TRANSPORT'] = 'claude-code'
             values['TRUECOURSE_MAX_CONCURRENCY'] = 'eight'
             with self.assertRaisesRegex(RuntimeError, 'positive integer'):
                 vm.application_env(CONFIG, IMAGE)

@@ -48,6 +48,13 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
+# The Claude Code CLI, for a deployment that runs on it
+# (`TRUECOURSE_LLM_TRANSPORT=claude-code`): the Agent SDK is only the protocol
+# layer and spawns this binary. Installed under /usr/local beside node so it
+# travels with the runtime and is on PATH wherever node is. Pinned like node;
+# the deployment sets DISABLE_AUTOUPDATER so it never replaces itself.
+RUN npm install -g @anthropic-ai/claude-code@2.1.296
+
 ENV NODE_ENV=production \
     PORT=3001 \
     TRUECOURSE_RUNTIME_DIR=/data

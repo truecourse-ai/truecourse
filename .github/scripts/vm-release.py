@@ -74,12 +74,12 @@ SECRET_NAMES = ('DATABASE_URL', 'TRUECOURSE_SECRET_KEY', 'WORKOS_API_KEY',
                 'SENTRY_DSN', 'TRUECOURSE_MAX_CONCURRENCY', 'TRUECOURSE_MAX_API_CONCURRENCY',
                 'TRUECOURSE_CREDITS_OPENAI_API_KEY', 'TRUECOURSE_CREDITS_MODEL',
                 'TRUECOURSE_CREDITS_OPENAI_BASE_URL', 'TRUECOURSE_CREDITS_PRICE_MODEL',
-                'WORKOS_AUTHKIT_DOMAIN')
+                'WORKOS_AUTHKIT_DOMAIN', 'TRUECOURSE_LLM_TRANSPORT', 'ANTHROPIC_API_KEY')
 # Absent in Key Vault means "use the app's default"; access failures still fail the release.
 OPTIONAL_SECRETS = ('SENTRY_DSN', 'TRUECOURSE_MAX_CONCURRENCY', 'TRUECOURSE_MAX_API_CONCURRENCY',
                     'TRUECOURSE_CREDITS_OPENAI_API_KEY', 'TRUECOURSE_CREDITS_MODEL',
                     'TRUECOURSE_CREDITS_OPENAI_BASE_URL', 'TRUECOURSE_CREDITS_PRICE_MODEL',
-                    'WORKOS_AUTHKIT_DOMAIN')
+                    'WORKOS_AUTHKIT_DOMAIN', 'TRUECOURSE_LLM_TRANSPORT', 'ANTHROPIC_API_KEY')
 INTEGER_SECRETS = ('TRUECOURSE_MAX_CONCURRENCY', 'TRUECOURSE_MAX_API_CONCURRENCY')
 
 
@@ -254,10 +254,19 @@ def application_env(config, image):
         raise RuntimeError('Managed PostgreSQL connection must require TLS')
     if len(env['TRUECOURSE_SECRET_KEY']) < 32:
         raise RuntimeError('Existing database encryption key is invalid')
+    # Operator mode runs every workspace on the image's `claude` CLI, billed to
+    # the one ANTHROPIC_API_KEY; the two are set together or not at all, so a
+    # release never ships a mode whose every run would fail its login probe.
+    transport = env.get('TRUECOURSE_LLM_TRANSPORT')
+    if transport is not None and transport != 'claude-code':
+        raise RuntimeError('TRUECOURSE_LLM_TRANSPORT must be claude-code or absent')
+    if (transport == 'claude-code') != ('ANTHROPIC_API_KEY' in env):
+        raise RuntimeError('TRUECOURSE_LLM_TRANSPORT=claude-code and ANTHROPIC_API_KEY go together')
     env.update({'WORKOS_APP_URL': 'https://' + config['fqdn'],
                 'WORKOS_REDIRECT_URI': 'https://' + config['fqdn'] + '/api/auth/callback',
                 'NODE_ENV': 'production', 'PORT': '3001',
                 'TRUECOURSE_LOG_DIR': '/var/log/truecourse',
+                'DISABLE_AUTOUPDATER': '1',  # the `claude` CLI is the release's, never self-replaced
                 'SENTRY_ENVIRONMENT': 'production' if config['environment'] == 'prod' else 'dev',
                 'TRUECOURSE_RELEASE': validate_image(config, image)})
     # MCP sign-in is AuthKit's: with its domain in Key Vault, /mcp is this
