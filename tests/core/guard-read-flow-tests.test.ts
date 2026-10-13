@@ -24,6 +24,7 @@ import {
   listGuardFlows,
   readGuardFlowDetail,
   readGuardRunFlowSummary,
+  readGuardRunFlows,
 } from '../../packages/core/src/commands/guard-read';
 import {
   guardFlowPlainStatus,
@@ -284,6 +285,18 @@ describe('flows proven by a Playwright test', () => {
     expect(detail?.test?.status).toBe('failing');
     expect(detail?.test?.disagreement?.observed).toBe('Editing opens an in-page dialog.');
     expect(detail?.test?.run?.ranAt).toBe('2026-10-02T12:00:00.000Z');
+  });
+
+  it('name, for a run of the stored tests, the flows its tests prove', async () => {
+    const ranAt = '2026-10-03T12:00:00.000Z';
+    const flows = await readGuardRunFlows(
+      REPO,
+      flowTestRun('run-2', ranAt, [ran('edit-expense', 'failing', 'pass', ranAt), ran('open-expense', 'passing', 'fail', ranAt)]),
+    );
+    expect(flows.map((f) => [f.flowId, f.title])).toEqual([
+      ['edit-expense', 'Edit expense'],
+      ['open-expense', 'Open an expense'],
+    ]);
   });
 
   it('carry the spec, the seed and the accepted run in their detail when no run is newer', async () => {

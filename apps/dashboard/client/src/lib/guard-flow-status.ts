@@ -43,6 +43,7 @@ import {
   parseBlockedOnCapabilities,
 } from '@truecourse/shared';
 import type {
+  FlowTestRunResult,
   GuardCoveragePlainStatus,
   GuardDriverId,
   GuardFlowGap,
@@ -246,6 +247,21 @@ export const GUARD_TEST_VERDICT_WORD: Record<GuardFlowPlainStatus, string> = {
   blocked: GUARD_COVERAGE_STATUS_WORD.blocked,
   'not-testable': GUARD_COVERAGE_STATUS_WORD['not-testable'],
   'never-run': GUARD_COVERAGE_STATUS_WORD['never-run'],
+};
+
+/**
+ * One test's OUTCOME in a run of the stored flow tests, as a status: the word a
+ * run page's row, header and verdict all say. A seed that did not hold is red
+ * like any error, and a skipped test is grey, since it reached no verdict.
+ */
+export const FLOW_TEST_OUTCOME_STATUS: Record<
+  FlowTestRunResult['outcome'],
+  { plain: GuardFlowPlainStatus; word: string }
+> = {
+  pass: { plain: 'succeeded', word: 'Passed' },
+  fail: { plain: 'failed', word: 'Failed' },
+  'seed-failed': { plain: 'failed', word: 'Seed failed' },
+  skipped: { plain: 'not-testable', word: 'Skipped' },
 };
 
 /** A stored test's status and which execution decided it. */

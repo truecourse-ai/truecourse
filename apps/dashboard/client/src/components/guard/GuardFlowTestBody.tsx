@@ -15,8 +15,11 @@
  *   the record  the summary its session gave, collapsible; the rulings stand open
  *   footer      the spec and the seed, by file
  *
- * The run shown is the one the test's status was accepted on. A test stored
- * without one says so and shows its files.
+ * The run shown is the one the test's status stands on: the run it was
+ * accepted on, or a later run of the stored tests. A test stored without one
+ * says so and shows its files. On a run's page the body shows that run alone,
+ * and `outcome` makes the run's own outcome the verdict, with how it parts from
+ * the status the test was accepted on.
  *
  * The other reading, on the header's mode switch, is the files themselves: the
  * spec, then its seed.
@@ -24,10 +27,11 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronRight, ScrollText } from "lucide-react";
-import type { FlowTestStep, GuardEvidenceVisual, GuardFlowTestView } from "@truecourse/shared";
+import type { FlowTestRunResult, FlowTestStep, GuardEvidenceVisual, GuardFlowTestView } from "@truecourse/shared";
 import { ArtifactRaw } from "@/dashboard/ui/artifact-view";
 import * as api from "@/lib/api";
 import { formatGuardDuration } from "@/lib/guard-drifts";
+import { FLOW_TEST_OUTCOME_STATUS } from "@/lib/guard-flow-status";
 import {
   GuardRunFilmstrip,
   GuardScreenshotLightbox,
@@ -48,6 +52,21 @@ const VERDICT: Record<GuardFlowTestView["status"], { word: string; dot: string; 
   failing: { word: "Failing", dot: "bg-red-500", border: "border-red-500/35" },
   blocked: { word: "Blocked", dot: "bg-amber-500", border: "border-amber-500/35" },
 };
+
+/** One run's outcome as the verdict, when the body shows a run rather than the record. */
+const RUN_VERDICT: Record<FlowTestRunResult["outcome"], { word: string; dot: string; border: string }> = {
+  pass: { ...VERDICT.passing, word: FLOW_TEST_OUTCOME_STATUS.pass.word },
+  fail: { ...VERDICT.failing, word: FLOW_TEST_OUTCOME_STATUS.fail.word },
+  "seed-failed": { ...VERDICT.failing, word: FLOW_TEST_OUTCOME_STATUS["seed-failed"].word },
+  skipped: { word: FLOW_TEST_OUTCOME_STATUS.skipped.word, dot: "bg-slate-400", border: "border-border" },
+};
+
+/** How a run's outcome parts from the status the test was accepted on; null when it does not. */
+function runDeparture(authored: FlowTestRunResult["authored"], outcome: FlowTestRunResult["outcome"]): string | null {
+  if (authored === "passing" && outcome === "fail") return "Accepted as passing, failed in this run.";
+  if (authored === "failing" && outcome === "pass") return "Accepted as failing, passed in this run.";
+  return null;
+}
 
 const STEP_DOT: Record<FlowTestStep["outcome"], string> = {
   passed: "bg-emerald-500",
@@ -82,9 +101,12 @@ export function GuardFlowTestBody({
   test,
   raw = false,
   rulings,
+  ran,
 }: {
   repoId: string;
   test: GuardFlowTestView;
+  /** One run of the test, when the body shows that run: its outcome is the verdict. */
+  ran?: Pick<FlowTestRunResult, "authored" | "outcome">;
   /** The parent's artifact mode: true renders the stored files instead of the page. */
   raw?: boolean;
   /** The rulings a reader can make about this flow, after the evidence. */
@@ -157,7 +179,8 @@ export function GuardFlowTestBody({
     );
   }
 
-  const verdict = VERDICT[test.status];
+  const verdict = ran ? RUN_VERDICT[ran.outcome] : VERDICT[test.status];
+  const departure = ran ? runDeparture(ran.authored, ran.outcome) : null;
   const passedCount = steps.filter((step) => step.outcome === "passed").length;
   const unreached = steps.filter((step) => step.outcome === "not-reached").length;
 
@@ -183,6 +206,12 @@ export function GuardFlowTestBody({
               <span className="text-[11px] text-muted-foreground">No run recorded</span>
             )}
           </div>
+          {departure && <p className="mt-1.5 min-w-0 text-[12px] leading-snug text-foreground">{departure}</p>}
+          {!failed && run?.error && (
+            <div className="mt-1.5 min-w-0 text-[12px]">
+              <GuardLongText text={run.error} label="what the run said" />
+            </div>
+          )}
           {failed && (
             <p className="mt-1.5 min-w-0 text-[12px] leading-snug">
               <button
@@ -314,23 +343,25 @@ export function GuardFlowTestBody({
         </section>
       )}
 
-      <section aria-label="Summary" className="min-w-0 rounded border border-border">
-        <button
-          type="button"
-          aria-expanded={summaryOpen}
-          onClick={() => setSummaryOpen((prev) => !prev)}
-          className="flex w-full cursor-pointer items-center gap-1.5 px-2.5 py-1.5 text-left text-[11px] text-muted-foreground outline-none hover:bg-muted/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
-        >
-          <Chevron open={summaryOpen} />
-          <ScrollText aria-hidden className="h-3.5 w-3.5 shrink-0" />
-          Summary
-        </button>
-        {summaryOpen && (
-          <p className="min-w-0 whitespace-pre-wrap break-words border-t border-border p-2.5 text-[12px] leading-relaxed text-foreground">
-            {test.summary}
-          </p>
-        )}
-      </section>
+      {test.summary && (
+        <section aria-label="Summary" className="min-w-0 rounded border border-border">
+          <button
+            type="button"
+            aria-expanded={summaryOpen}
+            onClick={() => setSummaryOpen((prev) => !prev)}
+            className="flex w-full cursor-pointer items-center gap-1.5 px-2.5 py-1.5 text-left text-[11px] text-muted-foreground outline-none hover:bg-muted/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+          >
+            <Chevron open={summaryOpen} />
+            <ScrollText aria-hidden className="h-3.5 w-3.5 shrink-0" />
+            Summary
+          </button>
+          {summaryOpen && (
+            <p className="min-w-0 whitespace-pre-wrap break-words border-t border-border p-2.5 text-[12px] leading-relaxed text-foreground">
+              {test.summary}
+            </p>
+          )}
+        </section>
+      )}
 
       {rulings}
 

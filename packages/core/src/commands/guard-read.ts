@@ -1719,15 +1719,19 @@ export async function readGuardFlowDetail(
 /**
  * The flows a RUN references, with their milestone chains — the join that lets the
  * Runs tab paint a result as a flow instance without a second fetch. Only the
- * flows the run's results name are returned (the smallest possible join); a
- * hand-written scenario names none and simply contributes nothing.
+ * flows the run's results name, scenarios and flow tests alike, are returned
+ * (the smallest possible join); a hand-written scenario names none and simply
+ * contributes nothing.
  */
 export async function readGuardRunFlows(
   repoKey: string,
   latest: GuardLatest | null,
   ref?: string,
 ): Promise<GuardRunFlow[]> {
-  const flowIds = new Set((latest?.scenarios ?? []).flatMap((s) => (s.flowId ? [s.flowId] : [])))
+  const flowIds = new Set([
+    ...(latest?.scenarios ?? []).flatMap((s) => (s.flowId ? [s.flowId] : [])),
+    ...(latest?.flowTests ?? []).map((t) => t.flowId),
+  ])
   if (flowIds.size === 0) return []
   const flowsFile = await readGuardFlowsForView(repoKey, ref)
   if (!flowsFile) return []
