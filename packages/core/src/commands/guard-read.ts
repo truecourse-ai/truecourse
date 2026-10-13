@@ -238,7 +238,11 @@ export interface GuardCoverageSources {
   flows?: GuardFlowsFile | null
   /** The claim corpus (`scenarios/claims.json`): the rows the coverage is keyed by. */
   claims?: ClaimsFile | null
-  /** The flows a Playwright test proves, by flow id; a test's verdict is its flow's status. */
+  /**
+   * The flows a Playwright test proves, by flow id, as the tests index stores
+   * them. A test's verdict is its flow's status, after `latest` has had its say
+   * ({@link testsAfterRun}).
+   */
   tests?: ReadonlyMap<string, FlowTestRecord>
   /** The decisions ledger: a dismissed claim wears `dismissed`, a dismissed flow is marked. */
   decisions?: GuardDecisions | null
@@ -261,7 +265,7 @@ function viewFromSources(sources: GuardCoverageSources, commit?: string): FlowVi
     latest: sources.latest,
     result: sources.result,
     scenarios: [...(sources.scenarios ?? [])],
-    tests: new Map(sources.tests ?? []),
+    tests: testsAfterRun(sources.tests ?? new Map(), sources.latest),
     dismissals: new Map((sources.decisions?.dismissedFlows ?? []).map((d) => [d.flowId, d])),
     claimDismissals: new Map((sources.decisions?.dismissedClaims ?? []).map((d) => [d.claimId, d])),
     claims: sources.claims ?? null,
@@ -415,11 +419,8 @@ async function runSummaryCommit(
  * all answers null, which the caller records as "not derivable".
  *
  * A run of the stored flow tests carries each test's own outcome, and that is
- * the word its flow wore in the run: a test that passed is its flow succeeded
- * and one that failed is its flow failed, whatever status it was accepted on.
- * A seed that did not hold, or a test that was skipped, says nothing about the
- * product, so its flow keeps the word its record gives it, as a blocked flow
- * the run had no test for does.
+ * the word its flow wore in the run, by the same rule every flow read follows
+ * ({@link testsAfterRun}).
  */
 export async function readGuardRunFlowSummary(
   repoKey: string,
@@ -427,11 +428,6 @@ export async function readGuardRunFlowSummary(
 ): Promise<GuardRunFlowSummary | null> {
   const view = await loadFlowView(repoKey, await runSummaryCommit(repoKey, latest), latest)
   if (!view) return null
-  for (const ran of latest.flowTests ?? []) {
-    const record = view.tests.get(ran.flowId)
-    if (!record || (ran.outcome !== 'pass' && ran.outcome !== 'fail')) continue
-    view.tests.set(ran.flowId, { ...record, status: ran.outcome === 'pass' ? 'passing' : 'failing' })
-  }
   const summary: GuardRunFlowSummary = {}
   // Only the flows the repository HAS: a manifest entry kept for its stale
   // scenarios after synthesis retired the flow is history, not coverage, and
@@ -1123,6 +1119,35 @@ function flowTestMark(test: FlowTestRecord): GuardFlowTestMark {
     ...(test.blockedBy ? { blockedBy: test.blockedBy } : {}),
     ...(test.copyDrift?.length ? { copyDrift: test.copyDrift } : {}),
   }
+}
+
+/**
+ * The tests index as a run of the stored tests leaves it. A test the run passed
+ * or failed wears that outcome, and the run becomes the one its status stands
+ * on, when the run is newer than the run the status was accepted on and ran the
+ * same spec. A test accepted since the run keeps its record. A seed that did not
+ * hold, or a skipped test, says nothing about the product, so its record stands
+ * too. A test that now passes drops the disagreement it was accepted failing on.
+ */
+function testsAfterRun(
+  tests: ReadonlyMap<string, FlowTestRecord>,
+  latest: GuardLatest | null,
+): Map<string, FlowTestRecord> {
+  const after = new Map(tests)
+  for (const ran of latest?.flowTests ?? []) {
+    const record = tests.get(ran.flowId)
+    if (!record || record.file !== ran.file) continue
+    if (ran.outcome !== 'pass' && ran.outcome !== 'fail') continue
+    if (record.run && Date.parse(ran.run.ranAt) <= Date.parse(record.run.ranAt)) continue
+    const { disagreement, ...rest } = record
+    after.set(ran.flowId, {
+      ...rest,
+      status: ran.outcome === 'pass' ? 'passing' : 'failing',
+      run: ran.run,
+      ...(ran.outcome === 'fail' && disagreement ? { disagreement } : {}),
+    })
+  }
+  return after
 }
 
 /**

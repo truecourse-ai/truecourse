@@ -1,9 +1,10 @@
 /**
  * The flow reads, for flows a Playwright test proves: a stored scenario set
- * that carries a tests index gives each flow the status its test reached, the
+ * that carries a tests index gives each flow the status its test reached, a
+ * newer run of the stored tests replaces that status with its own outcome, the
  * list row says what a failing test observed and what a blocked flow waits on,
- * the detail carries the spec, the seed and the accepted run, and that run's
- * pictures resolve through the evidence reads every other test uses.
+ * the detail carries the spec, the seed and the run its status stands on, and
+ * that run's pictures resolve through the evidence reads every other test uses.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
@@ -29,6 +30,7 @@ import {
   type FlowTestRunResult,
   type FlowTestsFile,
   type GuardGenerateReport,
+  type GuardLatest,
 } from '../../packages/shared/src/index';
 
 const REPO = 'acme/penny';
@@ -95,6 +97,30 @@ const TESTS: FlowTestsFile = {
     },
   ],
 };
+
+/** One test's result in a run of the stored tests. */
+const ran = (
+  flowId: string,
+  authored: FlowTestRunResult['authored'],
+  outcome: FlowTestRunResult['outcome'],
+  ranAt: string,
+): FlowTestRunResult => ({ flowId, file: `${flowId}.spec.ts`, authored, outcome, run: { ranAt, durationMs: 1, steps: [] } });
+
+/** A run of the stored tests: no scenario, one result per test. */
+const flowTestRun = (runId: string, ranAt: string, flowTests: FlowTestRunResult[]): GuardLatest => ({
+  run: { runId, ranAt, branch: 'main', commit: COMMIT, recipeFingerprint: 'product-world' },
+  summary: {
+    total: flowTests.length,
+    pass: flowTests.filter((t) => t.outcome === 'pass').length,
+    fail: flowTests.filter((t) => t.outcome === 'fail').length,
+    stale: 0,
+    orphaned: 0,
+    error: flowTests.filter((t) => t.outcome === 'seed-failed').length,
+    blocked: 0,
+  },
+  scenarios: [],
+  flowTests,
+});
 
 const REPORT: GuardGenerateReport = {
   generatedAt: '2026-10-02T12:00:00.000Z',
@@ -196,25 +222,17 @@ describe('flows proven by a Playwright test', () => {
 
   it('wear, in the summary of a run of the stored tests, the word that run left them', async () => {
     const ranAt = '2026-10-03T12:00:00.000Z';
-    const ran = (
-      flowId: string,
-      authored: FlowTestRunResult['authored'],
-      outcome: FlowTestRunResult['outcome'],
-    ): FlowTestRunResult => ({ flowId, file: `${flowId}.spec.ts`, authored, outcome, run: { ranAt, durationMs: 1, steps: [] } });
-
-    const summary = await readGuardRunFlowSummary(REPO, {
-      run: { runId: 'run-2', ranAt, branch: 'main', commit: COMMIT, recipeFingerprint: 'product-world' },
-      summary: { total: 3, pass: 1, fail: 1, stale: 0, orphaned: 0, error: 1, blocked: 0 },
-      scenarios: [],
-      flowTests: [
+    const summary = await readGuardRunFlowSummary(
+      REPO,
+      flowTestRun('run-2', ranAt, [
         // Accepted failing, and the product now does what the documents say.
-        ran('edit-expense', 'failing', 'pass'),
+        ran('edit-expense', 'failing', 'pass', ranAt),
         // Accepted passing, and the product no longer does.
-        ran('open-expense', 'passing', 'fail'),
+        ran('open-expense', 'passing', 'fail', ranAt),
         // A seed that did not hold says nothing about the product.
-        ran('rename-expense', 'passing', 'seed-failed'),
-      ],
-    });
+        ran('rename-expense', 'passing', 'seed-failed', ranAt),
+      ]),
+    );
 
     expect(summary).toEqual({
       'edit-expense': 'succeeded',
@@ -226,7 +244,49 @@ describe('flows proven by a Playwright test', () => {
     });
   });
 
-  it('carry the spec, the seed and the accepted run in their detail', async () => {
+  it('wear, on every read, the outcome of the newest run of the stored tests', async () => {
+    const ranAt = '2026-10-03T12:00:00.000Z';
+    const failedRun = {
+      ranAt,
+      durationMs: 5,
+      steps: [{ order: 1, title: 'The details page opens', outcome: 'failed' as const, durationMs: 5, error: 'expect(page).toHaveTitle failed' }],
+      error: 'expect(page).toHaveTitle failed',
+      evidencePath: '.truecourse/guard/evidence/run-2/open-expense',
+    };
+    await guardStore.writeGuardLatest(
+      REPO,
+      flowTestRun('run-2', ranAt, [
+        ran('edit-expense', 'failing', 'pass', ranAt),
+        { ...ran('open-expense', 'passing', 'fail', ranAt), run: failedRun },
+        ran('rename-expense', 'passing', 'seed-failed', ranAt),
+      ]),
+    );
+
+    const { flows } = await listGuardFlows(REPO);
+    const byId = new Map(flows.map((f) => [f.flowId, f]));
+    // It passes now, so the disagreement it was accepted failing on is gone.
+    expect(guardFlowPlainStatus(byId.get('edit-expense')!)).toBe('succeeded');
+    expect(byId.get('edit-expense')!.test).toEqual({ status: 'passing', seeded: true });
+    expect(guardFlowPlainStatus(byId.get('open-expense')!)).toBe('failed');
+    expect(guardFlowPlainStatus(byId.get('rename-expense')!)).toBe('partially-succeeded');
+
+    // The detail shows the run the status now stands on.
+    const detail = await readGuardFlowDetail(REPO, 'open-expense');
+    expect(detail?.test).toMatchObject({ status: 'failing', run: failedRun });
+  });
+
+  it('keep the status a test was accepted on when the run is older than that acceptance', async () => {
+    // edit-expense was accepted failing on 2026-10-02; this run predates it.
+    const ranAt = '2026-10-01T12:00:00.000Z';
+    await guardStore.writeGuardLatest(REPO, flowTestRun('run-0', ranAt, [ran('edit-expense', 'failing', 'pass', ranAt)]));
+
+    const detail = await readGuardFlowDetail(REPO, 'edit-expense');
+    expect(detail?.test?.status).toBe('failing');
+    expect(detail?.test?.disagreement?.observed).toBe('Editing opens an in-page dialog.');
+    expect(detail?.test?.run?.ranAt).toBe('2026-10-02T12:00:00.000Z');
+  });
+
+  it('carry the spec, the seed and the accepted run in their detail when no run is newer', async () => {
     const detail = await readGuardFlowDetail(REPO, 'edit-expense');
     expect(detail?.status).toBe('fail');
     expect(detail?.test?.spec).toEqual({
