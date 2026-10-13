@@ -137,6 +137,8 @@ describe('a flow proven by a Playwright test', () => {
     });
     const verdict = screen.getByRole('region', { name: 'Test verdict' });
     expect(within(verdict).getByText('Blocked')).toBeInTheDocument();
+    expect(within(verdict).getByText('Blocked on')).toBeInTheDocument();
+    expect(within(verdict).getByText('CurrencyBeacon API key')).toBeInTheDocument();
     expect(within(verdict).getByText('Conversion needs a CurrencyBeacon API key this product does not have.')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Steps' })).toBeNull();
   });

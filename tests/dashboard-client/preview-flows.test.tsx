@@ -207,7 +207,6 @@ describe('Flows, the index', () => {
     // The document the flow cites, by file name.
     expect(within(cli).getByText('cli.md')).toBeInTheDocument();
 
-    // A thing only one flow waits on names that flow.
     const blocked = screen.getByRole('table', { name: 'Blocked flows' });
     expect(within(blocked).getByText('Checks out with a saved card')).toBeInTheDocument();
 
@@ -215,7 +214,7 @@ describe('Flows, the index', () => {
     expect(state.calls).toContain(`/api/repos/${WEB.id}/guard/flows`);
   });
 
-  it('says what a failed flow observed, and folds blocked flows into what they wait on', async () => {
+  it('says what a failed flow observed, and lists every blocked flow as itself', async () => {
     const blockedOn = (flowId: string, title: string) =>
       flow({
         flowId,
@@ -244,20 +243,16 @@ describe('Flows, the index', () => {
       webFlows: [],
     });
     renderAt('/flows');
-    const user = userEvent.setup();
 
     const failed = await screen.findByRole('table', { name: 'Failed flows' });
     const row = within(failed).getByText('Edit expense').closest('tr')!;
     expect(within(row).getByText('Editing opens an in-page dialog.')).toBeInTheDocument();
 
-    // Two flows, one missing thing: one row, which opens to the flows.
+    // One row per blocked flow; what it waits on is the flow page's to say.
     const blocked = screen.getByRole('table', { name: 'Blocked flows' });
-    const reason = within(blocked).getByText('CurrencyBeacon API key').closest('tr')!;
-    expect(within(reason).getByText('2 flows')).toBeInTheDocument();
-    expect(within(blocked).queryByText('Convert an expense')).toBeNull();
-    await user.click(reason);
     expect(within(blocked).getByText('Convert an expense')).toBeInTheDocument();
     expect(within(blocked).getByText('Convert an expense twice')).toBeInTheDocument();
+    expect(within(blocked).queryByText('CurrencyBeacon API key')).toBeNull();
 
     const succeeded = screen.getByRole('table', { name: 'Succeeded flows' });
     expect(within(within(succeeded).getByText('Open an expense').closest('tr')!).getByText('Seeded')).toBeInTheDocument();
@@ -355,8 +350,8 @@ describe('Flows, the index', () => {
     });
     renderAt('/flows');
     const user = userEvent.setup();
-    // Three succeeded rows, and the two blocked flows as the one thing they wait on.
-    await waitFor(() => expect(rows()).toHaveLength(4));
+    // Three succeeded rows, and a row for each blocked flow.
+    await waitFor(() => expect(rows()).toHaveLength(5));
 
     await user.click(screen.getByRole('button', { name: 'Add filter' }));
     await user.click(await screen.findByRole('option', { name: /Status/ }));

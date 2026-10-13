@@ -9,10 +9,8 @@
  * page at '/flows/:flowId?repo=<id>'.
  *
  * Each status has the columns its rows have something to say in. A failed flow
- * says what the product did instead of what its documents promise. Blocked
- * flows collapse to one row per thing they wait on, which opens to the flows
- * themselves: eighteen flows blocked on one missing key are one fact, not
- * eighteen. A thing only one flow waits on names that flow and opens it. The
+ * says what the product did instead of what its documents promise. A blocked
+ * flow names its document, and what it waits on is on the flow's own page. The
  * rest say whether their test seeds its own data.
  *
  * Blocked flows are excluded unless Settings > Workspace or an explicit
@@ -26,7 +24,7 @@
  * same two signals the Agent page listens to.
  */
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import type { GuardFlowListItem } from '@truecourse/shared';
 import { guardDriver } from '@truecourse/shared';
@@ -40,7 +38,6 @@ import {
   GUARD_FLOW_STATUS_ORDER,
   GUARD_FLOW_STATUS_WORD,
   guardFlowPlainStatus,
-  guardWhyNoTest,
   type GuardFlowPlainStatus,
 } from '@/lib/guard-flow-status';
 import type { Repo } from '@/dashboard/data/types';
@@ -156,19 +153,6 @@ function documentCell(docs: readonly string[]): string {
   if (docs.length === 0) return '';
   const name = docs[0].split('/').pop() ?? docs[0];
   return docs.length === 1 ? name : `${name} +${docs.length - 1}`;
-}
-
-/**
- * What a blocked flow waits on, the phrase blocked flows group by: the few
- * words its test gave the missing thing, else the test's own explanation, else
- * what the flow's gap needs.
- */
-function blockedReason({ flow }: FlowRow): string {
-  return (
-    flow.test?.blockedOn ??
-    flow.test?.blockedBy ??
-    guardWhyNoTest(flow.surfaces.find((surface) => surface.gap)?.gap, { attempted: flow.errors > 0 })
-  );
 }
 
 const TABLE = 'w-full table-fixed border-collapse text-[13px]';
@@ -355,24 +339,6 @@ function FlowsIndex() {
     return groups;
   }, [rows]);
 
-  /** The blocked rows by what they wait on, most flows first. */
-  const blockedOn = useMemo(() => {
-    const reasons = new Map<string, FlowRow[]>();
-    for (const row of byStatus.get('blocked') ?? []) {
-      const reason = blockedReason(row);
-      reasons.set(reason, [...(reasons.get(reason) ?? []), row]);
-    }
-    return [...reasons].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
-  }, [byStatus]);
-  /** The reasons whose flows are listed under them. */
-  const [openReasons, setOpenReasons] = useState<ReadonlySet<string>>(new Set());
-  const toggleReason = (reason: string): void =>
-    setOpenReasons((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(reason)) next.add(reason);
-      return next;
-    });
-
   const open = ({ repo, flow }: FlowRow): void => {
     void navigate(flowHref(flow.flowId, repo.id));
   };
@@ -440,38 +406,15 @@ function FlowsIndex() {
                 key={status}
                 status={status}
                 count={group.length}
-                columns={[{ label: 'Blocked on' }, { label: 'Flows', width: '14rem' }]}
+                columns={[{ label: 'Flow' }, { label: 'Document', width: '14rem' }]}
               >
-                {blockedOn.map(([reason, flows]) => (
-                  <Fragment key={reason}>
-                    {flows.length === 1 ? (
-                      <tr {...opening(() => open(flows[0]))} className={ROW}>
-                        <td className={`${FIRST} text-foreground`} title={reason}>
-                          {reason}
-                        </td>
-                        <td className="truncate py-2.5 pl-3 pr-6" title={flows[0].flow.title}>
-                          <FlowName flow={flows[0].flow} />
-                        </td>
-                      </tr>
-                    ) : (
-                      <tr {...opening(() => toggleReason(reason))} aria-expanded={openReasons.has(reason)} className={ROW}>
-                        <td className={`${FIRST} text-foreground`} title={reason}>
-                          {reason}
-                        </td>
-                        <td className="truncate py-2.5 pl-3 pr-6 tabular-nums text-foreground">{flows.length} flows</td>
-                      </tr>
-                    )}
-                    {flows.length > 1 &&
-                      openReasons.has(reason) &&
-                      flows.map((row) => (
-                        <tr key={idOf(row)} {...opening(() => open(row))} className={ROW}>
-                          <td className="truncate py-2 pl-10 pr-3">
-                            <FlowName flow={row.flow} />
-                          </td>
-                          <td className={LAST}>{documentCell(row.flow.docs)}</td>
-                        </tr>
-                      ))}
-                  </Fragment>
+                {group.map((row) => (
+                  <tr key={idOf(row)} {...opening(() => open(row))} className={ROW}>
+                    <td className={FIRST}>
+                      <FlowName flow={row.flow} />
+                    </td>
+                    <td className={LAST}>{documentCell(row.flow.docs)}</td>
+                  </tr>
                 ))}
               </StatusGroup>
             );

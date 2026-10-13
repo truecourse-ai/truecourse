@@ -5,7 +5,7 @@
  *
  *   verdict     the word, how long the run took, how the steps went; for a
  *               failing test, what the documents say against what the product
- *               did; for a blocked flow, what it waits on
+ *               did; for a blocked flow, the thing it waits on and why
  *   filmstrip   a browser run only: the session video as the Replay tile, then
  *               one tile per step, the failing one marked
  *   the steps   the spec's own `test.step`s as one dense collapsible line each,
@@ -235,8 +235,14 @@ export function GuardFlowTestBody({
               </div>
             </dl>
           )}
+          {test.status === "blocked" && test.blockedOn && (
+            <dl className="mt-2 min-w-0 text-[12px] leading-snug">
+              <dt className="font-medium text-foreground">Blocked on</dt>
+              <dd className="mt-0.5 break-words text-foreground">{test.blockedOn}</dd>
+            </dl>
+          )}
           {test.status === "blocked" && test.blockedBy && (
-            <p className="mt-1.5 min-w-0 break-words text-[12px] leading-snug text-foreground">{test.blockedBy}</p>
+            <p className="mt-1.5 min-w-0 break-words text-[12px] leading-snug text-muted-foreground">{test.blockedBy}</p>
           )}
         </div>
       </section>
