@@ -44,7 +44,7 @@ let openedFrom: BookPlacement | undefined;
 let calendar: ReturnType<typeof getCalApi> | undefined;
 function loadCalendar() {
   calendar ??= getCalApi({ namespace: NAMESPACE }).then((cal) => {
-    cal('ui', { theme: 'light', layout: 'month_view' });
+    cal('ui', { theme: 'light', layout: 'month_view', hideEventTypeDetails: true });
     cal('preload', { calLink: CAL_LINK });
     cal('on', {
       action: 'bookingSuccessfulV2',
@@ -108,7 +108,7 @@ export function BookingCalendar({ className }: { className?: string }) {
     const el = ref.current;
     if (!el) return;
     void getCalApi({ namespace: INLINE_NAMESPACE }).then((cal) => {
-      cal('ui', { theme: 'light', layout: 'month_view' });
+      cal('ui', { theme: 'light', layout: 'month_view', hideEventTypeDetails: true });
       cal('on', {
         action: 'bookingSuccessfulV2',
         callback: () => {
