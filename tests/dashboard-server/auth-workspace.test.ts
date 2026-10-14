@@ -6,7 +6,10 @@ import {
   resetEntitlementsStore,
   setEntitlementsStore,
 } from '@truecourse/core/lib/entitlements-store';
-import { createAuthRouter } from '../../apps/dashboard/server/src/auth/workos-auth';
+import {
+  createAuthRouter,
+  createSessionVerifier,
+} from '../../apps/dashboard/server/src/auth/workos-auth';
 import {
   clearServerFeatures,
   registerServerFeature,
@@ -128,13 +131,19 @@ function makeWorkos(
 // The verifier the gate also holds; the router must call THIS one.
 const verify = vi.fn(async () => null as unknown);
 
-function makeApp(workos: unknown): Express {
+function makeApp(workos: unknown, verifier: unknown = verify): Express {
   const app = express();
   app.use(express.json());
   /* eslint-disable @typescript-eslint/no-explicit-any */
-  app.use('/api/auth', createAuthRouter(workos as any, cfg as any, verify as any));
+  app.use('/api/auth', createAuthRouter(workos as any, cfg as any, verifier as any));
   /* eslint-enable @typescript-eslint/no-explicit-any */
   return app;
+}
+
+/** The app over the real verifier, which the onboarding route resolves its session through. */
+function appWithVerifier(workos: unknown): Express {
+  /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+  return makeApp(workos, createSessionVerifier(workos as any, cfg as any));
 }
 
 describe('POST /api/auth/workspace', () => {
@@ -146,7 +155,7 @@ describe('POST /api/auth/workspace', () => {
     vi.mocked(captureWorkspaceCreated).mockClear();
     const m = makeWorkos();
     calls = m.calls;
-    app = makeApp(m.workos);
+    app = appWithVerifier(m.workos);
     // A workspace is named AND described when it is created: the description is
     // what its documents are attributed against, and nothing connects without one.
     profiles = installWorkspaceProfiles([]);
@@ -194,7 +203,7 @@ describe('POST /api/auth/workspace', () => {
         { id: 'om_existing', organizationId: 'org_existing', organizationName: 'Existing', status: 'active', userId: 'user_1' },
       ],
     });
-    const res = await request(makeApp(m.workos))
+    const res = await request(appWithVerifier(m.workos))
       .post('/api/auth/workspace')
       .set('Cookie', 'tc_session=sealed-has-org')
       .send({ name: 'Another', description: TEST_WORKSPACE_DESCRIPTION })
@@ -218,7 +227,7 @@ describe('POST /api/auth/workspace', () => {
         },
       ],
     });
-    const res = await request(makeApp(m.workos))
+    const res = await request(appWithVerifier(m.workos))
       .post('/api/auth/workspace')
       .set('Cookie', 'tc_session=sealed-no-org')
       .send({ name: 'Acme', description: TEST_WORKSPACE_DESCRIPTION })
@@ -243,7 +252,7 @@ describe('POST /api/auth/workspace', () => {
         { id: 'om_1', organizationId: 'org_half', organizationName: 'Acme', status: 'active', userId: 'user_1' },
       ],
     });
-    const res = await request(makeApp(m.workos))
+    const res = await request(appWithVerifier(m.workos))
       .post('/api/auth/workspace')
       .set('Cookie', 'tc_session=sealed-no-org')
       .send({ name: 'Acme', description: TEST_WORKSPACE_DESCRIPTION })
@@ -264,7 +273,7 @@ describe('POST /api/auth/workspace', () => {
         { id: 'om_existing', organizationId: 'org_existing', organizationName: 'Existing', status: 'active', userId: 'user_1' },
       ],
     });
-    await request(makeApp(m.workos))
+    await request(appWithVerifier(m.workos))
       .post('/api/auth/workspace')
       .set('Cookie', 'tc_session=sealed-has-org')
       .send({ name: 'Another', description: TEST_WORKSPACE_DESCRIPTION })
@@ -287,7 +296,7 @@ describe('POST /api/auth/workspace', () => {
         },
       ],
     });
-    const res = await request(makeApp(m.workos))
+    const res = await request(appWithVerifier(m.workos))
       .post('/api/auth/workspace')
       .set('Cookie', 'tc_session=sealed-no-org')
       .send({ name: 'Acme', description: TEST_WORKSPACE_DESCRIPTION })

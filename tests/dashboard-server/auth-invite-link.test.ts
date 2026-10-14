@@ -94,7 +94,7 @@ function makeApp(workos: unknown, opts: { manyWorkspaces?: boolean } = {}): Expr
     '/api/auth',
     createInviteLinkRouter({
       verify: verify as any,
-      tools: createWorkspaceSessionTools(workos as any, cfg as any),
+      tools: createWorkspaceSessionTools(workos as any, cfg as any, verify as any),
       inviteLinks: links,
       manyWorkspaces: opts.manyWorkspaces ?? false,
     }),

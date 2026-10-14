@@ -5,8 +5,7 @@
  * its user belongs to and stays there. These three routes are what a second one
  * needs — the list the switcher draws, the move into another, and the creation
  * of one more — and they mount at `/api/auth/workspaces`, above the auth gate,
- * because each mints a cookie of its own off the sealed session rather than
- * reading the one the gate resolved.
+ * because each mints a cookie of its own off the sealed session.
  *
  * Creating the FIRST workspace is not here: an org-less signup naming its
  * workspace is onboarding, which every edition has.
