@@ -113,7 +113,7 @@ export function createRepoGuardSetupTask(
   const runIds = new Map<string, string>();
   /** The commit each job cloned, for the settle hook. Same lifetime as `runIds`. */
   const commits = new Map<string, string>();
-  /** Jobs whose setup the head could not pass, as opposed to one that broke. Same lifetime. */
+  /** Jobs whose recipe setup the head could not pass, as opposed to one that broke. Same lifetime. */
   const refused = new Set<string>();
 
   return {
@@ -270,9 +270,11 @@ export function createRepoGuardSetupTask(
 
             // The bundle is preserved above whatever happened, so a refused
             // setup keeps its work; fail the job so its status agrees with
-            // Activity and it cannot chain into generation.
+            // Activity and it cannot chain into generation. A product world
+            // that was not brought up does not say whether the head or the
+            // session is at fault, so it is not counted as the head refused.
             if (report.status !== 'ok') {
-              refused.add(ctx.jobId);
+              if (llm.mode !== 'claude-code') refused.add(ctx.jobId);
               throw new Error(report.reason || 'Setup did not complete');
             }
             const reason = firstLine(report.reason);

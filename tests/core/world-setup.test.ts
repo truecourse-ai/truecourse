@@ -105,6 +105,27 @@ describe('world setup, on a tree that has world scripts', () => {
     expect(briefing).toContain('Start from those scripts.')
   }, 60_000)
 
+  it('stops building after five failed builds, the engine’s own included, and ends without a world', async () => {
+    const root = tree({ build: `echo build >> events.log\necho "SyntaxError: Unexpected token" >&2\nexit 1\n` })
+    const builds = () => fs.readFileSync(path.join(root, 'events.log'), 'utf-8').trim().split('\n').length
+    const answers: string[] = []
+    const model = scripted(async (input) => {
+      const verify = input.def.tools.find((t) => t.name === 'verify_world')!
+      for (let i = 0; i < 5; i += 1) answers.push((await verify.execute({}, {} as never)).content)
+      input.onEvent({ type: 'tool-result', toolName: 'verify_world', content: answers.at(-1)! })
+      return { kind: 'outcome', value: { summary: 'lib/store.ts does not compile.', notRunning: [] } }
+    })
+
+    const result = await runWorldSetup({ repoRoot: root, worldId: 'tc-world-setup', acquire: model.acquire })
+
+    // The engine's run of the scripts was the first failed build; the session got four more.
+    expect(builds()).toBe(5)
+    expect(answers[0]).toContain('3 of 5 builds left.')
+    expect(answers[3]).toContain('No build is left')
+    expect(answers[4]).toMatch(/^The build has failed 5 times/)
+    expect(result).toMatchObject({ status: 'failed', reason: 'the product did not build: 5 builds failed. lib/store.ts does not compile.' })
+  }, 60_000)
+
   it('says nothing of a failure when the scripts are being written afresh', async () => {
     const root = tree({ build: `exit 1\n` })
     const model = scripted(async () => ({ kind: 'failure', failure: { kind: 'budget-exhausted', retryability: 'none' } }))

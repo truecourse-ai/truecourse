@@ -97,6 +97,8 @@ let seen: { setupHadOverlays: boolean | null; scanned: boolean };
 let cancelledChecks: number[];
 /** The mode the check's own LLM runs in. */
 let checkLlmMode: WorkspaceLlm['mode'];
+/** The mode setup's LLM runs in: on Claude Code it brings up a product world. */
+let setupLlmMode: WorkspaceLlm['mode'];
 
 const testLlm = {
   mode: 'api',
@@ -353,7 +355,7 @@ function mountJobs(): JobsMount {
     hub,
     repos,
     startWorker: laneWorker,
-    guardSetup: { startLlm: async () => testLlm, runSetup: (root, opts) => engines.setup(root, opts) },
+    guardSetup: { startLlm: async () => ({ ...testLlm, mode: setupLlmMode }), runSetup: (root, opts) => engines.setup(root, opts) },
     guardGenerate: { startLlm: async () => testLlm, runGenerate: (root, opts) => engines.generate(root, opts) },
     guardRun: {
       startLlm: async () => testLlm,
@@ -397,6 +399,7 @@ beforeEach(async () => {
   seen = { setupHadOverlays: null, scanned: false };
   cancelledChecks = [];
   checkLlmMode = 'api';
+  setupLlmMode = 'api';
   engines = {
     setup: async (repoRoot) => {
       seen.setupHadOverlays = fs.existsSync(dependenciesLocalPath(repoRoot));
@@ -593,6 +596,16 @@ describe('the pull request check', () => {
     expect(await jobTypes()).toEqual(['repo.pr-check', 'repo.guard-setup']);
     const [setupRun] = await listStoredSessionRuns(REPO, 'guard-setup');
     expect(lastGithubUpdate()!.details_url).toBe(`https://app/agent/${setupRun!.runId}`);
+  });
+
+  it('a product world the head could not bring up is an error, not the pull request’s failure', async () => {
+    await storeBase();
+    setupLlmMode = 'claude-code';
+    engines.setup = async () => ({ report: { ranAt: '', status: 'failed', reason: 'the product was not brought up: the session timed out', steps: [] }, reportPath: '', sessionsRunDirs: [] }) as never;
+    const settled = await check();
+    // Whether the head broke the build or the session failed to bring it up is not known.
+    expect(settled).toMatchObject({ conclusion: 'neutral', reason: 'error' });
+    expect(await jobTypes()).toEqual(['repo.pr-check', 'repo.guard-setup']);
   });
 
   it('a generate that breaks is an error, linked to that generate', async () => {

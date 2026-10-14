@@ -26,6 +26,7 @@ import type { ProductWorld } from '@truecourse/shared';
 import { runSessionPool } from '../agent/session-pool.js';
 import { describeSessionFailure } from '../guard-setup/session-context.js';
 import {
+  WORLD_BUILD_ATTEMPTS,
   WORLD_SESSION_TIMEOUT_MS,
   worldSessionBriefing,
   worldSessionDef,
@@ -107,8 +108,14 @@ export async function runWorldSetup(input: WorldSetupInput): Promise<WorldSetupR
       return { status: 'failed', reason: `the product was not brought up: ${describeSessionFailure(outcome.failure)}`, spent };
     }
     const world = state.verified();
-    // The outcome check already refused anything else; this is the type saying so.
-    if (!world) return { status: 'failed', reason: 'the world session ended without scripts the engine had verified', spent };
+    // The outcome check refused anything else but a build that kept failing.
+    if (!world) {
+      const reason =
+        state.buildsFailed() >= WORLD_BUILD_ATTEMPTS
+          ? `the product did not build: ${state.buildsFailed()} builds failed. ${outcome.output.summary}`
+          : 'the world session ended without scripts the engine had verified';
+      return { status: 'failed', reason, spent };
+    }
     return { status: 'ok', outcome: 'written', world, summary: outcome.output.summary, notRunning: outcome.output.notRunning, spent };
   } finally {
     releaseWorldSlot(slot);
