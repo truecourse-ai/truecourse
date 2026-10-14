@@ -5,6 +5,9 @@
  * ReactMarkdown `components`, the same approach the claims viewer uses, scaled up
  * here for a full-page doc rather than a compact preview.
  *
+ * MDX component blocks (`<Steps>`, `<Step>`, `<Card>`) read as markdown, their
+ * text rendered and markable like any paragraph; see `remark-component-blocks`.
+ *
  * Container directives (`:::note … :::`) are markdown too here: fetched pages
  * from Docusaurus-based sites are full of them, so they render as callouts —
  * known type or not — rather than leaking their `:::` fences as prose.
@@ -30,6 +33,7 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { Info, Lightbulb, OctagonAlert, TriangleAlert } from 'lucide-react';
 
 import { ADMONITION_KIND, ADMONITION_TITLE, remarkAdmonitions } from '@/lib/remark-admonitions';
+import { remarkComponentBlocks } from '@/lib/remark-component-blocks';
 import { SENTENCE_MARK, remarkSentenceMarks, type SentenceRange } from '@/lib/remark-sentence-marks';
 
 // Extend GitHub's sanitize schema so README-style raw HTML renders instead of
@@ -187,7 +191,14 @@ type RemarkPlugins = NonNullable<Options['remarkPlugins']>;
 
 export function DocMarkdown({ source, marks = NO_MARKS }: { source: string; marks?: readonly SentenceRange[] }): ReactNode {
   const remarkPlugins = useMemo(
-    (): RemarkPlugins => [remarkGfm, remarkDirective, remarkFrontmatter, remarkAdmonitions, [remarkSentenceMarks, marks]],
+    (): RemarkPlugins => [
+      remarkGfm,
+      remarkDirective,
+      remarkFrontmatter,
+      remarkComponentBlocks,
+      remarkAdmonitions,
+      [remarkSentenceMarks, marks],
+    ],
     [marks],
   );
   return (
