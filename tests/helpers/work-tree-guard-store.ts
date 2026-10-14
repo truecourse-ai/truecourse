@@ -337,6 +337,18 @@ export class WorkTreeGuardStore implements GuardStore {
     return fs.readFileSync(full, 'utf-8');
   }
 
+  async forEachScenarioFile(
+    repoKey: string,
+    relPaths: readonly string[],
+    at: VersionAt | undefined,
+    each: (relPath: string, body: string) => void | Promise<void>,
+  ): Promise<void> {
+    for (const relPath of relPaths) {
+      const body = await this.readScenarioFile(repoKey, relPath, at);
+      if (body != null) await each(relPath, body);
+    }
+  }
+
   async saveGuardSetupBundle(): Promise<void> {
     // No-op: setup wrote these files into the working tree, which is the store.
   }

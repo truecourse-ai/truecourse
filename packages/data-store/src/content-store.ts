@@ -27,6 +27,12 @@ export const contentScope = {
   guardEvidence: (repoKey: string): string => `guard-evidence:${repoKey}`,
 };
 
+/**
+ * How many bodies one `getMany` query asks for. It bounds the list a query
+ * binds and the rows one reply carries, however large a set the caller walks.
+ */
+export const CONTENT_READ_BATCH = 500;
+
 export class ContentStore {
   constructor(private readonly db: Db) {}
 
@@ -86,6 +92,22 @@ export class ContentStore {
       .where(and(eq(content.scope, scope), eq(content.sha, sha)))
       .limit(1);
     return rows[0]?.body ?? null;
+  }
+
+  /**
+   * The bodies of `shas` under `scope`, {@link CONTENT_READ_BATCH} per query,
+   * yielded a batch at a time so a caller that writes each one out never holds
+   * the whole set. A sha with no row is absent from its batch.
+   */
+  async *getMany(scope: string, shas: Iterable<string>): AsyncGenerator<Map<string, string>> {
+    const unique = [...new Set(shas)];
+    for (let i = 0; i < unique.length; i += CONTENT_READ_BATCH) {
+      const rows = await this.db
+        .select({ sha: content.sha, body: content.body })
+        .from(content)
+        .where(and(eq(content.scope, scope), inArray(content.sha, unique.slice(i, i + CONTENT_READ_BATCH))));
+      yield new Map(rows.map((r) => [r.sha, r.body]));
+    }
   }
 
   async getJson<T>(scope: string, sha: string): Promise<T | null> {

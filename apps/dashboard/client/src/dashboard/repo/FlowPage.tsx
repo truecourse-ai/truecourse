@@ -2,8 +2,8 @@
  * One flow, as its own page (`/flows/:flowId?repo=`): the breadcrumb
  * back to Flows, then the flow workspace (`GuardFlowsPane`), pinned to
  * this one flow. A scenario or finding the workspace opens rides the same URL
- * tabs it always did. The reads are the server's, re-read
- * when a generate or a run lands.
+ * tabs it always did. The page reads this flow's detail alone, never the whole
+ * inventory, and re-reads when a generate or a run lands.
  *
  * The flows of every repository are ONE list now, so this page belongs to the
  * Flows page rather than to a repository tab: the repository it is read through
@@ -14,9 +14,8 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '@/dashboard/ui/bits';
 import { GuardFlowsPane } from '@/components/guard/GuardFlowsPane';
-import { useGuardClaims } from '@/hooks/useGuardClaims';
 import { useGuardDecisions } from '@/hooks/useGuardDecisions';
-import { useGuardFlows } from '@/hooks/useGuardFlows';
+import { useGuardFlowDetail } from '@/hooks/useGuardFlowDetail';
 import { flowTabId, tabFlowId, useGuardFlowTabs } from '@/hooks/useGuardFlowTabs';
 import { useGuardInterfaces } from '@/hooks/useGuardInterfaces';
 import { useGuardScenarios } from '@/hooks/useGuardScenarios';
@@ -35,14 +34,10 @@ export function FlowPage({ repo, flowId }: { repo: Repo; flowId: string }) {
   const decisions = useGuardDecisions(repo.id, true, reloadKey);
   // A flow ruling changes what the flow reads say (`dismissed`), so they re-read on it.
   const flowsKey = reloadKey + decisions.flowRevision;
-  const flows = useGuardFlows(repo.id, true, flowsKey);
   const interfaces = useGuardInterfaces(repo.id, true, reloadKey);
-  const claims = useGuardClaims(repo.id, true, reloadKey);
   const tests = useGuardScenarios(repo.id, true, reloadKey);
   const urlTabs = useGuardFlowTabs(repo.id);
   const { openSpecDoc, openGuardInterface, openGuardExternals } = useGuardView();
-
-  const flow = flows.view?.flows.find((f) => f.flowId === flowId) ?? null;
 
   // The page IS the flow: its tab is always open and pinned; opening another
   // flow from inside the workspace (an epic's chain) navigates to that page;
@@ -67,24 +62,22 @@ export function FlowPage({ repo, flowId }: { repo: Repo; flowId: string }) {
     };
   }, [flowId, navigate, repo.id, urlTabs]);
 
+  const detail = useGuardFlowDetail(repo.id, tabFlowId(tabs.activeId), flowsKey);
   const binds = useMemo(() => guardTestBinds(tests.rows), [tests.rows]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <PageHeader
         crumbs={[{ label: 'Flows', to: FLOWS_BASE }]}
-        title={flow?.title ?? flowId}
+        title={detail.detail?.title ?? flowId}
       />
       <div className="min-h-0 flex-1">
         <GuardFlowsPane
           repoId={repo.id}
-          view={flows.view}
-          loading={flows.loading}
-          error={flows.error}
+          detail={detail}
           tabs={tabs}
           interfaces={interfaces.view?.interfaces ?? null}
           binds={binds}
-          reloadKey={flowsKey}
           decisions={decisions}
           onOpenSpec={openSpecDoc}
           onOpenInterface={openGuardInterface}

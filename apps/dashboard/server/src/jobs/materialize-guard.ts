@@ -49,11 +49,11 @@ import {
 } from '@truecourse/shared';
 import { flowTestsIndexPath } from '@truecourse/shared/work-tree';
 import {
+  forEachScenarioFile,
   readGuardBaselineCommit,
   readGuardDecisions,
   readGuardResult,
   readManifest,
-  readScenarioFile,
   saveScenarios,
   writeGuardEvidence,
   writeGuardLatest,
@@ -114,12 +114,9 @@ export async function materializeStoredGuardState(
   // Every file of the set, not only the scenario yaml: the committed flows and
   // claims beside the manifest are what synthesis reconciles against, and a
   // clone without them makes every flow look new.
-  for (const rel of await storedScenarioSetFiles(repoKey, treeDir, at)) {
-    const body = await readScenarioFile(repoKey, rel, at);
-    if (body == null) continue;
-    assertSafeRel(rel);
-    writeFile(safeJoin(treeDir, rel), body);
-  }
+  const setFiles = await storedScenarioSetFiles(repoKey, treeDir, at);
+  for (const rel of setFiles) assertSafeRel(rel);
+  await forEachScenarioFile(repoKey, setFiles, at, (rel, body) => writeFile(safeJoin(treeDir, rel), body));
   const report = await readGuardResult(repoKey, at);
   if (report) writeCloneGuardResult(treeDir, report);
   return baseline;

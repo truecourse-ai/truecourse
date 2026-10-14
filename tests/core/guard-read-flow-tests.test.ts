@@ -22,6 +22,8 @@ import { installMemoryGuardOverlays, resetGuardOverlayStore } from '../helpers/m
 import {
   listGuardEvidenceVisuals,
   listGuardFlows,
+  readGuardClaims,
+  readGuardClaimsAndFlows,
   readGuardFlowDetail,
   readGuardRunFlowSummary,
   readGuardRunFlows,
@@ -219,6 +221,13 @@ describe('flows proven by a Playwright test', () => {
     // A flow no test was written for reads as every ungenerated flow does.
     expect(byId.get('delete-expense')!.test).toBeUndefined();
     expect(guardFlowPlainStatus(byId.get('delete-expense')!)).toBe('blocked');
+  });
+
+  it('read the same claims and flows out of one view as out of two', async () => {
+    const both = await readGuardClaimsAndFlows(REPO);
+    expect(both.flows).toEqual(await listGuardFlows(REPO));
+    expect(both.claims).toEqual(await readGuardClaims(REPO));
+    expect(both.flows.flows.length).toBeGreaterThan(0);
   });
 
   it('wear, in the summary of a run of the stored tests, the word that run left them', async () => {

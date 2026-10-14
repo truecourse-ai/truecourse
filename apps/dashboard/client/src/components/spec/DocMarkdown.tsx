@@ -5,6 +5,9 @@
  * ReactMarkdown `components`, the same approach the claims viewer uses, scaled up
  * here for a full-page doc rather than a compact preview.
  *
+ * MDX component blocks (`<Steps>`, `<Step>`, `<Card>`) read as markdown, their
+ * text rendered and markable like any paragraph; see `remark-component-blocks`.
+ *
  * Container directives (`:::note … :::`) are markdown too here: fetched pages
  * from Docusaurus-based sites are full of them, so they render as callouts —
  * known type or not — rather than leaking their `:::` fences as prose.
@@ -30,6 +33,7 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import { Info, Lightbulb, OctagonAlert, TriangleAlert } from 'lucide-react';
 
 import { ADMONITION_KIND, ADMONITION_TITLE, remarkAdmonitions } from '@/lib/remark-admonitions';
+import { remarkComponentBlocks } from '@/lib/remark-component-blocks';
 import { SENTENCE_MARK, remarkSentenceMarks, type SentenceRange } from '@/lib/remark-sentence-marks';
 
 // Extend GitHub's sanitize schema so README-style raw HTML renders instead of
@@ -136,11 +140,12 @@ const COMPONENTS: Components = {
     <a href={href} id={id} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">{children}</a>
   ),
   img: ({ node, ...props }) => <img {...props} className="inline-block max-w-full" />,
-  // The sentence a conflict points at, in place.
+  // The sentence a conflict points at, in place. A code span inside it takes
+  // the highlight's tint, a shade deeper, rather than painting grey over it.
   mark: ({ node, children }) => (
     <mark
       data-sentence={node?.properties?.[SENTENCE_MARK]}
-      className="rounded-sm bg-amber-500/20 px-0.5 text-foreground ring-1 ring-amber-500/50"
+      className="box-decoration-clone rounded-sm bg-amber-500/20 px-0.5 text-foreground ring-1 ring-amber-500/50 [&_code]:bg-amber-500/20"
     >
       {children}
     </mark>
@@ -187,7 +192,14 @@ type RemarkPlugins = NonNullable<Options['remarkPlugins']>;
 
 export function DocMarkdown({ source, marks = NO_MARKS }: { source: string; marks?: readonly SentenceRange[] }): ReactNode {
   const remarkPlugins = useMemo(
-    (): RemarkPlugins => [remarkGfm, remarkDirective, remarkFrontmatter, remarkAdmonitions, [remarkSentenceMarks, marks]],
+    (): RemarkPlugins => [
+      remarkGfm,
+      remarkDirective,
+      remarkFrontmatter,
+      remarkComponentBlocks,
+      remarkAdmonitions,
+      [remarkSentenceMarks, marks],
+    ],
     [marks],
   );
   return (

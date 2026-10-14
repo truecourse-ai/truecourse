@@ -240,6 +240,18 @@ export interface GuardStore {
   listScenarioFiles(repoKey: string, at?: VersionAt): Promise<string[]>;
   /** One scenario YAML's content by its repo-relative path, or `null`. */
   readScenarioFile(repoKey: string, relPath: string, at?: VersionAt): Promise<string | null>;
+  /**
+   * Many files of ONE stored set, by repo-relative path as `readScenarioFile`
+   * takes them: each body is handed to `each` as it is read, in batches, so a
+   * large set is neither one query per file nor held whole. A path the set does
+   * not hold is skipped. Order is unspecified.
+   */
+  forEachScenarioFile(
+    repoKey: string,
+    relPaths: readonly string[],
+    at: VersionAt | undefined,
+    each: (relPath: string, body: string) => void | Promise<void>,
+  ): Promise<void>;
 
   // --- Setup bundle ---------------------------------------------------------
   // What `guard setup` leaves behind (the settle spine, findings, recipe,
@@ -396,6 +408,12 @@ export const readScenarioFile = (
   relPath: string,
   at?: VersionAt,
 ): Promise<string | null> => getGuardStore().readScenarioFile(repoKey, relPath, at);
+export const forEachScenarioFile = (
+  repoKey: string,
+  relPaths: readonly string[],
+  at: VersionAt | undefined,
+  each: (relPath: string, body: string) => void | Promise<void>,
+): Promise<void> => getGuardStore().forEachScenarioFile(repoKey, relPaths, at, each);
 
 export const saveGuardSetupBundle = (
   ref: RepoRef,

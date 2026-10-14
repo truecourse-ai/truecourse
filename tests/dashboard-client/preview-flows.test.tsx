@@ -106,6 +106,28 @@ const CHECKOUT = flow({
   bucket: 'blocked',
 });
 
+/** The flow page's read of WRITE_READ: its detail, which titles the page. */
+const WRITE_READ_DETAIL = {
+  flowId: 'write-then-read',
+  title: 'Writes a file and reads it back',
+  goal: 'a goal',
+  status: 'pass',
+  bucket: 'guarded',
+  epic: false,
+  manual: false,
+  composedOf: [],
+  milestones: [],
+  surfaces: [],
+  gaps: [],
+  interfaceIds: [],
+  findings: [],
+  errors: [],
+  dismissed: false,
+  generatedAt: null,
+  runId: null,
+  ranAt: null,
+};
+
 /** Two connected repositories, one flow each. */
 function serve(options: { cliFlows?: unknown[]; webFlows?: unknown[]; showBlocked?: boolean } = {}) {
   const state = {
@@ -128,6 +150,7 @@ function serve(options: { cliFlows?: unknown[]; webFlows?: unknown[]; showBlocke
     if (url.pathname === '/api/llm/config') return json({ config: { provider: 'anthropic' }, providers: ['anthropic'] });
     if (url.pathname === `/api/repos/${CLI.id}/guard/flows`) return json({ recipe: null, flows: state.cli });
     if (url.pathname === `/api/repos/${WEB.id}/guard/flows`) return json({ recipe: null, flows: state.web });
+    if (url.pathname === `/api/repos/${CLI.id}/guard/flows/write-then-read`) return json(WRITE_READ_DETAIL);
     if (/\/guard\/decisions$/.test(url.pathname)) return json({ version: 1, dismissedClaims: [], dismissedFlows: [] });
     if (/\/guard\/interfaces$/.test(url.pathname)) return json({ mapped: false, interfaces: [], surfaces: [], totals: {} });
     if (/\/guard\/claims$/.test(url.pathname)) return json({ extracted: false, claims: [], flows: [] });
@@ -436,7 +459,7 @@ describe('one flow', () => {
       ),
     );
     expect(
-      await screen.findByRole('heading', { name: 'Writes a file and reads it back' }),
+      await screen.findByRole('heading', { name: 'Writes a file and reads it back', level: 1 }),
     ).toBeInTheDocument();
     const crumbs = screen.getAllByRole('navigation', { name: 'Breadcrumb' }).at(-1)!;
     expect(within(crumbs).getByRole('link', { name: 'Flows' })).toHaveAttribute('href', '/flows');

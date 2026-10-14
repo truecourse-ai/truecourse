@@ -31,6 +31,13 @@ import {
 } from '@truecourse/shared';
 
 /**
+ * How many repositories a workspace-wide read (Home, Context's documents and
+ * claims) builds guard views for at once. Each view holds one repository's
+ * parsed guard state, so a large workspace is read a few repositories at a time.
+ */
+export const REPO_READ_CONCURRENCY = 4;
+
+/**
  * The Flows payload, narrowed to the flows wearing one of `status` (the
  * coverage words) when it is given. The totals stay the whole repository's.
  */

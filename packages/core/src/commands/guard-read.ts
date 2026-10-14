@@ -149,6 +149,7 @@ import {
   type GuardStepActual,
 } from '@truecourse/shared'
 import {
+  forEachScenarioFile,
   getGuardStore,
   loadGuardSetupBundle,
   listScenarioFiles,
@@ -214,9 +215,10 @@ async function resolveGuardScope(repoKey: string, ref?: string): Promise<GuardRe
 
 /** Resolve named setup actions against the same account state as execution. The
  * read materializes the repository's stored overlay and never borrows the
- * server env. */
+ * server env. It reads the setup state alone (recipe, catalog, report,
+ * decisions, overlays), so the tree leaves the scenario set out. */
 export async function guardExternalSetupIndexForView(repoKey: string, ref?: string): Promise<GuardExternalSetupIndex> {
-  return withGuardReadTree(repoKey, ref, tree => readGuardExternalSetupIndex(tree, { env: {} }))
+  return withGuardReadTree(repoKey, ref, tree => readGuardExternalSetupIndex(tree, { env: {} }), { scenarioSet: false })
 }
 
 // ---------------------------------------------------------------------------
@@ -1489,8 +1491,26 @@ function flowListItem(
  */
 export async function listGuardFlows(repoKey: string, ref?: string): Promise<GuardFlowsView> {
   const view = await loadFlowView(repoKey, ref)
-  if (!view) return emptyFlowsView()
+  return view ? composeFlowsView(repoKey, view) : emptyFlowsView()
+}
 
+/**
+ * A repository's Claims and Flows payloads from ONE view: what a surface
+ * showing both reads, where {@link readGuardClaims} and {@link listGuardFlows}
+ * side by side would build the view twice.
+ */
+export async function readGuardClaimsAndFlows(
+  repoKey: string,
+  ref?: string,
+): Promise<{ claims: GuardClaimsView; flows: GuardFlowsView }> {
+  const view = await loadFlowView(repoKey, ref)
+  return view
+    ? { claims: composeClaimsView(view), flows: await composeFlowsView(repoKey, view) }
+    : { claims: EMPTY_CLAIMS_VIEW, flows: emptyFlowsView() }
+}
+
+/** The Flows payload of a built view. */
+async function composeFlowsView(repoKey: string, view: FlowViewSources): Promise<GuardFlowsView> {
   const flows = allFlowIds(view)
     .map((id) => flowListItem(id, view))
     .sort(
@@ -2243,18 +2263,20 @@ export async function readGuardRecipeCard(repoKey: string, commit?: string): Pro
 /** Map each stored scenario id → its repo-relative YAML path (first sorted file wins, matching the loader's dedup). */
 async function scenarioFilesById(repoKey: string, commit?: string): Promise<Map<string, string>> {
   const map = new Map<string, string>()
-  for (const rel of await listScenarioFiles(repoKey, at(commit))) {
-    const content = await readScenarioFile(repoKey, rel, at(commit))
-    if (content == null) continue
+  const files = await listScenarioFiles(repoKey, at(commit))
+  // Bodies arrive in no particular order, so the first sorted file is kept by comparison.
+  await forEachScenarioFile(repoKey, files, at(commit), (rel, content) => {
     let parsed: unknown
     try {
       parsed = yaml.load(content)
     } catch {
-      continue
+      return
     }
     const id = (parsed as { id?: unknown } | null)?.id
-    if (typeof id === 'string' && !map.has(id)) map.set(id, rel)
-  }
+    if (typeof id !== 'string') return
+    const kept = map.get(id)
+    if (kept === undefined || rel < kept) map.set(id, rel)
+  })
   return map
 }
 

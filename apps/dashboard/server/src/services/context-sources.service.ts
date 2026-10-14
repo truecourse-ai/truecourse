@@ -18,6 +18,7 @@
  */
 
 import { createAppError } from '@truecourse/core/lib/errors';
+import pLimit from 'p-limit';
 import { log } from '@truecourse/core/lib/logger';
 import { readRegistry, type RegistryEntry } from '@truecourse/core/config/registry';
 import {
@@ -78,6 +79,7 @@ import { requireJobs } from '../jobs/current.js';
 import { captureAction, EVENTS } from '../observability/posthog.js';
 import { isVisibleTo, type RepoOwnershipLookup } from '../middleware/project.js';
 import { addableContextKinds, emitContextChanged, serverContextDrivers } from './context.service.js';
+import { REPO_READ_CONCURRENCY } from './guard-reads.service.js';
 
 /**
  * What Context needs of GitHub to store a source for a repository, whether or
@@ -578,19 +580,24 @@ export async function listWorkspaceDocuments(
     refsByRepo.set(binding.repoFullName, [...(refsByRepo.get(binding.repoFullName) ?? []), ...refs]);
   }
 
-  // One claims read per repository, then every document it reads folded from
-  // the repository's claims. The externals index is deliberately not read: it
-  // never changes which of the five words a claim wears.
-  const coverage = new Map<string, Map<string, GuardCoveragePlainStatus>>();
-  for (const [repoFullName, refs] of refsByRepo) {
-    const byDoc = claimWordsByDoc(await readGuardClaims(visible.get(repoFullName)!.path));
-    const words = new Map<string, GuardCoveragePlainStatus>();
-    for (const ref of new Set(refs)) {
-      const word = byDoc.get(ref)?.doc;
-      if (word) words.set(ref, word);
-    }
-    coverage.set(repoFullName, words);
-  }
+  // One claims read per repository, a few repositories at a time, then every
+  // document it reads folded from the repository's claims.
+  const limit = pLimit(REPO_READ_CONCURRENCY);
+  const coverage = new Map(
+    await Promise.all(
+      [...refsByRepo].map(([repoFullName, refs]) =>
+        limit(async () => {
+          const byDoc = claimWordsByDoc(await readGuardClaims(visible.get(repoFullName)!.path));
+          const words = new Map<string, GuardCoveragePlainStatus>();
+          for (const ref of new Set(refs)) {
+            const word = byDoc.get(ref)?.doc;
+            if (word) words.set(ref, word);
+          }
+          return [repoFullName, words] as const;
+        }),
+      ),
+    ),
+  );
 
   const rows = composeContextDocumentRows({
     corpus,
@@ -620,14 +627,15 @@ export async function listWorkspaceClaims(caller: ContextCaller): Promise<Contex
   if (!file) return composeContextClaims(null, []);
   // The map holds each repository under two names; one reading each.
   const repos = new Set((await linkableRepos(caller)).values());
-  const readings: ContextClaimReading[] = [];
-  for (const entry of repos) {
-    readings.push({
-      repo: entry.slug,
-      view: await readGuardClaims(entry.path),
-      dismissals: (await readGuardDecisions(entry.path)).dismissedClaims,
-    });
-  }
+  const limit = pLimit(REPO_READ_CONCURRENCY);
+  const readings = await Promise.all(
+    [...repos].map((entry) =>
+      limit(async (): Promise<ContextClaimReading> => {
+        const [view, decisions] = await Promise.all([readGuardClaims(entry.path), readGuardDecisions(entry.path)]);
+        return { repo: entry.slug, view, dismissals: decisions.dismissedClaims };
+      }),
+    ),
+  );
   return composeContextClaims(file, readings);
 }
 
