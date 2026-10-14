@@ -50,7 +50,7 @@
 
 import { resolveCommitSha } from '@truecourse/core/lib/repo-ref';
 import { emitRepoLifecycle } from '@truecourse/core/lib/repo-lifecycle';
-import { loadGuardSetupBundle } from '@truecourse/core/lib/guard-store';
+import { loadGuardSetupBundle, readGuardRunForCommit } from '@truecourse/core/lib/guard-store';
 import { materializeGuardOverlays } from '@truecourse/core/lib/guard-overlays';
 import { materializeGuardSetupBundle } from '@truecourse/core/services/guard-setup/bundle';
 import {
@@ -287,6 +287,8 @@ export function createRepoGuardRunTask(
           }
           const latest: GuardLatest = { ...outcome.latest, run: { ...outcome.latest.run, pullRequest: pr.number } };
           const headFlows = headFlowSummary(tree.dir, latest);
+          // Generate already ran the tests at this commit; read before this run is stored over it.
+          const earlier = await readGuardRunForCommit(repoFullName, commitSha, scope);
           await persistFlowTestRun(ref, tree.dir, latest, { coverage: { claims: {}, flows: headFlows } });
           const check = await deps.pullRequests.pulls.getCheck(pr.checkId);
           outcomes.set(
@@ -298,6 +300,7 @@ export function createRepoGuardRunTask(
               latest,
               headFlows,
               conflictsCreated: check?.report?.conflictsCreated.length ?? 0,
+              earlier,
             }),
           );
           return flowTestRunSettled(repoFullName, latest);

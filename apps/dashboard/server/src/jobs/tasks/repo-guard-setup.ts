@@ -26,6 +26,7 @@ import { log } from '@truecourse/core/lib/logger';
 import { resolveCommitSha } from '@truecourse/core/lib/repo-ref';
 import { emitRepoLifecycle } from '@truecourse/core/lib/repo-lifecycle';
 import { materializeGuardOverlays } from '@truecourse/core/lib/guard-overlays';
+import { buildOutputTail } from '@truecourse/guard-runner';
 import {
   loadGuardSetupBundle,
   saveGuardSetupBundle,
@@ -113,8 +114,10 @@ export function createRepoGuardSetupTask(
   const runIds = new Map<string, string>();
   /** The commit each job cloned, for the settle hook. Same lifetime as `runIds`. */
   const commits = new Map<string, string>();
-  /** Jobs whose recipe setup the head could not pass, as opposed to one that broke. Same lifetime. */
+  /** Jobs whose setup the head could not pass (a recipe it refused, a product that did not build), as opposed to one that broke. Same lifetime. */
   const refused = new Set<string>();
+  /** Jobs whose product world did not build: what the check quotes. Same lifetime. */
+  const notBuilt = new Map<string, { failures: number; output: string }>();
 
   return {
     type: REPO_GUARD_SETUP_TASK,
@@ -272,9 +275,11 @@ export function createRepoGuardSetupTask(
             // setup keeps its work; fail the job so its status agrees with
             // Activity and it cannot chain into generation. A product world
             // that was not brought up does not say whether the head or the
-            // session is at fault, so it is not counted as the head refused.
+            // session is at fault, so it is not counted as the head refused,
+            // unless it did not build however many times it was built.
             if (report.status !== 'ok') {
-              if (llm.mode !== 'claude-code') refused.add(ctx.jobId);
+              if (llm.mode !== 'claude-code' || report.build) refused.add(ctx.jobId);
+              if (report.build) notBuilt.set(ctx.jobId, { ...report.build, output: buildOutputTail(report.build.output, 20) });
               throw new Error(report.reason || 'Setup did not complete');
             }
             const reason = firstLine(report.reason);
@@ -325,6 +330,8 @@ export function createRepoGuardSetupTask(
       const commitSha = commits.get(ctx.jobId) ?? null;
       commits.delete(ctx.jobId);
       const wasRefused = refused.delete(ctx.jobId);
+      const build = notBuilt.get(ctx.jobId) ?? null;
+      notBuilt.delete(ctx.jobId);
       // Clears the in-page progress popup and refreshes the guard surfaces,
       // however setup ended.
       await emitRepoLifecycle(ctx.payload.workspaceOrgId, ctx.payload.repoFullName, 'guard-setup');
@@ -351,7 +358,7 @@ export function createRepoGuardSetupTask(
         // it was stopped, or it has nothing to generate from — which settles
         // on the spec half alone. A pause leaves the check open for its resume.
         if (outcome === 'failed') {
-          await settleLinkCheck(port, pr, { reason: wasRefused ? 'build-failed' : 'error', report: { codeHalf: 'ran' } }, link);
+          await settleLinkCheck(port, pr, { reason: wasRefused ? 'build-failed' : 'error', report: { codeHalf: 'ran', build } }, link);
         } else if (outcome === 'paused') {
           await pauseLinkCheck(port, pr, link);
         } else if (outcome === 'cancelled') {

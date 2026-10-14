@@ -98,6 +98,16 @@ export const CHECK_CONCLUSION_OF_REASON: Record<PullRequestCheckReason, PullRequ
 
 const FlowRefSchema = z.object({ id: z.string(), title: z.string() })
 
+/** A sentence of a document, where a developer finds it in the repository. */
+const DocSentenceSchema = z.object({
+  /** The document's path in its source (`docs/app.md`), never a `context/` ref. */
+  path: z.string(),
+  /** 1-based line of the sentence; null when the document's text was not at hand. */
+  line: z.number().int().positive().nullable(),
+  sentence: z.string(),
+})
+export type PullRequestDocSentence = z.infer<typeof DocSentenceSchema>
+
 export const PullRequestCheckReportSchema = z.object({
   base: z.object({
     /** The merge-base the provider resolved, or null when it could not be. */
@@ -120,6 +130,17 @@ export const PullRequestCheckReportSchema = z.object({
       path: z.string().nullable(),
       line: z.number().int().positive().nullable(),
       blocksRepositories: z.array(z.string()),
+      /** The two sentences, each marked when the pull request edited it. */
+      sides: z.array(DocSentenceSchema.extend({ edited: z.boolean() })).default([]),
+      /** The ruling the workspace had made on this pair before the pull request edited a side of it. */
+      ruling: z
+        .object({
+          at: z.string(),
+          /** The path of the document ruled right; null when the ruling picked neither. */
+          right: z.string().nullable(),
+        })
+        .nullable()
+        .default(null),
     }),
   ),
   /** Documents whose bound sentences moved, with the flows bound to each. */
@@ -138,11 +159,21 @@ export const PullRequestCheckReportSchema = z.object({
         newlyCovered: z.number().int().nonnegative().default(0),
         added: z.number().int().nonnegative(),
         retired: z.number().int().nonnegative(),
+        /** Flows proven at the head. A report stored before it was counted reads as none. */
+        held: z.number().int().nonnegative().default(0),
       }),
       newFailures: z.array(
         FlowRefSchema.extend({
           scenarioIds: z.array(z.string()),
           label: z.enum(['bug', 'doc-drift', 'test-defect']).optional(),
+          /** The documented sentence the failed step proves. */
+          documented: DocSentenceSchema.optional(),
+          /** The step the test failed at: its 1-based order, how many there are, and its title. */
+          step: z.object({ order: z.number().int().positive(), of: z.number().int().positive(), title: z.string() }).optional(),
+          /** What the product did instead: the test's recorded disagreement, else its assertion. */
+          observed: z.string().optional(),
+          /** Seconds before this run that a run of the same commit passed the test. */
+          passedEarlierSeconds: z.number().int().nonnegative().optional(),
         }),
       ),
       preExisting: z.array(FlowRefSchema),
@@ -151,11 +182,22 @@ export const PullRequestCheckReportSchema = z.object({
       /** Flows that could not run or had no scenario at the base and pass at the head. */
       newlyCovered: z.array(FlowRefSchema).default([]),
       /** Flows whose test held at the base and holds at the head only as the head rewrote it. */
-      rewritten: z.array(FlowRefSchema).default([]),
+      rewritten: z
+        .array(
+          FlowRefSchema.extend({
+            /** Where the rewritten test uses the product's name for what the documents call otherwise. */
+            copyDrift: z
+              .array(z.object({ documented: z.string(), observed: z.string(), at: DocSentenceSchema.nullable() }))
+              .default([]),
+          }),
+        )
+        .default([]),
     })
     .nullable(),
   specHalf: z.enum(['ran', 'no-documents-changed', 'not-a-source']),
   codeHalf: z.enum(['ran', 'stopped-by-conflict', 'not-run']),
+  /** The head's product did not build: how many builds failed, and the end of the last one's output. */
+  build: z.object({ failures: z.number().int().positive(), output: z.string() }).nullable().default(null),
 })
 export type PullRequestCheckReport = z.infer<typeof PullRequestCheckReportSchema>
 

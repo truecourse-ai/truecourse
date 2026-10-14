@@ -56,7 +56,7 @@ export function compareFlows(base: GuardRunFlowSummary, head: GuardRunFlowSummar
 }
 
 /** A flow a run proved: it succeeded, with or without healing around a renamed control. */
-const proven = (status: GuardCoveragePlainStatus | null): boolean =>
+export const proven = (status: GuardCoveragePlainStatus | null): boolean =>
   status === 'succeeded' || status === 'partially-succeeded';
 
 function deltaKind(
@@ -110,6 +110,44 @@ export function sentencesChanged(doc: string, before: string | null, head: strin
  */
 export function onChangedSentence(conflict: ConflictLike, changed: ReadonlyMap<string, ReadonlySet<string>>): boolean {
   return conflict.sections.some((side) => changed.get(side.doc)?.has(side.sentence) ?? false);
+}
+
+/** A ruling as the decisions ledger keeps it: each side a doc and a sentence key, and the verdict. */
+export interface RulingLike {
+  docA: string;
+  sentenceA: string;
+  docB: string;
+  sentenceB: string;
+  verdict: 'a' | 'b' | 'dismissed';
+  resolvedAt: string;
+}
+
+/**
+ * The ruling the workspace had made on a conflict before the pull request
+ * edited a side of it: one on the same two documents, on the same sentence of
+ * every side the head left alone, and on a sentence of each edited side the
+ * head no longer holds (`held`). Null when the conflict is new, or no side of
+ * it was edited.
+ */
+export function rulingBeforeEdit<R extends RulingLike>(
+  sides: readonly { doc: string; sentence: string; edited: boolean }[],
+  rulings: readonly R[],
+  held: (doc: string, sentence: string) => boolean,
+): R | null {
+  if (sides.length !== 2 || !sides.some((side) => side.edited)) return null;
+  const covers = (ruling: R, [a, b]: readonly [string, string]): boolean =>
+    [
+      { side: sides[0]!, doc: ruling.docA, sentence: a },
+      { side: sides[1]!, doc: ruling.docB, sentence: b },
+    ].every(({ side, doc, sentence }) =>
+      doc === side.doc && (side.edited ? sentence !== side.sentence && !held(doc, sentence) : sentence === side.sentence),
+    );
+  // A ruling may name the two documents in either order.
+  return (
+    rulings.find((ruling) => covers(ruling, [ruling.sentenceA, ruling.sentenceB])) ??
+    rulings.find((ruling) => covers({ ...ruling, docA: ruling.docB, docB: ruling.docA }, [ruling.sentenceB, ruling.sentenceA])) ??
+    null
+  );
 }
 
 export interface DocMoved {

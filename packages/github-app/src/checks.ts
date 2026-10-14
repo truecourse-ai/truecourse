@@ -4,9 +4,10 @@
  * `in_progress` as the job works and `completed` when it settles — and the
  * summary and annotations it carries. Nothing else calls `checks.*`.
  *
- * The summary is the check's report as markdown, counts first; annotations
- * mark the conflicts the pull request created on the changed documents' own
- * lines, fifty per request as the API takes them. Nothing is posted as a
+ * The summary is the check's report as markdown, written for the developer
+ * who opened the pull request: what happened, what to do, then the evidence;
+ * annotations mark the conflicts the pull request created on the changed
+ * documents' own lines, fifty per request as the API takes them. Nothing is posted as a
  * comment: the check is the whole conversation.
  */
 
@@ -119,130 +120,268 @@ export const PAUSED_CHECK_OUTPUT: CheckOutput = {
   summary: 'The check carries on as soon as the workspace can spend again.',
 };
 
-/** The one-line title each reason wears on the check. */
-const CHECK_TITLE_OF_REASON: Record<PullRequestCheckReason, string> = {
-  clean: 'No new failures, no conflicts created',
-  'new-failures': 'New failures',
-  conflict: 'Conflicts with the documentation',
-  'build-failed': 'The pull request does not build',
-  'no-base': 'Not checked: no base to compare against',
-  draft: 'Checked when ready for review',
-  superseded: 'Superseded by a newer commit',
-  cancelled: 'Cancelled',
-  error: 'The check could not run',
-};
+type Report = PullRequestCheckReport;
+type Run = NonNullable<Report['run']>;
+type CreatedConflict = Report['conflictsCreated'][number];
+
+const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
+const short = (sha: string): string => `\`${sha.slice(0, 8)}\``;
+const at = (path: string, line: number | null): string => `\`${line === null ? path : `${path}:${line}`}\``;
+const quoted = (sentence: string): string => `"${sentence}"`;
+const day = (iso: string): string => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+
+/** The one line a check wears: what happened, in the words of the developer who opened the pull request. */
+function checkTitle(reason: PullRequestCheckReason, report: Report | null): string {
+  switch (reason) {
+    case 'new-failures': {
+      const n = report?.run?.newFailures.length ?? 0;
+      return `${n} documented ${plural(n, 'behavior', 'behaviors')} broke`;
+    }
+    case 'conflict': {
+      const n = report?.conflictsCreated.length ?? 0;
+      return n > 0
+        ? `${n} document ${plural(n, 'conflict needs', 'conflicts need')} a decision`
+        : 'Not tested: the documentation has unresolved conflicts';
+    }
+    case 'clean': {
+      if (!report?.run) return 'Nothing to test: this repository reads no documents';
+      const n = report.run.rewritten.length;
+      return n > 0
+        ? `All documented flows succeeded. ${n} ${plural(n, 'flow was', 'flows were')} rewritten`
+        : 'All documented flows succeeded';
+    }
+    case 'build-failed':
+      return "The project doesn't build at this commit";
+    case 'error':
+      return report?.build ? "The project doesn't build at this commit" : "TrueCourse couldn't finish this check";
+    case 'no-base':
+      return 'Not checked: rebase onto a newer commit';
+    case 'draft':
+      return 'Not checked: draft pull request';
+    case 'superseded':
+      return 'Replaced by the check of a newer commit';
+    case 'cancelled':
+      return 'The check was stopped before it finished';
+  }
+}
 
 /**
- * The check's output for a settled report: the four parts in order, counts
- * first, capped at what GitHub accepts (cut back to the counts and the link
- * when the whole would not fit), and one annotation per created conflict
- * that names a changed document's line.
+ * The check's output for a settled report, written for the developer who
+ * opened the pull request: a title that says what happened, then what to do,
+ * then the evidence, every document named by its path and line. Capped at what
+ * GitHub accepts (cut back to the opening and the link when the whole would not
+ * fit), with one annotation per created conflict on the changed document's line.
  */
 export function renderCheckOutput(
   reason: PullRequestCheckReason,
-  report: PullRequestCheckReport | null,
+  report: Report | null,
   detailsUrl: string | null,
 ): CheckOutput {
-  const title = CHECK_TITLE_OF_REASON[reason];
-  if (!report) return { title, summary: settledWithoutReport(reason, detailsUrl) };
-  // Nothing was compared, so the counts say nothing: what the author needs is the commit to rebase onto.
-  if (reason === 'no-base') return { title, summary: [noBaseLine(report.base), link(detailsUrl)].filter(Boolean).join('\n\n') };
-  const counts = countsLine(report);
-  const full = [counts, ...sections(report), link(detailsUrl)].filter(Boolean).join('\n\n');
-  const summary = full.length <= SUMMARY_LIMIT ? full : [counts, link(detailsUrl)].filter(Boolean).join('\n\n');
+  const title = checkTitle(reason, report);
+  if (!report) return { title, summary: [WITHOUT_A_REPORT[reason], link('The full report', detailsUrl)].filter(Boolean).join('\n\n') };
+  const [opening, ...rest] = body(reason, report, detailsUrl);
+  const closing = closingLink(reason, report, detailsUrl);
+  const full = [opening, ...rest, closing].filter(Boolean).join('\n\n');
+  const summary = full.length <= SUMMARY_LIMIT ? full : [opening, closing].filter(Boolean).join('\n\n');
   const annotations: CheckAnnotation[] = report.conflictsCreated.flatMap((c) =>
-    c.path !== null && c.line !== null
-      ? [{ path: c.path, startLine: c.line, message: `Conflicts with ${c.docs[1]}: ${c.note}` }]
-      : [],
+    c.path !== null && c.line !== null ? [{ path: c.path, startLine: c.line, message: conflictAnnotation(c) }] : [],
   );
   return { title, summary, ...(annotations.length > 0 ? { annotations } : {}) };
 }
 
-/** Why a pull request was not checked for want of a base, and where to rebase so it can be. */
-function noBaseLine(base: PullRequestCheckReport['base']): string {
-  const onto = base.nearestWithBase
-    ? `\`${base.nearestWithBase.slice(0, 8)}\` or a newer default-branch commit`
-    : 'a newer default-branch commit';
-  const from = base.mergeBase ? ` (\`${base.mergeBase.slice(0, 8)}\`)` : '';
-  return `The commit this pull request branched from${from} has no stored state to compare against. Rebase onto ${onto} to be checked.`;
-}
-
-function settledWithoutReport(reason: PullRequestCheckReason, detailsUrl: string | null): string {
-  const lines: Record<PullRequestCheckReason, string> = {
-    clean: 'Nothing to report.',
-    'new-failures': 'See the details.',
-    conflict: 'See the details.',
-    'build-failed': 'Setup or the run could not bring the pull request up. See the details.',
-    'no-base': 'The commit this pull request branched from has no stored state to compare against. Rebase onto a newer default-branch commit to be checked.',
-    draft: 'Drafts are not checked. Mark the pull request ready for review and it will be.',
-    superseded: 'A newer commit was pushed; that one is checked instead.',
-    cancelled: 'The check was stopped before it settled.',
-    error: 'Something on our side stopped the check; it was not the pull request.',
-  };
-  return [lines[reason], link(detailsUrl)].filter(Boolean).join('\n\n');
-}
-
-function countsLine(report: PullRequestCheckReport): string {
-  const parts = [
-    `${report.conflictsCreated.length} conflict${report.conflictsCreated.length === 1 ? '' : 's'} created`,
-    `${report.docsMoved.length} document${report.docsMoved.length === 1 ? '' : 's'} moved`,
-    `${report.repositoriesAffected.length} other repositor${report.repositoriesAffected.length === 1 ? 'y' : 'ies'} affected`,
-  ];
-  if (report.run) {
-    const c = report.run.counts;
-    parts.push(
-      `${c.newFailures} new failure${c.newFailures === 1 ? '' : 's'}`,
-      `${c.preExisting} pre-existing`,
-      `${c.fixed} fixed`,
-    );
-  } else {
-    parts.push(WITHOUT_A_RUN[report.codeHalf]);
-  }
-  return `**${parts.join(' · ')}**`;
-}
-
-/** What the counts line says in place of the run's counts, by why there are none. */
-const WITHOUT_A_RUN: Record<PullRequestCheckReport['codeHalf'], string> = {
-  // The code half began and produced no run to compare: the head did not build or boot, or a link broke.
-  ran: 'no run to compare',
-  'stopped-by-conflict': 'code not run: an open conflict blocks it',
-  'not-run': 'code not run',
+/** What a check settled without a report says. */
+const WITHOUT_A_REPORT: Record<PullRequestCheckReason, string> = {
+  clean: 'Nothing in this PR breaks a behavior the documentation describes.',
+  'new-failures': 'This PR breaks a behavior the documentation describes.',
+  conflict: 'Tests did not run: the documents disagree.',
+  'build-failed': 'The project could not be built or started at this commit, so no tests ran.',
+  'no-base': 'This PR branched from a commit TrueCourse has not tested. Rebase onto a newer commit and the check will run.',
+  draft: 'Mark the pull request ready for review to check it.',
+  superseded: 'A newer commit was pushed; that one is checked instead.',
+  cancelled: 'Nothing was decided about this commit.',
+  error: 'Re-run the check from GitHub. If it fails again, see what stopped it.',
 };
 
-function sections(report: PullRequestCheckReport): string[] {
-  const out: string[] = [];
-  if (report.conflictsCreated.length > 0) {
-    out.push(
-      `## Conflicts created\n\n${report.conflictsCreated
-        .map((c) => `- ${c.docs[0]} vs ${c.docs[1]}: ${c.note}`)
-        .join('\n')}`,
-    );
+/** The opening paragraph, then each section that has something in it. */
+function body(reason: PullRequestCheckReason, report: Report, detailsUrl: string | null): string[] {
+  const run = report.run;
+  const created = report.conflictsCreated;
+  const conflicts = created.length > 0 ? [conflictList(created)] : [];
+  const runSections = [...(run ? runDetails(run) : []), ...documentSections(report)];
+  switch (reason) {
+    case 'new-failures': {
+      const n = run?.newFailures.length ?? 0;
+      return [
+        `This PR breaks ${plural(n, 'a behavior', 'behaviors')} the documentation describes. Fix the code, or update the document if the behavior changed on purpose.`,
+        ...(run ? newFailures(run) : []),
+        ...conflicts,
+        ...runSections,
+      ];
+    }
+    case 'conflict':
+      if (created.length === 0) {
+        return [
+          `Tests are paused for this repository until its document conflicts are resolved ${link('in TrueCourse', detailsUrl) || 'in TrueCourse'}. Nothing in this PR caused them.`,
+        ];
+      }
+      return [conflictOpening(created, detailsUrl), ...conflicts, ...documentSections(report)];
+    case 'clean':
+      if (!run) return ['This repository reads no documents, so there is nothing to test.', ...conflicts];
+      return ['Nothing in this PR breaks a behavior the documentation describes.', ...conflicts, ...runSections];
+    case 'build-failed':
+    case 'error':
+      if (report.build) return buildFailure(report);
+      return reason === 'error'
+        ? [`Re-run the check from GitHub. If it fails again, ${link('see what stopped it', detailsUrl) || 'see what stopped it'}.`]
+        : ['The project could not be built or started at this commit, so no tests ran.'];
+    case 'no-base':
+      return [noBase(report.base)];
+    default:
+      return [WITHOUT_A_REPORT[reason]];
   }
+}
+
+/** The link the summary ends on, worded for what it opens; none where the opening already links. */
+function closingLink(reason: PullRequestCheckReason, report: Report, detailsUrl: string | null): string {
+  switch (reason) {
+    case 'new-failures':
+    case 'clean':
+      return report.run ? link('Full run', detailsUrl) : '';
+    case 'build-failed':
+    case 'error':
+      return report.build ? link('Full build log', detailsUrl) : reason === 'error' ? '' : link('See what failed', detailsUrl);
+    case 'conflict':
+    case 'no-base':
+      return '';
+    default:
+      return link('The full report', detailsUrl);
+  }
+}
+
+/** Each broken behavior: the documented sentence, what the product did, and where the test stopped. */
+function newFailures(run: Run): string[] {
+  const blocks = run.newFailures.map((f) => {
+    const lines = [`### ${f.label ? `${f.title} (${f.label})` : f.title}`];
+    if (f.documented) lines.push(`${at(f.documented.path, f.documented.line)} ${quoted(f.documented.sentence)}`);
+    if (f.observed) lines.push(`**Observed:** ${f.observed}`);
+    if (f.step) lines.push(`Failed at step ${f.step.order} of ${f.step.of}: *${f.step.title}*`);
+    if (f.passedEarlierSeconds !== undefined) {
+      lines.push(`⚠ This test passed on this same commit ${f.passedEarlierSeconds} ${plural(f.passedEarlierSeconds, 'second', 'seconds')} earlier. It may be flaky.`);
+    }
+    return lines.join('\n');
+  });
+  const held = run.counts.held;
+  if (held > 0) blocks.push(`${held} other documented ${plural(held, 'flow still holds', 'flows still hold')}.`);
+  return blocks;
+}
+
+/** The opening of a check the pull request's own document conflicts stopped. */
+function conflictOpening(created: readonly CreatedConflict[], detailsUrl: string | null): string {
+  const there = link('in TrueCourse', detailsUrl) || 'in TrueCourse';
+  const lead = "Tests did not run: the documents disagree, and TrueCourse can't tell which one is right.";
+  return created.every((c) => c.ruling !== null)
+    ? `${lead} This PR made changes in the document you had already ruled on, so that ruling no longer applies to it. Confirm it again ${there}, or change one of the documents.`
+    : `${lead} This PR adds a sentence another document contradicts. Decide which one is right ${there}, or change one of the documents.`;
+}
+
+/** The conflicts grouped by the sentence the pull request edited, each with what disagrees with it. */
+function conflictList(created: readonly CreatedConflict[]): string {
+  const groups = new Map<string, { anchor: CreatedConflict['sides'][number] | null; against: string[] }>();
+  for (const c of created) {
+    if (c.sides.length !== 2) {
+      // A report stored before sides were recorded names the two documents only.
+      const key = `docs:${c.docs.join(' vs ')}`;
+      groups.set(key, { anchor: null, against: [...(groups.get(key)?.against ?? []), `- ${c.docs[0]} vs ${c.docs[1]}: ${c.note}`] });
+      continue;
+    }
+    const anchor = c.sides.find((side) => side.edited) ?? c.sides[0]!;
+    const other = c.sides.find((side) => side !== anchor) ?? c.sides[1]!;
+    const ruled = c.ruling
+      ? c.ruling.right
+        ? ` On ${day(c.ruling.at)} you ruled ${at(c.ruling.right, null)} right.`
+        : ` On ${day(c.ruling.at)} you dismissed it.`
+      : '';
+    const key = `${anchor.path}:${anchor.line}:${anchor.sentence}`;
+    groups.set(key, { anchor, against: [...(groups.get(key)?.against ?? []), `- ${at(other.path, other.line)} ${quoted(other.sentence)}${ruled}`] });
+  }
+  return [...groups.values()]
+    .map(({ anchor, against }) =>
+      anchor
+        ? `**${at(anchor.path, anchor.line)}**${anchor.edited ? ' (edited in this PR)' : ''}\n${quoted(anchor.sentence)}\n\ndisagrees with\n\n${against.join('\n')}`
+        : against.join('\n'),
+    )
+    .join('\n\n');
+}
+
+function conflictAnnotation(c: CreatedConflict): string {
+  const other = c.sides.find((side) => !side.edited);
+  return other ? `Disagrees with ${other.path}${other.line === null ? '' : `:${other.line}`}: ${quoted(other.sentence)}` : `Conflicts with ${c.docs[1]}: ${c.note}`;
+}
+
+/** Everything else the run found, each section only when it has something in it. */
+function runDetails(run: Run): string[] {
+  const out: string[] = [];
+  const list = (heading: string, items: readonly string[], lead?: string): void => {
+    if (items.length > 0) out.push([`### ${heading}`, ...(lead ? [lead] : []), items.join('\n')].join('\n'));
+  };
+  if (run.rewritten.length > 0) out.push(rewritten(run.rewritten));
+  list('Now passing', run.fixed.map((f) => `- ${f.title}`));
+  list('Newly covered', run.newlyCovered.map((f) => `- **${f.title}**: had no passing test before; passes now.`));
+  list("Couldn't be tested on this PR", run.newlyBlocked.map((f) => `- **${f.title}**: ${f.why}`));
+  list('Already failing on the default branch', run.preExisting.map((f) => `- ${f.title}`), 'Not affected by this PR.');
+  return out;
+}
+
+/** The documents the pull request changed under tested flows, and the other repositories that read them. */
+function documentSections(report: Report): string[] {
+  const out: string[] = [];
   if (report.docsMoved.length > 0) {
     out.push(
-      `## Documents moved\n\n${report.docsMoved
-        .map((d) => `- ${d.doc}${d.flows.length > 0 ? ` (${d.flows.map((f) => f.title).join(', ')})` : ''}`)
+      `### Documents this PR changed under tested flows\n${report.docsMoved
+        .map((d) => `- ${at(d.doc, null)}${d.flows.length > 0 ? `: ${d.flows.map((f) => f.title).join(', ')}` : ''}`)
         .join('\n')}`,
     );
   }
   if (report.repositoriesAffected.length > 0) {
-    out.push(`## Repositories affected\n\n${report.repositoriesAffected.map((r) => `- ${r.repoFullName}`).join('\n')}`);
-  }
-  if (report.run) {
-    const lines: string[] = [];
-    const list = (heading: string, flows: readonly { title: string }[]): void => {
-      if (flows.length > 0) lines.push(`### ${heading}\n\n${flows.map((f) => `- ${f.title}`).join('\n')}`);
-    };
-    list('New failures', report.run.newFailures.map((f) => ({ title: f.label ? `${f.title} (${f.label})` : f.title })));
-    list('Pre-existing failures', report.run.preExisting);
-    list('Fixed', report.run.fixed);
-    list('Could not run at the head', report.run.newlyBlocked.map((f) => ({ title: `${f.title}: ${f.why}` })));
-    list('Newly covered', report.run.newlyCovered);
-    // A rewrite that fits a test to the change can hide what it would have caught.
-    list('Tests rewritten to pass at the head', report.run.rewritten);
-    out.push(`## The run\n\n${lines.length > 0 ? lines.join('\n\n') : 'Every flow held.'}`);
+    out.push(`### Other repositories that read these documents\n${report.repositoriesAffected.map((r) => `- ${r.repoFullName}`).join('\n')}`);
   }
   return out;
 }
 
-const link = (detailsUrl: string | null): string => (detailsUrl ? `[The full report](${detailsUrl})` : '');
+/** The flows whose test the pull request rewrote to keep passing, and the renames behind them. */
+function rewritten(flows: Run['rewritten']): string {
+  const said = (drift: Run['rewritten'][number]['copyDrift'][number]): string =>
+    `the product says ${quoted(drift.observed)} where the docs say ${quoted(drift.documented)}${drift.at ? ` (${at(drift.at.path, drift.at.line)})` : ''}`;
+  let previous = '';
+  const items = flows.map((f) => {
+    if (f.copyDrift.length === 0) return `- **${f.title}**: its test was rewritten.`;
+    const renames = f.copyDrift.map((d) => `${d.documented}\u0000${d.observed}`).join('\u0001');
+    const same = renames === previous;
+    previous = renames;
+    return `- **${f.title}**: ${same ? 'same rename.' : `${f.copyDrift.map(said).join('; ')}.`}`;
+  });
+  return [
+    `### Rewritten flows (${flows.length})`,
+    'A test changed so that it passes can hide a regression; these are worth a look.',
+    items.join('\n'),
+  ].join('\n');
+}
+
+/** Why no tests ran: the build failed, quoting the end of what it printed. */
+function buildFailure(report: Report): string[] {
+  const build = report.build!;
+  const base = report.base.commit ? ` The same build script worked on the default branch (${short(report.base.commit)}).` : '';
+  return [
+    `The build failed ${build.failures} ${plural(build.failures, 'time', 'times')}, so no tests ran.${base}`,
+    ['```', build.output.trim(), '```'].join('\n'),
+  ];
+}
+
+/** Why a pull request was not checked for want of a base, and where to rebase so it can be. */
+function noBase(base: Report['base']): string {
+  const from = base.mergeBase ? ` from ${short(base.mergeBase)}` : '';
+  const onto = base.nearestWithBase ? `onto ${short(base.nearestWithBase)} or a newer commit` : 'onto a newer commit of the default branch';
+  return `This PR branched${from}, which TrueCourse has not tested. Rebase ${onto} and the check will run.`;
+}
+
+const link = (label: string, detailsUrl: string | null): string => (detailsUrl ? `[${label}](${detailsUrl})` : '');

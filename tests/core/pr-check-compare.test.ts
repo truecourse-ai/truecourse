@@ -11,6 +11,7 @@ import {
   conflictsCreated,
   docsMoved,
   onChangedSentence,
+  rulingBeforeEdit,
   sentencesChanged,
   testsRewritten,
 } from '../../packages/core/src/services/pr-check/compare';
@@ -204,5 +205,36 @@ describe('onChangedSentence', () => {
     expect(onChangedSentence(conflict('old', 'old'), changed)).toBe(false);
     // The same key in another document is another sentence.
     expect(onChangedSentence(conflict('new', 'old'), changed)).toBe(false);
+  });
+});
+
+describe('rulingBeforeEdit', () => {
+  const ruling = (sentenceA: string, sentenceB: string) => ({
+    docA: 'a.md',
+    sentenceA,
+    docB: 'b.md',
+    sentenceB,
+    verdict: 'a' as const,
+    resolvedAt: '2026-10-08T00:00:00.000Z',
+  });
+  const sides = [
+    { doc: 'a.md', sentence: 'kept', edited: false },
+    { doc: 'b.md', sentence: 'rewritten', edited: true },
+  ];
+  const held = (_doc: string, sentence: string) => sentence === 'kept' || sentence === 'rewritten' || sentence === 'still-here';
+
+  it('finds the ruling on the same pair, on the sentence the head no longer holds', () => {
+    expect(rulingBeforeEdit(sides, [ruling('kept', 'old')], held)).toMatchObject({ sentenceB: 'old' });
+    // Named the other way round.
+    expect(rulingBeforeEdit(sides, [{ ...ruling('old', 'kept'), docA: 'b.md', docB: 'a.md' }], held)).toMatchObject({ sentenceA: 'old' });
+  });
+
+  it('ignores a ruling on another sentence the head still holds, or on another sentence of the unedited side', () => {
+    expect(rulingBeforeEdit(sides, [ruling('kept', 'still-here')], held)).toBeNull();
+    expect(rulingBeforeEdit(sides, [ruling('other', 'old')], held)).toBeNull();
+  });
+
+  it('has nothing to find when the head edited no side', () => {
+    expect(rulingBeforeEdit(sides.map((s) => ({ ...s, edited: false })), [ruling('kept', 'old')], held)).toBeNull();
   });
 });

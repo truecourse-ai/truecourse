@@ -116,15 +116,16 @@ interface Verified {
 export interface WorldSessionState {
   /** The world the last passing `verify_world` reported, when the scripts have not changed since. */
   verified(): ProductWorld | undefined;
-  /** How many builds failed, the engine's own run of existing scripts included. */
-  buildsFailed(): number;
+  /** Once no build is left: how many failed, and what the last one printed. */
+  outOfBuilds(): { failures: number; output: string } | undefined;
 }
 
 export function worldSessionDef(input: WorldSessionInput): { def: SessionDef<WorldSessionOutcome>; state: WorldSessionState } {
   let verified: Verified | undefined;
   const standing = (): ProductWorld | undefined =>
     verified && verified.scripts === scriptsHash(input.repoRoot) ? verified.world : undefined;
-  const builds = { failed: input.failed?.stage === 'build' ? 1 : 0 };
+  const engineBuildFailed = input.failed?.stage === 'build';
+  const builds: FailedBuilds = { failed: engineBuildFailed ? 1 : 0, output: engineBuildFailed ? input.failed!.output : '' };
   const outOfBuilds = (): boolean => builds.failed >= WORLD_BUILD_ATTEMPTS;
 
   const def: SessionDef<WorldSessionOutcome> = {
@@ -156,7 +157,13 @@ export function worldSessionDef(input: WorldSessionInput): { def: SessionDef<Wor
         ? undefined
         : 'Outcome refused: the scripts are not the ones `verify_world` last passed (it failed, or they changed since). Run `verify_world` on them as they are now.',
   };
-  return { def, state: { verified: standing, buildsFailed: () => builds.failed } };
+  return {
+    def,
+    state: {
+      verified: standing,
+      outOfBuilds: () => (outOfBuilds() ? { failures: builds.failed, output: builds.output } : undefined),
+    },
+  };
 }
 
 /** One hash over the three scripts as they are on disk; a missing one counts. */
@@ -184,12 +191,18 @@ const VERIFY_WORLD = defineToolSpec({
   inputSchema: z.object({}).strict(),
 });
 
+/** The builds that failed so far, and what the last one printed. */
+interface FailedBuilds {
+  failed: number;
+  output: string;
+}
+
 /** What `verify_world` says once no build is left: the outcome is all that remains. */
 const OUT_OF_BUILDS = `The build has failed ${WORLD_BUILD_ATTEMPTS} times, counting the engine's own run of the scripts that were there. No build is left: give the outcome now, saying in its summary what stops the build. It is accepted, and setup ends with the product not brought up.`;
 
 function verifyWorldTool(
   input: WorldSessionInput,
-  builds: { failed: number },
+  builds: FailedBuilds,
   record: (verified: Verified | undefined) => void,
 ): SessionTool {
   return VERIFY_WORLD.bind({
@@ -204,6 +217,7 @@ function verifyWorldTool(
       const build = await buildProductWorld(input.repoRoot, { slot: input.slot, signal: ctx.signal });
       if (!build.ok) {
         builds.failed += 1;
+        builds.output = build.output;
         const how = build.timedOut ? 'did not finish in time' : `exited ${build.exitCode ?? 'without a code'}`;
         const left =
           builds.failed >= WORLD_BUILD_ATTEMPTS

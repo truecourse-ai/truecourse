@@ -198,7 +198,7 @@ describe('a supersede', () => {
 });
 
 describe('a draft', () => {
-  it('is held: a check settled at once, saying it is checked when ready', async () => {
+  it('is held: a check settled at once, saying a draft is not checked', async () => {
     await checks().onPullRequest({ pr: pr({ draft: true }), installationId: 5, effect: 'draft' });
     const [check] = pulls.checks;
     expect(check).toMatchObject({ status: 'settled', conclusion: 'neutral', reason: 'draft', jobId: null });
@@ -207,7 +207,7 @@ describe('a draft', () => {
     expect(github[1]!.params).toMatchObject({
       status: 'completed',
       conclusion: 'neutral',
-      output: expect.objectContaining({ title: 'Checked when ready for review' }),
+      output: expect.objectContaining({ title: 'Not checked: draft pull request' }),
     });
   });
 
