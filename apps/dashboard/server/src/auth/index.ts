@@ -117,7 +117,7 @@ export function createAuth(mode: ServerMode, deps: AuthDeps): Auth {
   const mcpConfig = loadMcpOAuthConfig();
   const workos = new WorkOS(config.apiKey, { clientId: config.clientId });
   const verify = createSessionVerifier(workos, config);
-  const workspaceSession = createWorkspaceSessionTools(workos, config);
+  const workspaceSession = createWorkspaceSessionTools(workos, config, verify);
   const mcp = mcpConfig
     ? createHostedMcpAuth({
         issuer: mcpConfig.issuer,

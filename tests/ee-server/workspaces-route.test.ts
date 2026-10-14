@@ -1,9 +1,9 @@
 /**
  * The enterprise workspaces router (`/api/auth/workspaces`): what the side
  * menu's switcher lists, and the two moves between organizations. All three
- * mint the session cookie, so they work off the sealed session rather than the
- * gate's verifier — which is why they mount above the gate and are built from
- * the open server's workspace session tools.
+ * mint the session cookie, so they mount above the gate and are built from the
+ * open server's workspace session tools, which resolve the session through the
+ * gate's verifier.
  *
  * WorkOS is faked, so the tests assert orchestration without a live SDK.
  */
@@ -11,7 +11,10 @@
 import express, { type Express } from 'express';
 import request from 'supertest';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { createWorkspaceSessionTools } from '../../apps/dashboard/server/src/auth/workos-auth';
+import {
+  createSessionVerifier,
+  createWorkspaceSessionTools,
+} from '../../apps/dashboard/server/src/auth/workos-auth';
 import { createWorkspacesRouter } from '../../ee/packages/server/src/workspaces/index';
 import {
   TEST_WORKSPACE_DESCRIPTION,
@@ -32,6 +35,8 @@ interface Calls {
   createOrg: Array<{ name: string }>;
   membership: Array<{ organizationId: string; userId: string }>;
   refresh: Array<{ organizationId?: string }>;
+  /** The sealed cookie each refresh was made from. */
+  refreshedFrom: string[];
   getOrg: string[];
   listMemberships: Array<Record<string, unknown>>;
 }
@@ -46,12 +51,18 @@ type Membership = {
 };
 
 function makeWorkos(
-  opts: { existingOrg?: string | null; memberships?: Membership[] } = {},
+  opts: {
+    existingOrg?: string | null;
+    memberships?: Membership[];
+    /** A cookie whose access token has expired, so it must be refreshed first. */
+    expiredCookie?: string;
+  } = {},
 ) {
   const calls: Calls = {
     createOrg: [],
     membership: [],
     refresh: [],
+    refreshedFrom: [],
     getOrg: [],
     listMemberships: [],
   };
@@ -59,19 +70,19 @@ function makeWorkos(
   const user = { id: 'user_1', email: 'u@acme.test' };
   const workos = {
     userManagement: {
-      loadSealedSession: () => ({
-        authenticate: async () => ({
-          authenticated: true,
-          user,
-          organizationId: opts.existingOrg ?? null,
-        }),
-        refresh: async (o: { organizationId?: string }) => {
+      loadSealedSession: ({ sessionData }: { sessionData: string }) => ({
+        authenticate: async () =>
+          sessionData === opts.expiredCookie
+            ? { authenticated: false, reason: 'invalid_jwt' }
+            : { authenticated: true, user, organizationId: opts.existingOrg ?? null },
+        refresh: async (o: { organizationId?: string } = {}) => {
           calls.refresh.push(o);
+          calls.refreshedFrom.push(sessionData);
           return {
             authenticated: true,
-            sealedSession: `sealed:${o.organizationId}`,
+            sealedSession: `sealed:${o.organizationId ?? 'fresh'}`,
             user,
-            organizationId: o.organizationId ?? null,
+            organizationId: o.organizationId ?? opts.existingOrg ?? null,
           };
         },
       }),
@@ -107,7 +118,8 @@ function makeApp(workos: unknown, granted = true): Express {
   const app = express();
   app.use(express.json());
   /* eslint-disable @typescript-eslint/no-explicit-any */
-  const tools = createWorkspaceSessionTools(workos as any, cfg as any);
+  const verify = createSessionVerifier(workos as any, cfg as any);
+  const tools = createWorkspaceSessionTools(workos as any, cfg as any, verify);
   /* eslint-enable @typescript-eslint/no-explicit-any */
   app.use(
     '/api/auth/workspaces',
@@ -197,6 +209,17 @@ describe('GET /api/auth/workspaces', () => {
       .set('Cookie', 'tc_session=sealed')
       .expect(200);
     expect(res.body.workspaces).toEqual([{ id: 'org_ws_unnamed', name: 'Acme', current: true }]);
+  });
+
+  it('sends back the cookie an expired access token was refreshed into', async () => {
+    const m = makeWorkos({ existingOrg: 'org_ws_a', memberships: [WS_A], expiredCookie: 'stale' });
+    const res = await request(makeApp(m.workos))
+      .get('/api/auth/workspaces')
+      .set('Cookie', 'tc_session=stale')
+      .expect(200);
+    expect(res.headers['set-cookie']).toEqual([
+      expect.stringContaining('tc_session=sealed%3Afresh'),
+    ]);
   });
 
   it('returns 401 without a session cookie', async () => {
@@ -350,6 +373,28 @@ describe('POST /api/auth/workspaces/switch', () => {
     expect(res.body.user.organizationName).toBe('Northwind Labs');
     expect(res.headers['set-cookie']?.[0]).toContain('tc_session=sealed%3Aorg_ws_b');
     expect(m.calls.createOrg).toEqual([]);
+  });
+
+  it('refreshes an expired access token and moves the refreshed session', async () => {
+    const m = makeWorkos({
+      existingOrg: 'org_ws_a',
+      memberships: [WS_A, WS_B],
+      expiredCookie: 'stale',
+    });
+    const res = await request(makeApp(m.workos))
+      .post('/api/auth/workspaces/switch')
+      .set('Cookie', 'tc_session=stale')
+      .send({ organizationId: 'org_ws_b' })
+      .expect(200);
+
+    // WorkOS rotates refresh tokens, so the move chains onto the refreshed
+    // cookie: the stale one can never be refreshed twice.
+    expect(m.calls.refreshedFrom).toEqual(['stale', 'sealed:fresh']);
+    expect(m.calls.refresh).toEqual([{}, { organizationId: 'org_ws_b' }]);
+    expect(res.body.user.organizationId).toBe('org_ws_b');
+    expect(res.headers['set-cookie']).toEqual([
+      expect.stringContaining('tc_session=sealed%3Aorg_ws_b'),
+    ]);
   });
 
   it('does not know an organization the user has no active membership of', async () => {

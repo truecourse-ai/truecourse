@@ -434,42 +434,34 @@ async function adoptExistingOrganization(
 
 /** The signed-in session a request carries. */
 export interface SignedInSession {
-  /** The sealed cookie it arrived with, which a re-mint chains onto. */
+  /** The sealed cookie a re-mint chains onto: the rotated one when the gate's verifier refreshed. */
   sealed: string;
-  user: User;
+  user: AuthUser;
   organizationId: string | null;
 }
 
 /**
- * The session behind a request that mints a cookie of its own, so it works off
- * the sealed session rather than the gate's verifier. Answers null once it has
- * sent the 401 itself; a refused WorkOS call throws to the route's handler.
+ * The session behind a request that mints a cookie of its own. It resolves
+ * through the gate's verifier, so an expired access token is refreshed (once,
+ * shared with every other request carrying the same cookie) rather than read
+ * as signed out, and the rotated cookie is both sent back and the one a re-mint
+ * chains onto. Answers null once it has sent the 401 itself.
  */
 async function requireSession(
-  workos: WorkOS,
-  cfg: WorkosConfig,
+  verify: AuthVerifier,
   req: Request,
   res: Response,
 ): Promise<SignedInSession | null> {
-  const sealed = parseCookies(req.headers.cookie)[SESSION_COOKIE];
-  if (!sealed) {
+  const result = await verify(req.headers.cookie);
+  const sealed =
+    sealedFromSetCookie(result?.setCookie) ?? parseCookies(req.headers.cookie)[SESSION_COOKIE];
+  if (!result || !sealed) {
     res.status(401).json({ error: 'Not authenticated' });
     return null;
   }
-  const session = workos.userManagement.loadSealedSession({
-    sessionData: sealed,
-    cookiePassword: cfg.cookiePassword,
-  });
-  const authed = await session.authenticate();
-  if (!authed.authenticated) {
-    res.status(401).json({ error: 'Not authenticated' });
-    return null;
-  }
-  return {
-    sealed,
-    user: authed.user,
-    organizationId: await standingOrganization(workos, authed.user.id, authed.organizationId),
-  };
+  // A route that re-mints replaces this with its own, newer cookie.
+  if (result.setCookie) res.append('Set-Cookie', result.setCookie);
+  return { sealed, user: result.user, organizationId: result.user.organizationId ?? null };
 }
 
 /**
@@ -478,8 +470,8 @@ async function requireSession(
  * The open edition has one workspace and needs none of this: its only move is
  * the onboarding one below, where a session with no organization is put into
  * the one its user belongs to. The enterprise bundle's list, switch and create
- * routes are the callers, and they mint cookies of their own, so they work off
- * the sealed session rather than the gate's verifier.
+ * routes are the callers, and they mint cookies of their own, so they sit above
+ * the gate and re-mint the sealed session the gate's verifier resolves.
  */
 export interface WorkspaceSessionTools {
   /** The client every route here shares, so there is one set of caches. */
@@ -504,10 +496,11 @@ export interface WorkspaceSessionTools {
 export function createWorkspaceSessionTools(
   workos: WorkOS,
   cfg: WorkosConfig,
+  verify: AuthVerifier,
 ): WorkspaceSessionTools {
   return {
     workos,
-    requireSession: (req, res) => requireSession(workos, cfg, req, res),
+    requireSession: (req, res) => requireSession(verify, req, res),
     activeMemberships: (userId) => activeMemberships(workos, userId),
     mintSessionInto: (sealed, organizationId) =>
       mintSessionInto(workos, cfg, sealed, organizationId),
@@ -667,11 +660,6 @@ export function createAuthRouter(
   // nothing connects into a workspace that has no description, so a workspace
   // created without one would begin at a refusal.
   router.post('/workspace', async (req, res) => {
-    const sealed = parseCookies(req.headers.cookie)[SESSION_COOKIE];
-    if (!sealed) {
-      res.status(401).json({ error: 'Not authenticated' });
-      return;
-    }
     const raw = (req.body as { name?: unknown })?.name;
     const name = typeof raw === 'string' ? raw.trim() : '';
     if (!name || name.length > 80) {
@@ -686,29 +674,23 @@ export function createAuthRouter(
       return;
     }
     try {
-      const session = workos.userManagement.loadSealedSession({
-        sessionData: sealed,
-        cookiePassword: cfg.cookiePassword,
-      });
-      const authed = await session.authenticate();
-      if (!authed.authenticated) {
-        res.status(401).json({ error: 'Not authenticated' });
-        return;
-      }
+      const session = await requireSession(verify, req, res);
+      if (!session) return;
+      const { sealed, user } = session;
       // Already in a workspace → no-op, so a double-submit can't spawn a second
-      // org or orphan a membership. The token's claim alone does not count: a
-      // member removed from the workspace it names is in none.
-      const current = await standingOrganization(workos, authed.user.id, authed.organizationId);
-      if (current) {
-        await describeIfUndescribed(current, description);
-        res.json({ user: toAuthUser(authed.user, current) });
+      // org or orphan a membership. The verifier counts only a standing
+      // membership: a member removed from the workspace the token names is in
+      // none.
+      if (session.organizationId) {
+        await describeIfUndescribed(session.organizationId, description);
+        res.json({ user });
         return;
       }
 
       // Nor does an invited person get one of their own: a user who already has
       // a membership is moved into it, and only a user with none names a new
       // workspace.
-      const adopted = await adoptExistingOrganization(workos, cfg, sealed, authed.user.id);
+      const adopted = await adoptExistingOrganization(workos, cfg, sealed, user.id);
       if (adopted) {
         await describeIfUndescribed(adopted.organizationId, description);
         res.setHeader('Set-Cookie', adopted.setCookie);
@@ -721,13 +703,13 @@ export function createAuthRouter(
       const org = await workos.organizations.createOrganization({ name });
       await workos.userManagement.createOrganizationMembership({
         organizationId: org.id,
-        userId: authed.user.id,
+        userId: user.id,
       });
       await saveWorkspaceProfile(org.id, description);
       captureWorkspaceCreated({
-        userId: authed.user.id,
-        email: authed.user.email,
-        name: [authed.user.firstName, authed.user.lastName].filter(Boolean).join(' ') || undefined,
+        userId: user.id,
+        email: user.email,
+        name: [user.firstName, user.lastName].filter(Boolean).join(' ') || undefined,
         workspaceId: org.id,
         workspaceName: org.name,
       });
