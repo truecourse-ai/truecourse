@@ -10,6 +10,7 @@ import {
   compareFlows,
   conflictsCreated,
   docsMoved,
+  testsRewritten,
 } from '../../packages/core/src/services/pr-check/compare';
 import { buildCorpusConflicts, sentenceKey } from '../../packages/shared/src/spec/conflict-resolution';
 
@@ -155,11 +156,24 @@ describe('docsMoved', () => {
       // A document the base never bound is new, not moved.
       { id: 'f3', bindings: [['docs/b.md', 'Welcome.']] },
     ]);
-    expect(docsMoved(base, head)).toEqual([{ doc: 'docs/a.md', flowIds: ['f1', 'f2'] }]);
+    expect(docsMoved(base.flows, head.flows)).toEqual([{ doc: 'docs/a.md', flowIds: ['f1', 'f2'] }]);
   });
 
-  it('answers nothing without both manifests', () => {
-    expect(docsMoved(null, manifest([{ id: 'f', bindings: [['d', 'x']] }]))).toEqual([]);
-    expect(docsMoved(manifest([{ id: 'f', bindings: [['d', 'x']] }]), null)).toEqual([]);
+  it('answers nothing without both sides', () => {
+    expect(docsMoved([], manifest([{ id: 'f', bindings: [['d', 'x']] }]).flows)).toEqual([]);
+    expect(docsMoved(manifest([{ id: 'f', bindings: [['d', 'x']] }]).flows, [])).toEqual([]);
+  });
+});
+
+describe('testsRewritten', () => {
+  it('names the flows proven at both sides whose test the head rewrote', () => {
+    const deltas = compareFlows(
+      { same: 'succeeded', edited: 'succeeded', drifted: 'succeeded', broke: 'succeeded', wasFailing: 'failed' },
+      { same: 'succeeded', edited: 'succeeded', drifted: 'partially-succeeded', broke: 'failed', wasFailing: 'succeeded', added: 'succeeded' },
+    );
+    const base = new Map([['same', 'a'], ['edited', 'b'], ['drifted', 'c'], ['broke', 'd'], ['wasFailing', 'e']]);
+    const head = new Map([['same', 'a'], ['edited', 'b2'], ['drifted', 'c2'], ['broke', 'd2'], ['wasFailing', 'e2'], ['added', 'f']]);
+    // A failure and a fix are already in the report; a flow new at the head had nothing to rewrite.
+    expect(testsRewritten(deltas, base, head)).toEqual(['drifted', 'edited']);
   });
 });

@@ -1168,8 +1168,8 @@ describe('the guard generate job', () => {
     expect(notes.map((n) => [n.level, n.title, n.body])).toEqual([
       ['success', 'Flow tests written', '2 tests for 2 flows: 2 passing, 0 failing, 0 blocked, 1 unsettled.'],
     ]);
-    // Running stored tests is not a link of this chain.
-    expect(enqueued).toEqual(['repo.guard-generate']);
+    // The kept tests chain into a run of them, as a scenario set does.
+    expect(enqueued).toEqual(['repo.guard-generate', 'repo.guard-run']);
   }, 60_000);
 
   it('chains the baseline run once the scenario set is stored', async () => {

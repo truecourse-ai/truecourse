@@ -150,6 +150,8 @@ export const PullRequestCheckReportSchema = z.object({
       newlyBlocked: z.array(FlowRefSchema.extend({ why: z.string() })),
       /** Flows that could not run or had no scenario at the base and pass at the head. */
       newlyCovered: z.array(FlowRefSchema).default([]),
+      /** Flows whose test held at the base and holds at the head only as the head rewrote it. */
+      rewritten: z.array(FlowRefSchema).default([]),
     })
     .nullable(),
   specHalf: z.enum(['ran', 'no-documents-changed', 'not-a-source']),

@@ -1,7 +1,7 @@
 /**
  * THE COMPARISON a pull request check is judged by: the head's run against the
- * base's, the head's corpus against the workspace's, the head's manifest
- * against the base's. Pure — every input is a stored artifact the job read
+ * base's, the head's corpus against the workspace's, the head's flow bindings
+ * and flow tests against the base's. Pure — every input is a stored artifact the job read
  * before, so a control run or a rerun can be put in front of it later without
  * touching it.
  */
@@ -13,7 +13,7 @@ import {
   type CorpusLike,
   type DecisionsLike,
   type GuardCoveragePlainStatus,
-  type GuardManifest,
+  type GuardFlowBinding,
   type GuardRunFlowSummary,
 } from '@truecourse/shared';
 
@@ -94,23 +94,29 @@ export interface DocMoved {
   flowIds: string[];
 }
 
+/** One flow's document bindings, as a manifest entry or a flow of the flow corpus carries them. */
+export interface FlowBindings {
+  flowId: string;
+  bindings: readonly GuardFlowBinding[];
+}
+
 /**
- * The documents both manifests bind where a head flow's bound sentences differ
+ * The documents both sides bind where a head flow's bound sentences differ
  * from every sentence set the base bound in that document — the documents the
  * pull request changed under a flow — each with the flows that read it, which
  * go stale with it.
  */
-export function docsMoved(base: GuardManifest | null, head: GuardManifest | null): DocMoved[] {
+export function docsMoved(base: readonly FlowBindings[], head: readonly FlowBindings[]): DocMoved[] {
   // Every sentence set the base bound a document under: two base flows can hold
   // the same document at different sentences.
   const before = new Map<string, Set<string>>();
-  for (const flow of base?.flows ?? []) {
+  for (const flow of base) {
     for (const binding of flow.bindings) {
       before.set(binding.doc, (before.get(binding.doc) ?? new Set()).add(sentenceSetKey(binding.sentences)));
     }
   }
   const moved = new Map<string, DocMoved>();
-  for (const flow of head?.flows ?? []) {
+  for (const flow of head) {
     for (const binding of flow.bindings) {
       const was = before.get(binding.doc);
       if (was === undefined || was.has(sentenceSetKey(binding.sentences))) continue;
@@ -120,6 +126,22 @@ export function docsMoved(base: GuardManifest | null, head: GuardManifest | null
     }
   }
   return [...moved.values()].sort((a, b) => a.doc.localeCompare(b.doc));
+}
+
+/**
+ * The flows whose test held at the base and holds at the head with a spec or
+ * seed the head rewrote. A rewrite that fits a test to a changed product hides
+ * the regression it would have caught, so the check lists these for a person
+ * to read. `base` and `head` are each flow's test sources (spec and seed).
+ */
+export function testsRewritten(
+  deltas: readonly FlowDelta[],
+  base: ReadonlyMap<string, string>,
+  head: ReadonlyMap<string, string>,
+): string[] {
+  return deltas
+    .filter((d) => proven(d.base) && proven(d.head) && base.has(d.flowId) && head.get(d.flowId) !== base.get(d.flowId))
+    .map((d) => d.flowId);
 }
 
 const sentenceSetKey = (sentences: readonly string[]): string => [...sentences].sort().join('\0');

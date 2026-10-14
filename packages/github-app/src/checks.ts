@@ -238,6 +238,8 @@ function sections(report: PullRequestCheckReport): string[] {
     list('Fixed', report.run.fixed);
     list('Could not run at the head', report.run.newlyBlocked.map((f) => ({ title: `${f.title}: ${f.why}` })));
     list('Newly covered', report.run.newlyCovered);
+    // A rewrite that fits a test to the change can hide what it would have caught.
+    list('Tests rewritten to pass at the head', report.run.rewritten);
     out.push(`## The run\n\n${lines.length > 0 ? lines.join('\n\n') : 'Every flow held.'}`);
   }
   return out;

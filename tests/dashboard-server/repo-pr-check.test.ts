@@ -22,9 +22,11 @@ import { JobStore, PgGuardStore, PgRepositoryStore, RepositoriesRegistryStore } 
 import { resetRegistryStore, setRegistryStore } from '@truecourse/core/config/registry';
 import { registerJob, type JobTask, type StartWorker } from '@truecourse/jobs';
 import { manifestPath, scenariosDir, dependenciesLocalPath, API_SERVER_BOOT_EXPECTED } from '@truecourse/guard-runner';
+import { flowSeedFileName, flowTestFileName, flowTestsDir, flowTestsIndexPath } from '@truecourse/shared/work-tree';
 import {
   GUARD_FORMAT_VERSION,
   sentenceKey,
+  type FlowTestRecord,
   type GuardGenerateReport,
   type GuardLatest,
   type PullRequestCheckRecord,
@@ -86,6 +88,7 @@ let engines: {
   setup: NonNullable<RepoGuardSetupTaskDeps['runSetup']>;
   generate: NonNullable<RepoGuardGenerateTaskDeps['runGenerate']>;
   run: NonNullable<RepoGuardRunTaskDeps['runGuard']>;
+  runFlowTests: NonNullable<RepoGuardRunTaskDeps['runFlowTests']>;
   scan: NonNullable<RepoPullRequestCheckTaskDeps['runScan']>;
 };
 /** What each engine saw of the tree when it ran. */
@@ -216,6 +219,74 @@ async function storeBase(commit = BASE): Promise<void> {
   await writeGuardRunCoverage(REPO, { runId: run.run.runId, ranAt: run.run.ranAt, commit, claims: {}, flows: { f1: 'succeeded' } });
 }
 
+/**
+ * A set whose flows are proven by Playwright tests, written into `dir`: the
+ * flow corpus, and per flow a passing test with its spec (`specs[id]`) and a
+ * seed. `binds` overrides a flow's bound sentences. Answers the tests index.
+ */
+function writeFlowTestSet(dir: string, specs: Record<string, string>, binds: Record<string, string[]> = {}): FlowTestRecord[] {
+  fs.mkdirSync(flowTestsDir(dir), { recursive: true });
+  const flows = Object.keys(specs).map((id) => ({
+    id,
+    title: `Flow ${id}`,
+    goal: 'An org is set up.',
+    fingerprint: `sha256:${id}`,
+    milestones: [{ order: 1, doc: 'docs/orgs.md', claimId: `claim-${id}`, claimTitle: 'An org can be created.', sentences: binds[id] ?? ['orgs'] }],
+    bindings: [{ doc: 'docs/orgs.md', sentences: binds[id] ?? ['orgs'] }],
+    composedOf: [],
+    synthesisInputsHash: 'sha256:inputs',
+  }));
+  fs.writeFileSync(path.join(path.dirname(manifestPath(dir)), 'flows.json'), JSON.stringify({ version: 1, generatedAt: '', flows }) + '\n');
+  const tests: FlowTestRecord[] = Object.entries(specs).map(([id, spec]) => {
+    fs.writeFileSync(path.join(flowTestsDir(dir), flowTestFileName(id)), spec);
+    fs.writeFileSync(path.join(flowTestsDir(dir), flowSeedFileName(id)), `// seeds ${id}\n`);
+    return {
+      flowId: id,
+      flowFingerprint: `sha256:${id}`,
+      status: 'passing',
+      file: flowTestFileName(id),
+      seed: flowSeedFileName(id),
+      summary: `Flow ${id} holds.`,
+      run: { ranAt: '2026-09-01T09:00:00.000Z', durationMs: 1, steps: [] },
+    };
+  });
+  fs.writeFileSync(flowTestsIndexPath(dir), JSON.stringify({ version: 1, generatedAt: '', tests }) + '\n');
+  return tests;
+}
+
+/** A run of the stored flow tests, each flow's test at its outcome. */
+function flowTestLatest(runId: string, commit: string, outcomes: Record<string, 'pass' | 'fail' | 'seed-failed'>): GuardLatest {
+  const results = Object.entries(outcomes);
+  const count = (o: string) => results.filter(([, outcome]) => outcome === o).length;
+  return {
+    run: { runId, ranAt: '2026-09-01T10:00:00.000Z', branch: 'main', commit, recipeFingerprint: 'product-world' },
+    summary: { total: results.length, pass: count('pass'), fail: count('fail'), stale: 0, orphaned: 0, error: 0 },
+    scenarios: [],
+    flowTests: results.map(([flowId, outcome]) => ({
+      flowId,
+      file: flowTestFileName(flowId),
+      authored: 'passing',
+      outcome,
+      run: { ranAt: '2026-09-01T10:00:00.000Z', durationMs: 1, steps: [] },
+    })),
+  } as GuardLatest;
+}
+
+/** The base at `commit` as Claude Code leaves it: a flow-test set, a bundle, a report and a passing run of the tests. */
+async function storeFlowTestBase(specs: Record<string, string>, commit = BASE): Promise<void> {
+  const dir = fs.mkdtempSync(path.join(home, 'base-'));
+  writeFlowTestSet(dir, specs);
+  const ref = { repoKey: REPO, commitSha: commit };
+  await saveScenarios(ref, scenariosDir(dir));
+  await writeGuardResult(ref, report());
+  await saveGuardSetupBundle(ref, { '.truecourse/world/up.sh': '#!/bin/sh\n' });
+  const outcomes = Object.fromEntries(Object.keys(specs).map((id) => [id, 'pass' as const]));
+  const run = flowTestLatest(`run-${commit}`, commit, outcomes);
+  await writeGuardLatest(REPO, run);
+  const flows = Object.fromEntries(Object.keys(specs).map((id) => [id, 'succeeded' as const]));
+  await writeGuardRunCoverage(REPO, { runId: run.run.runId, ranAt: run.run.ranAt, commit, claims: {}, flows });
+}
+
 function pr(over: Partial<PullRequestRecord> = {}): PullRequestRecord {
   return {
     repoFullName: REPO,
@@ -284,7 +355,11 @@ function mountJobs(): JobsMount {
     startWorker: laneWorker,
     guardSetup: { startLlm: async () => testLlm, runSetup: (root, opts) => engines.setup(root, opts) },
     guardGenerate: { startLlm: async () => testLlm, runGenerate: (root, opts) => engines.generate(root, opts) },
-    guardRun: { startLlm: async () => testLlm, runGuard: (root, opts) => engines.run(root, opts) },
+    guardRun: {
+      startLlm: async () => testLlm,
+      runGuard: (root, opts) => engines.run(root, opts),
+      runFlowTests: (root, opts) => engines.runFlowTests(root, opts),
+    },
     pullRequestCheck: {
       pulls,
       repos,
@@ -329,6 +404,9 @@ beforeEach(async () => {
     },
     generate: async () => ({ guard: report() }) as never,
     run: async () => ({ status: 'ok', latest: latestOf('run-head', HEAD, 'pass') }) as never,
+    runFlowTests: async () => {
+      throw new Error('this set has no flow tests');
+    },
     scan: async () => {
       seen.scanned = true;
       return { corpus: { version: 6, generatedAt: '', docs: [], areas: [], skippedDocs: [] } } as never;
@@ -445,6 +523,51 @@ describe('the pull request check', () => {
       counts: { newFailures: 1 },
       newFailures: [{ id: 'f1', scenarioIds: ['a1'] }],
     });
+    expect(lastGithubUpdate()).toMatchObject({ conclusion: 'failure', details_url: 'https://app/repos/widgets/runs/run-head' });
+  });
+
+  it('checks a head whose flows are proven by Playwright tests against the tests stored at its base', async () => {
+    await storeFlowTestBase({ 'log-in': '// v1\n', export: '// v1\n', invite: '// v1\n' });
+    let generateSawBaseTests = false;
+    engines.generate = async (root) => {
+      generateSawBaseTests = fs.readFileSync(flowTestsIndexPath(root), 'utf-8').includes('"invite"');
+      // The head rewrote log-in's test, and moved export's sentences.
+      const tests = writeFlowTestSet(root, { 'log-in': '// v2\n', export: '// v1\n', invite: '// v1\n' }, { export: ['orgs', 'billing'] });
+      return {
+        guard: report(),
+        flowTests: {
+          status: 'ok',
+          tests,
+          authored: 1,
+          unsettled: [],
+          moved: [],
+          judged: { read: 0, flagged: 0, unavailable: 0 },
+          spent: { sessions: 1, turns: 1, tokens: 1, costUsd: 0 },
+        },
+      } as never;
+    };
+    let worldKey: string | undefined;
+    engines.runFlowTests = async (_root, opts) => {
+      worldKey = opts.worldKey;
+      return { status: 'ok', latest: flowTestLatest('run-head', HEAD, { 'log-in': 'pass', export: 'fail', invite: 'seed-failed' }) } as never;
+    };
+
+    const settled = await check();
+
+    expect(settled).toMatchObject({ conclusion: 'failure', reason: 'new-failures', baseCommitSha: BASE, guardRunId: 'run-head' });
+    expect(settled.report?.run).toMatchObject({
+      counts: { newFailures: 1, newlyBlocked: 1 },
+      newFailures: [{ id: 'export', title: 'Flow export', scenarioIds: [flowTestFileName('export')] }],
+      newlyBlocked: [{ id: 'invite', why: 'its seed did not hold at the head' }],
+      rewritten: [{ id: 'log-in', title: 'Flow log-in' }],
+    });
+    expect(settled.report?.docsMoved).toEqual([{ doc: 'docs/orgs.md', flows: [{ id: 'export', title: 'Flow export' }] }]);
+    // Generate started from the base's tests, and the run is the chain's last link, on the head's own world.
+    expect(generateSawBaseTests).toBe(true);
+    expect(await jobTypes()).toEqual(['repo.pr-check', 'repo.guard-setup', 'repo.guard-generate', 'repo.guard-run']);
+    expect(worldKey).toBe(`${ORG}/${REPO}#7`);
+    const prRuns = (await readGuardHistory(REPO, { scope: 'pr/7' })).runs;
+    expect(prRuns.map((r) => [r.runId, r.pullRequest])).toEqual([['run-head', 7]]);
     expect(lastGithubUpdate()).toMatchObject({ conclusion: 'failure', details_url: 'https://app/repos/widgets/runs/run-head' });
   });
 

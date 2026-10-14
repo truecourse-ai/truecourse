@@ -15,14 +15,23 @@
  * a supersede, which settled it first.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { log } from '@truecourse/core/lib/logger';
 import {
+  forEachScenarioFile,
   readGuardRunFlows,
   readGuardRunForCommit,
   readManifest,
 } from '@truecourse/core/lib/guard-store';
-import { readGuardRunFlowSummary } from '@truecourse/core/commands/guard-read';
-import { compareFlows, docsMoved } from '@truecourse/core/services/pr-check/compare';
+import {
+  readFlowTestRecords,
+  readGuardFlowsFile,
+  readGuardRunFlowSummary,
+  readGuardRunFlowSummaryFromTree,
+  readTreeFlowTestRecords,
+} from '@truecourse/core/commands/guard-read';
+import { compareFlows, docsMoved, testsRewritten, type FlowBindings } from '@truecourse/core/services/pr-check/compare';
 import { PAUSED_CHECK_OUTPUT, renderCheckOutput, updateCheck, type OctokitClient } from '@truecourse/github-app';
 import {
   isWorldBootFailure,
@@ -32,6 +41,8 @@ import {
 } from '@truecourse/guard-runner';
 import {
   CHECK_CONCLUSION_OF_REASON,
+  type FlowTestRecord,
+  type GuardFlowsFile,
   type GuardLatest,
   type GuardManifest,
   type GuardRunFlowSummary,
@@ -41,6 +52,7 @@ import {
   type PullRequestCheckReport,
   type PullRequestStore,
 } from '@truecourse/shared';
+import { flowTestsDir } from '@truecourse/shared/work-tree';
 import type { PullRequestLink } from './tasks/onboarding.js';
 
 /** What the links reach the check through. */
@@ -248,10 +260,26 @@ export function worldNeverBooted(latest: GuardLatest): boolean {
 }
 
 /**
- * The head's run compared flow by flow with the base's, and the sections the
- * head's scenario set moved: the run's half of the report and the reason it
+ * The head's flows as its run left them, read from the head's tree. A flow
+ * test whose seed did not hold at the head could not run there, so its flow
+ * reads blocked, where a run of the default branch keeps the status it was
+ * accepted on.
+ */
+export function headFlowSummary(treeDir: string, latest: GuardLatest): GuardRunFlowSummary {
+  const flows = readGuardRunFlowSummaryFromTree(treeDir, latest) ?? {};
+  for (const id of seedFailedFlows(latest)) if (id in flows) flows[id] = 'blocked';
+  return flows;
+}
+
+const seedFailedFlows = (latest: GuardLatest): Set<string> =>
+  new Set((latest.flowTests ?? []).filter((t) => t.outcome === 'seed-failed').map((t) => t.flowId));
+
+/**
+ * The head's run compared flow by flow with the base's, and the documents the
+ * head moved under its flows: the run's half of the report and the reason it
  * settles on. A new failure fails the check; else a conflict the head created
- * (already on the row) does; else it is clean.
+ * (already on the row) does; else it is clean. A run of flow tests also lists
+ * the tests the head rewrote to keep passing.
  */
 export async function compareWithBase(input: {
   repoFullName: string;
@@ -262,6 +290,7 @@ export async function compareWithBase(input: {
   conflictsCreated: number;
 }): Promise<CheckOutcome> {
   const { repoFullName, link, treeDir, latest } = input;
+  const flowTests = latest.flowTests !== undefined;
   const baseRun = await readGuardRunForCommit(repoFullName, link.baseCommit);
   const baseFlows = baseRun ? await baseFlowSummary(repoFullName, baseRun) : {};
   const deltas = compareFlows(baseFlows, input.headFlows);
@@ -269,8 +298,16 @@ export async function compareWithBase(input: {
   const of = (kind: (typeof deltas)[number]['kind']) =>
     deltas.filter((d) => d.kind === kind).map((d) => ({ id: d.flowId, title: titles.get(d.flowId) ?? d.flowId }));
   const headManifest = readTreeManifest(treeDir);
-  const scenarioIds = scenarioIdsByFlow(headManifest);
-  const newFailures = of('new-failure').map((f) => ({ ...f, scenarioIds: scenarioIds.get(f.id) ?? [] }));
+  const headTests = flowTests ? [...readTreeFlowTestRecords(treeDir).values()] : [];
+  // What a new failure names: its scenarios, or its flow test's spec.
+  const runOf: Map<string, string[]> = flowTests
+    ? new Map(headTests.flatMap((t) => (t.file ? [[t.flowId, [t.file]]] : [])))
+    : scenarioIdsByFlow(headManifest);
+  const newFailures = of('new-failure').map((f) => ({ ...f, scenarioIds: runOf.get(f.id) ?? [] }));
+  const seedFailed = seedFailedFlows(latest);
+  const rewritten = flowTests
+    ? testsRewritten(deltas, await storedFlowTestSources(repoFullName, link.baseCommit), treeFlowTestSources(treeDir, headTests))
+    : [];
   const run: NonNullable<PullRequestCheckReport['run']> = {
     runId: latest.run.runId,
     counts: {
@@ -287,17 +324,23 @@ export async function compareWithBase(input: {
     fixed: of('fixed'),
     newlyBlocked: of('newly-blocked').map((f) => ({
       ...f,
-      why: link.fork ? 'the registered instances are not provided to a fork' : 'could not run at the head',
+      why: link.fork
+        ? 'the registered instances are not provided to a fork'
+        : seedFailed.has(f.id)
+          ? 'its seed did not hold at the head'
+          : 'could not run at the head',
     })),
     newlyCovered: of('newly-covered'),
+    rewritten: rewritten.map((id) => ({ id, title: titles.get(id) ?? id })),
   };
-  const baseManifest = await readManifest(repoFullName, { commitSha: link.baseCommit });
-  const moved = baseManifest
-    ? docsMoved(baseManifest, headManifest).map((d) => ({
-        doc: d.doc,
-        flows: d.flowIds.map((id) => ({ id, title: titles.get(id) ?? id })),
-      }))
-    : [];
+  // Scenarios bind through the manifest; flow tests through the flow corpus.
+  const [baseBindings, headBindings] = flowTests
+    ? [corpusBindings(await readGuardFlowsFile(repoFullName, link.baseCommit)), corpusBindings(readGuardFlowsCorpus(treeDir))]
+    : [(await readManifest(repoFullName, { commitSha: link.baseCommit }))?.flows ?? [], headManifest?.flows ?? []];
+  const moved = docsMoved(baseBindings, headBindings).map((d) => ({
+    doc: d.doc,
+    flows: d.flowIds.map((id) => ({ id, title: titles.get(id) ?? id })),
+  }));
   const reason: PullRequestCheckReason =
     newFailures.length > 0 ? 'new-failures' : input.conflictsCreated > 0 ? 'conflict' : 'clean';
   return { reason, report: { docsMoved: moved, run, codeHalf: 'ran' }, guardRunId: latest.run.runId };
@@ -312,4 +355,34 @@ async function baseFlowSummary(repoFullName: string, run: GuardLatest): Promise<
 
 function scenarioIdsByFlow(manifest: GuardManifest | null): Map<string, string[]> {
   return new Map((manifest?.flows ?? []).map((f) => [f.flowId, f.scenarios.map((s) => s.id)]));
+}
+
+const corpusBindings = (corpus: GuardFlowsFile | null): FlowBindings[] =>
+  (corpus?.flows ?? []).map((f) => ({ flowId: f.id, bindings: f.bindings }));
+
+/** One flow's test sources as one string: its spec, then its seed. */
+const testSource = (spec: string | null, seed: string | null): string => `${spec ?? ''}\0${seed ?? ''}`;
+
+/** Each flow test's sources in the head's tree, by flow id. */
+function treeFlowTestSources(treeDir: string, tests: readonly FlowTestRecord[]): Map<string, string> {
+  const read = (file: string | undefined): string | null => {
+    const abs = file ? path.join(flowTestsDir(treeDir), file) : null;
+    return abs && fs.existsSync(abs) ? fs.readFileSync(abs, 'utf-8') : null;
+  };
+  return new Map(tests.flatMap((t) => (t.file ? [[t.flowId, testSource(read(t.file), read(t.seed))] as const] : [])));
+}
+
+/** Each flow test's sources in the set stored at `commit`, by flow id. */
+async function storedFlowTestSources(repoFullName: string, commit: string): Promise<Map<string, string>> {
+  const tests = [...(await readFlowTestRecords(repoFullName, commit)).values()];
+  // Store paths are tree-relative; any root spells them the same.
+  const fileRel = (file: string): string =>
+    path.relative(repoFullName, path.join(flowTestsDir(repoFullName), file)).split(path.sep).join('/');
+  const bodies = new Map<string, string>();
+  const files = tests.flatMap((t) => [t.file, t.seed]).flatMap((f) => (f ? [fileRel(f)] : []));
+  await forEachScenarioFile(repoFullName, files, { commitSha: commit }, (rel, body) => {
+    bodies.set(rel, body);
+  });
+  const body = (file: string | undefined): string | null => (file ? (bodies.get(fileRel(file)) ?? null) : null);
+  return new Map(tests.flatMap((t) => (t.file ? [[t.flowId, testSource(body(t.file), body(t.seed))] as const] : [])));
 }

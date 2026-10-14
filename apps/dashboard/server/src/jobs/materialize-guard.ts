@@ -68,7 +68,7 @@ import {
   readGuardRunFlowSummary,
   readGuardRunClaimSummary,
 } from '@truecourse/core/commands/guard-read';
-import { storedScenarioSetFiles } from '@truecourse/core/lib/guard-read-tree';
+import { hasStoredScenarioSet, storedScenarioSetFiles } from '@truecourse/core/lib/guard-read-tree';
 import { log } from '@truecourse/core/lib/logger';
 import { assertSafeRel, safeJoin } from '@truecourse/core/lib/safe-path';
 
@@ -109,7 +109,7 @@ export async function materializeStoredGuardState(
   // and nothing when it holds no set.
   const at = { ...(opts.scope ? { scope: opts.scope } : {}), ...(opts.commitSha ? { commitSha: opts.commitSha } : {}) };
   const manifest = await readManifest(repoKey, at);
-  if (opts.commitSha && !manifest) return null;
+  if (opts.commitSha && !manifest && !(await hasStoredScenarioSet(repoKey, at))) return null;
   if (manifest) writeFile(manifestPath(treeDir), JSON.stringify(manifest, null, 2) + '\n');
   // Every file of the set, not only the scenario yaml: the committed flows and
   // claims beside the manifest are what synthesis reconciles against, and a
@@ -243,17 +243,30 @@ export async function persistGuardRun(
  * summary is written with it: every flow of the repository as this run's
  * outcomes leave it. Its section summary is empty, since a test proves a flow
  * and says nothing of a section. Best-effort, as every coverage summary is:
- * the run is stored either way.
+ * the run is stored either way. A caller that derived the summary itself (a
+ * pull request's run, read from its own tree) hands it in as `coverage`.
  */
 export async function persistFlowTestRun(
   ref: RepoRef,
   treeDir: string,
   run: GuardLatest,
-  provenance: VersionProvenance = { producedByRun: null, model: null },
+  opts: { provenance?: VersionProvenance; coverage?: Pick<GuardRunCoverage, 'claims' | 'flows'> } = {},
 ): Promise<void> {
   const latest: GuardLatest = { ...run, run: { ...run.run, origin: 'hosted' } };
+  const provenance = opts.provenance ?? { producedByRun: null, model: null };
   await writeGuardLatest(ref.repoKey, latest, { scope: ref.scope, provenance });
-  if (ref.scope === undefined) {
+  if (opts.coverage) {
+    try {
+      await writeGuardRunCoverage(ref.repoKey, {
+        runId: latest.run.runId,
+        ranAt: latest.run.ranAt,
+        commit: latest.run.commit,
+        ...opts.coverage,
+      });
+    } catch (err) {
+      log.warn(`[Guard] the coverage of ${ref.repoKey} run ${latest.run.runId} was not recorded: ${(err as Error).message}`);
+    }
+  } else if (ref.scope === undefined) {
     try {
       const flows = await readGuardRunFlowSummary(ref.repoKey, latest);
       if (!flows) {

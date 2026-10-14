@@ -24,12 +24,8 @@
 import { CURATE_STEPS } from '@truecourse/core/commands/spec-in-process';
 import { getWorkspaceDecisions } from '@truecourse/core/commands/spec-in-process';
 import { workspaceContextScanInProcess } from '@truecourse/core/commands/context-scan';
-import {
-  listGuardVersions,
-  loadGuardSetupBundle,
-  readGuardRunForCommit,
-  readManifest,
-} from '@truecourse/core/lib/guard-store';
+import { listGuardVersions, loadGuardSetupBundle, readGuardRunForCommit } from '@truecourse/core/lib/guard-store';
+import { hasStoredScenarioSet } from '@truecourse/core/lib/guard-read-tree';
 import { contextBindings, listContextDocuments } from '@truecourse/core/lib/context-store';
 import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import { emitRepoLifecycle } from '@truecourse/core/lib/repo-lifecycle';
@@ -356,15 +352,18 @@ async function resolveMergeBase(
   return data.merge_base_commit.sha;
 }
 
-/** Whether everything a check starts from is stored at `commit` in the default scope. */
+/**
+ * Whether everything a check starts from is stored at `commit` in the default
+ * scope: a scenario set (scenarios or flow tests), a setup bundle and a run.
+ */
 async function hasStoredBase(repoFullName: string, commit: string): Promise<boolean> {
   const at = { commitSha: commit };
-  const [manifest, bundle, run] = await Promise.all([
-    readManifest(repoFullName, at),
+  const [set, bundle, run] = await Promise.all([
+    hasStoredScenarioSet(repoFullName, at),
     loadGuardSetupBundle(repoFullName, at),
     readGuardRunForCommit(repoFullName, commit),
   ]);
-  return manifest !== null && bundle !== null && run !== null;
+  return set && bundle !== null && run !== null;
 }
 
 /** The newest default-branch commit that has everything a check starts from. */

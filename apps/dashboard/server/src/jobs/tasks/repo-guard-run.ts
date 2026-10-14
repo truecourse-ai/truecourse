@@ -38,14 +38,14 @@
  * product goes down however that went. The run is stored as a run of its own
  * whose `flowTests` set each test's outcome beside the status it was written
  * with; the tests index itself is never rewritten. A world that does not build
- * or come up fails the job with what its script printed. A pull request's run
- * stays on scenarios.
+ * or come up fails the job with what its script printed.
  *
  * A run that carries a pull request is its check's last link: it runs the set
- * the pull request's generate stored, stores the run under the pull request's
- * scope stamped with its number, compares it flow by flow with the base's, and
- * settles the check on that — linked to the run's page. A head that does not
- * build or whose world never comes up is the pull request's failure.
+ * the pull request's generate stored, scenarios or flow tests, stores the run
+ * under the pull request's scope stamped with its number, compares it flow by
+ * flow with the base's, and settles the check on that — linked to the run's
+ * page. A head that does not build or whose world never comes up is the pull
+ * request's failure.
  */
 
 import { resolveCommitSha } from '@truecourse/core/lib/repo-ref';
@@ -89,6 +89,7 @@ import {
   checkIsOpen,
   checkLinks,
   compareWithBase,
+  headFlowSummary,
   linkStarted,
   pauseLinkCheck,
   settleLinkCheck,
@@ -263,9 +264,10 @@ export function createRepoGuardRunTask(
         // A set that carries flow tests is run as its tests. What decides it is
         // what the set holds, not the workspace's model: running stored tests
         // needs none.
-        if (!pr && readFlowTests(tree.dir).tests.length > 0) {
+        if (readFlowTests(tree.dir).tests.length > 0) {
           const outcome = await runFlowTests(tree.dir, {
-            worldKey: `${ctx.payload.workspaceOrgId}/${repoFullName}`,
+            // The world setup and generate brought this head up under.
+            worldKey: `${ctx.payload.workspaceOrgId}/${repoFullName}${pr ? `#${pr.number}` : ''}`,
             tracker: mirrorTracker(ctx, GUARD_RUN_STEPS),
             ...(ctx.signal ? { signal: ctx.signal } : {}),
           });
@@ -274,11 +276,31 @@ export function createRepoGuardRunTask(
             throw new Error(`${repoFullName} has no flow test to run: every flow is blocked.`);
           }
           if (outcome.status === 'world-failed') {
+            // A head whose product does not come up is the pull request's failure, not the run's.
+            if (pr) outcomes.set(ctx.jobId, { reason: 'build-failed', report: { codeHalf: 'ran' } });
             throw new Error(`The product did not come up (${outcome.stage}): ${outcome.reason}`);
           }
           if (outcome.status === 'run-failed') throw new Error(`The flow tests did not run: ${outcome.reason}`);
-          await persistFlowTestRun(ref, tree.dir, outcome.latest);
-          return flowTestRunSettled(repoFullName, outcome.latest);
+          if (!pr || !deps.pullRequests) {
+            await persistFlowTestRun(ref, tree.dir, outcome.latest);
+            return flowTestRunSettled(repoFullName, outcome.latest);
+          }
+          const latest: GuardLatest = { ...outcome.latest, run: { ...outcome.latest.run, pullRequest: pr.number } };
+          const headFlows = headFlowSummary(tree.dir, latest);
+          await persistFlowTestRun(ref, tree.dir, latest, { coverage: { claims: {}, flows: headFlows } });
+          const check = await deps.pullRequests.pulls.getCheck(pr.checkId);
+          outcomes.set(
+            ctx.jobId,
+            await compareWithBase({
+              repoFullName,
+              link: pr,
+              treeDir: tree.dir,
+              latest,
+              headFlows,
+              conflictsCreated: check?.report?.conflictsCreated.length ?? 0,
+            }),
+          );
+          return flowTestRunSettled(repoFullName, latest);
         }
 
         // The judge is the only thing here that spends, and it is annotation-only

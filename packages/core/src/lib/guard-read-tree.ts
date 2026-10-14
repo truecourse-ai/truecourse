@@ -73,6 +73,15 @@ export async function storedScenarioSetFiles(
   return [...new Set(files)];
 }
 
+/**
+ * Whether a scenario set is stored at `at`: its manifest, or the tests index
+ * of a set whose flows are proven by Playwright tests, which has no manifest.
+ */
+export async function hasStoredScenarioSet(repoKey: string, at?: VersionAt): Promise<boolean> {
+  if (await readManifest(repoKey, at)) return true;
+  return (await readScenarioFile(repoKey, relOf(repoKey, flowTestsIndexPath(repoKey)), at)) != null;
+}
+
 /** The stored set's tests index and the specs and seeds it names; none when it has no index. */
 async function storedFlowTestFiles(repoKey: string, treeDir: string, at?: VersionAt): Promise<string[]> {
   const indexRel = relOf(treeDir, flowTestsIndexPath(treeDir));

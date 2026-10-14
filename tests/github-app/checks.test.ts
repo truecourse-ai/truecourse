@@ -45,6 +45,7 @@ const report = (over: Partial<PullRequestCheckReport> = {}): PullRequestCheckRep
     fixed: [],
     newlyBlocked: [],
     newlyCovered: [],
+    rewritten: [],
   },
   specHalf: 'no-documents-changed',
   codeHalf: 'ran',
@@ -162,6 +163,7 @@ describe('renderCheckOutput', () => {
           fixed: [],
           newlyBlocked: [],
           newlyCovered: [],
+          rewritten: [],
         },
       }),
       'https://app/agent/run-1',
@@ -178,7 +180,7 @@ describe('renderCheckOutput', () => {
     expect(renderCheckOutput('no-base', null, 'https://app/agent/r').summary).toContain('Rebase onto a newer');
   });
 
-  it('lists the flows the head newly covers', () => {
+  it('lists the flows the head newly covers, and the tests it rewrote to pass', () => {
     const run = {
       runId: 'r',
       counts: { newFailures: 0, preExisting: 0, fixed: 0, newlyBlocked: 0, newlyCovered: 1, added: 0, retired: 0 },
@@ -187,9 +189,11 @@ describe('renderCheckOutput', () => {
       fixed: [],
       newlyBlocked: [],
       newlyCovered: [{ id: 'key', title: 'The API key stays on the server' }],
+      rewritten: [{ id: 'login', title: 'Log in' }],
     };
     const out = renderCheckOutput('clean', report({ run, codeHalf: 'ran' }), null);
     expect(out.summary).toContain('### Newly covered\n\n- The API key stays on the server');
+    expect(out.summary).toContain('### Tests rewritten to pass at the head\n\n- Log in');
   });
 
   it('names the commit to rebase onto when there is no base', () => {
