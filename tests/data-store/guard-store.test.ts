@@ -14,7 +14,8 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { eq } from 'drizzle-orm';
 import { schema, MIGRATIONS_DIR, content, type Db } from '@truecourse/db';
-import { PgGuardStore, contentScope } from '../../packages/data-store/src/index';
+import { ContentStore, PgGuardStore, contentScope } from '../../packages/data-store/src/index';
+import { CONTENT_READ_BATCH } from '../../packages/data-store/src/content-store';
 import type { RepoRef } from '@truecourse/core/lib/guard-store';
 import { EMPTY_GUARD_DECISIONS, claimId, type GuardGenerateReport, type GuardLatest } from '@truecourse/shared';
 
@@ -544,6 +545,56 @@ describe('PgGuardStore — scenario corpus (pglite + Postgres content)', () => {
     fs.rmSync(src2, { recursive: true, force: true });
   });
 
+  it('forEachScenarioFile hands over many files of one set, across read batches', async () => {
+    const dir = seedScenarios(srcDir);
+    const count = CONTENT_READ_BATCH + 2;
+    for (let i = 0; i < count; i++) writeFile(dir, `many/f${i}.yaml`, `id: f${i}\n`);
+    writeFile(dir, 'twin/a.yaml', 'same body\n');
+    writeFile(dir, 'twin/b.yaml', 'same body\n');
+    await store.saveScenarios(refAt('c1'), dir);
+
+    const wanted = [
+      ...Array.from({ length: count }, (_, i) => `.truecourse/scenarios/many/f${i}.yaml`),
+      '.truecourse/scenarios/twin/a.yaml',
+      '.truecourse/scenarios/twin/b.yaml',
+      '.truecourse/scenarios/nope.yaml',
+      'somewhere/else.yaml',
+    ];
+    const got = new Map<string, string>();
+    await store.forEachScenarioFile(REPO, wanted, { commitSha: 'c1' }, (rel, body) => {
+      got.set(rel, body);
+    });
+
+    expect(got.size).toBe(count + 2);
+    expect(got.get(`.truecourse/scenarios/many/f${count - 1}.yaml`)).toBe(`id: f${count - 1}\n`);
+    // One stored body, both paths that name it.
+    expect(got.get('.truecourse/scenarios/twin/a.yaml')).toBe('same body\n');
+    expect(got.get('.truecourse/scenarios/twin/b.yaml')).toBe('same body\n');
+  });
+
+  it('loadScenarios still checks references against the stored claim corpus', async () => {
+    const dir = seedScenarios(srcDir);
+    const claim = {
+      id: 'c-1',
+      doc: 'README.md',
+      sentences: ['intro'],
+      subject: 'the thing',
+      statement: 'It works.',
+      areas: [],
+      testable: true,
+    };
+    writeFile(
+      dir,
+      'claims.json',
+      JSON.stringify({ version: 1, generatedAt: '2026-08-07T00:00:00.000Z', claims: [claim, claim] }),
+    );
+    await store.saveScenarios(refAt('c1'), dir);
+
+    const loaded = await store.loadScenarios(refAt('c1'));
+    expect(loaded.scenarios.map((s) => s.id)).toEqual(['s1']);
+    expect(loaded.errors.map((e) => e.message)).toEqual([expect.stringContaining('duplicate claim id "c-1"')]);
+  });
+
   it('dedupes unchanged bodies across commits', async () => {
     const dir = seedScenarios(srcDir);
     await store.saveScenarios(refAt('c1'), dir);
@@ -555,6 +606,31 @@ describe('PgGuardStore — scenario corpus (pglite + Postgres content)', () => {
     writeFile(dir, 'core/help.yaml', SCENARIO_YAML.replace('shows help', 'shows help v2'));
     await store.saveScenarios(refAt('c3'), dir);
     expect(await scopeCount(db, contentScope.guard(REPO))).toBe(4);
+  });
+});
+
+describe('ContentStore.getMany (pglite)', () => {
+  let client: PGlite;
+  let content: ContentStore;
+  beforeEach(async () => {
+    client = new PGlite();
+    content = new ContentStore(await makeDb(client));
+  });
+  afterEach(async () => {
+    await client.close();
+  });
+
+  it('reads in batches of CONTENT_READ_BATCH, once per sha, leaving out what is absent', async () => {
+    const scope = contentScope.guard(REPO);
+    const shas: string[] = [];
+    for (let i = 0; i <= CONTENT_READ_BATCH; i++) shas.push(await content.putText(scope, `body ${i}`));
+
+    const batches: Map<string, string>[] = [];
+    for await (const batch of content.getMany(scope, [...shas, shas[0]!, 'absent'])) batches.push(batch);
+
+    expect(batches.map((b) => b.size)).toEqual([CONTENT_READ_BATCH, 1]);
+    expect(batches[0]!.get(shas[0]!)).toBe('body 0');
+    expect(batches.some((b) => b.has('absent'))).toBe(false);
   });
 });
 

@@ -31,6 +31,7 @@ import { flowTestsDir, flowTestsIndexPath } from '@truecourse/shared/work-tree';
 import { assertSafeRel, safeJoin } from './safe-path.js';
 import { materializeGuardSetupBundle } from '../services/guard-setup/bundle.js';
 import {
+  forEachScenarioFile,
   listScenarioFiles,
   loadGuardSetupBundle,
   readGuardDecisions,
@@ -109,11 +110,9 @@ export async function materializeGuardReadTree(
 
   const manifest = await readManifest(repoKey, at);
   if (manifest) writeFile(manifestPath(treeDir), JSON.stringify(manifest, null, 2) + '\n');
-  for (const rel of await storedScenarioSetFiles(repoKey, treeDir, at)) {
-    assertSafeRel(rel);
-    const body = await readScenarioFile(repoKey, rel, at);
-    if (body != null) writeFile(safeJoin(treeDir, rel), body);
-  }
+  const setFiles = await storedScenarioSetFiles(repoKey, treeDir, at);
+  for (const rel of setFiles) assertSafeRel(rel);
+  await forEachScenarioFile(repoKey, setFiles, at, (rel, body) => writeFile(safeJoin(treeDir, rel), body));
 
   const report = await readGuardResult(repoKey, at);
   if (report) writeTreeGuardResult(treeDir, report);

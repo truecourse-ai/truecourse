@@ -111,7 +111,7 @@ import { putGuardEvidenceText, readGuardEvidenceText } from './guard-evidence-te
 import { iso } from './iso.js';
 import { assertSafeRel, mapLimit, safeJoin, sha256, sortKeys } from './pack.js';
 import { newVersionId, sweepGuardSeries } from './version-sweep.js';
-import { WORK_TREE_DIR, scenariosDir } from '@truecourse/shared/work-tree';
+import { WORK_TREE_DIR, guardClaimsPath, guardFlowsPath, scenariosDir } from '@truecourse/shared/work-tree';
 
 const OBJECT_CONCURRENCY = 16;
 
@@ -150,6 +150,18 @@ const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
 
 /** The repo-relative prefix guard scenario paths are listed / read under. */
 const SCENARIOS_PREFIX = '.truecourse/scenarios/';
+
+/** A work-tree path as a scenario-set manifest key (scenarios-dir-relative, posix). */
+const scenarioSetKey = (pathOf: (workDir: string) => string): string =>
+  path.relative(scenariosDir(''), pathOf('')).split(path.sep).join('/');
+
+/**
+ * Whether the scenario loader reads a set file: every YAML scenario, and the
+ * flow and claim corpora it checks their references against. The rest of a set
+ * (the flow tests, their specs and seeds) is nothing a load opens.
+ */
+const LOADER_CORPUS_KEYS = new Set([scenarioSetKey(guardFlowsPath), scenarioSetKey(guardClaimsPath)]);
+const loaderReads = (key: string): boolean => /\.ya?ml$/i.test(key) || LOADER_CORPUS_KEYS.has(key);
 
 interface Manifest {
   v: number;
@@ -771,19 +783,19 @@ export class PgGuardStore implements GuardStore {
 
     const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'tc-guard-scenarios-'));
     try {
-      const scope = contentScope.guard(ref.repoKey);
       const scenariosRoot = scenariosDir(root);
-      await mapLimit(Object.entries(manifest.files ?? {}), OBJECT_CONCURRENCY, async ([rel, sha]) => {
+      const wanted = Object.entries(manifest.files ?? {}).filter(([rel]) => loaderReads(rel));
+      const found = await this.forEachBody(contentScope.guard(ref.repoKey), wanted, async (rel, body) => {
         const dest = safeJoin(scenariosRoot, rel);
-        const body = await this.content.get(scope, sha);
-        if (body == null) {
-          throw new Error(
-            `[data-store] missing guard object ${sha} for ${rel} (${ref.repoKey}@${ref.commitSha || 'current'})`,
-          );
-        }
         await fsp.mkdir(path.dirname(dest), { recursive: true });
         await fsp.writeFile(dest, body);
       });
+      const absent = wanted.find(([, sha]) => !found.has(sha));
+      if (absent) {
+        throw new Error(
+          `[data-store] missing guard object ${absent[1]} for ${absent[0]} (${ref.repoKey}@${ref.commitSha || 'current'})`,
+        );
+      }
       return fileLoadScenarios(root);
     } finally {
       await fsp.rm(root, { recursive: true, force: true });
@@ -819,6 +831,43 @@ export class PgGuardStore implements GuardStore {
     return this.scenarioFileBody(repoKey, relPath.slice(SCENARIOS_PREFIX.length), at);
   }
 
+  async forEachScenarioFile(
+    repoKey: string,
+    relPaths: readonly string[],
+    at: VersionAt = {},
+    each: (relPath: string, body: string) => void | Promise<void>,
+  ): Promise<void> {
+    const manifest = await this.manifestFor(guardScenarioSets, repoKey, at);
+    const files = manifest?.files ?? {};
+    const entries = relPaths.flatMap((relPath) => {
+      const sha = relPath.startsWith(SCENARIOS_PREFIX) ? files[relPath.slice(SCENARIOS_PREFIX.length)] : undefined;
+      return sha ? [[relPath, sha] as const] : [];
+    });
+    await this.forEachBody(contentScope.guard(repoKey), entries, each);
+  }
+
+  /**
+   * Each `[name, sha]` entry's body, read in batches and handed to `each`.
+   * Identical files share one body, so a sha can stand for several names.
+   * Returns the shas that had a body; one that did not was never handed over.
+   */
+  private async forEachBody(
+    scope: string,
+    entries: readonly (readonly [name: string, sha: string])[],
+    each: (name: string, body: string) => void | Promise<void>,
+  ): Promise<Set<string>> {
+    const namesBySha = new Map<string, string[]>();
+    for (const [name, sha] of entries) namesBySha.set(sha, [...(namesBySha.get(sha) ?? []), name]);
+    const found = new Set<string>();
+    for await (const batch of this.content.getMany(scope, namesBySha.keys())) {
+      for (const [sha, body] of batch) {
+        found.add(sha);
+        for (const name of namesBySha.get(sha) ?? []) await each(name, body);
+      }
+    }
+    return found;
+  }
+
   /** Body of one scenario-set file by its scenarios-dir-relative path, or null. */
   private async scenarioFileBody(repoKey: string, rel: string, at: VersionAt): Promise<string | null> {
     const manifest = await this.manifestFor(guardScenarioSets, repoKey, at);
@@ -845,20 +894,20 @@ export class PgGuardStore implements GuardStore {
     const manifest = await this.manifestFor(guardSetupSets, repoKey, at);
     if (!manifest) return null;
 
-    const scope = contentScope.guard(repoKey);
+    const entries = Object.entries(manifest.files ?? {});
+    // The manifest is stored data; a caller materializes these paths into a
+    // working tree, so they are re-checked on the way out too.
+    for (const [rel] of entries) assertSafeRel(rel);
     const files: Record<string, string> = {};
-    await mapLimit(Object.entries(manifest.files ?? {}), OBJECT_CONCURRENCY, async ([rel, sha]) => {
-      // The manifest is stored data; a caller materializes these paths into a
-      // working tree, so they are re-checked on the way out too.
-      assertSafeRel(rel);
-      const body = await this.content.get(scope, sha);
-      if (body == null) {
-        throw new Error(
-          `[data-store] missing guard setup object ${sha} for ${rel} (${repoKey}@${at.commitSha ?? at.id ?? 'current'})`,
-        );
-      }
+    const found = await this.forEachBody(contentScope.guard(repoKey), entries, (rel, body) => {
       files[rel] = body;
     });
+    const absent = entries.find(([, sha]) => !found.has(sha));
+    if (absent) {
+      throw new Error(
+        `[data-store] missing guard setup object ${absent[1]} for ${absent[0]} (${repoKey}@${at.commitSha ?? at.id ?? 'current'})`,
+      );
+    }
     return files;
   }
 

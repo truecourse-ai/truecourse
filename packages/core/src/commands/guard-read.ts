@@ -149,6 +149,7 @@ import {
   type GuardStepActual,
 } from '@truecourse/shared'
 import {
+  forEachScenarioFile,
   getGuardStore,
   loadGuardSetupBundle,
   listScenarioFiles,
@@ -2243,18 +2244,20 @@ export async function readGuardRecipeCard(repoKey: string, commit?: string): Pro
 /** Map each stored scenario id → its repo-relative YAML path (first sorted file wins, matching the loader's dedup). */
 async function scenarioFilesById(repoKey: string, commit?: string): Promise<Map<string, string>> {
   const map = new Map<string, string>()
-  for (const rel of await listScenarioFiles(repoKey, at(commit))) {
-    const content = await readScenarioFile(repoKey, rel, at(commit))
-    if (content == null) continue
+  const files = await listScenarioFiles(repoKey, at(commit))
+  // Bodies arrive in no particular order, so the first sorted file is kept by comparison.
+  await forEachScenarioFile(repoKey, files, at(commit), (rel, content) => {
     let parsed: unknown
     try {
       parsed = yaml.load(content)
     } catch {
-      continue
+      return
     }
     const id = (parsed as { id?: unknown } | null)?.id
-    if (typeof id === 'string' && !map.has(id)) map.set(id, rel)
-  }
+    if (typeof id !== 'string') return
+    const kept = map.get(id)
+    if (kept === undefined || rel < kept) map.set(id, rel)
+  })
   return map
 }
 
