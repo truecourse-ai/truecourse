@@ -41,6 +41,28 @@ describe('sentence marks', () => {
     expect(document.querySelector('mark')?.getAttribute('data-sentence')).toBe(sentenceKey(text));
   });
 
+  it('marks a sentence as one highlight, the code spans and bold inside it included', () => {
+    const doc = 'Intro. `GET /api/expenses` accepts `q`, **`category`**, and `pageSize`. Outro.\n';
+    const text = '`GET /api/expenses` accepts `q`, **`category`**, and `pageSize`.';
+    const { marks } = locateSentences('docs/api.md', doc, [{ sentence: sentenceKey(text), quote: text }]);
+    render(<DocMarkdown source={doc} marks={marks} />);
+    const all = document.querySelectorAll('mark');
+    expect(all).toHaveLength(1);
+    expect(all[0]!.textContent).toBe('GET /api/expenses accepts q, category, and pageSize.');
+    expect([...all[0]!.querySelectorAll('code')].map((c) => c.textContent)).toEqual([
+      'GET /api/expenses',
+      'q',
+      'category',
+      'pageSize',
+    ]);
+    expect(all[0]!.querySelector('strong')?.textContent).toBe('category');
+  });
+
+  it('keeps two sentences of one paragraph two highlights', () => {
+    render(<DocMarkdown source={DOC} marks={locate('First sentence here.', 'Third one.').marks} />);
+    expect(marked()).toEqual(['First sentence here.', 'Third one.']);
+  });
+
   it('marks a wrapped list-item sentence exactly, past the indentation the parser strips', () => {
     render(<DocMarkdown source={DOC} marks={locate('It wraps onto a second line.').marks} />);
     expect(marked()).toEqual(['It wraps onto a second line.']);

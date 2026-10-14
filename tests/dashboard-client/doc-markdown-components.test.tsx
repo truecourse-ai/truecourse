@@ -43,13 +43,13 @@ describe('MDX component blocks', () => {
     const { marks, notes } = locate(text);
     expect(notes).toEqual([]);
     render(<DocMarkdown source={DOC} marks={marks} />);
-    expect(marked().join('')).toBe('Open Settings, then AI & developer.');
+    expect(marked()).toEqual(['Open Settings, then AI & developer.']);
     expect(document.querySelector('mark')?.getAttribute('data-sentence')).toBe(sentenceKey(text));
   });
 
   it('marks a sentence that follows a blank line inside a component', () => {
     render(<DocMarkdown source={DOC} marks={locate('Select **Revoke**.').marks} />);
-    expect(marked().join('')).toBe('Select Revoke.');
+    expect(marked()).toEqual(['Select Revoke.']);
   });
 
   it('renders the markdown inside a component, and a fence in it as code', () => {

@@ -144,7 +144,7 @@ const COMPONENTS: Components = {
   mark: ({ node, children }) => (
     <mark
       data-sentence={node?.properties?.[SENTENCE_MARK]}
-      className="rounded-sm bg-amber-500/20 px-0.5 text-foreground ring-1 ring-amber-500/50"
+      className="box-decoration-clone rounded-sm bg-amber-500/20 px-0.5 text-foreground ring-1 ring-amber-500/50"
     >
       {children}
     </mark>
