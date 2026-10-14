@@ -7,19 +7,20 @@
  * one flow, one test, one page, two homes for one thing is how a reader loses
  * track of which is authoritative.
  *
- * There is no Overview destination. The LIST beside this pane is the tab, it
- * carries the corpus, its counts and its narrowing, so with no flow open this
- * pane is at rest ("pick a flow"), not a second thing to read.
+ * There is no Overview destination. The Flows list carries the corpus, its
+ * counts and its narrowing, so with no flow open this pane is at rest ("pick a
+ * flow"), not a second thing to read. The open flow's detail is read by the page,
+ * which titles itself from it, and handed in.
  *
  * It has no non-flow subject at all: the preparation a test runs against is
  * per-surface, and is read on the Interfaces tab beside the surface it prepares.
  */
 
 import { Loader2, FlaskConical } from 'lucide-react';
-import type { GuardFlowsView, GuardInterfaceRow } from '@truecourse/shared';
+import type { GuardInterfaceRow } from '@truecourse/shared';
 import { EmptyState } from '@/components/ui/empty-state';
 import type { GuardDecisionsState } from '@/hooks/useGuardDecisions';
-import { useGuardFlowDetail } from '@/hooks/useGuardFlowDetail';
+import type { GuardFlowDetailState } from '@/hooks/useGuardFlowDetail';
 import { tabFlowId } from '@/hooks/useGuardFlowTabs';
 import type { GuardTabsState } from '@/hooks/useGuardTabs';
 import type { GuardTestBinds } from '@/lib/guard-tests';
@@ -31,28 +32,23 @@ function Centered({ children }: { children: React.ReactNode }) {
 
 export function GuardFlowsPane({
   repoId,
-  view,
-  loading,
-  error,
+  detail: { detail, loading: detailLoading },
   tabs,
   interfaces = null,
   binds,
-  reloadKey = 0,
   decisions,
   onOpenSpec,
   onOpenInterface,
   onOpenExternals,
 }: {
   repoId: string;
-  view: GuardFlowsView | null;
-  loading: boolean;
-  error: string | null;
+  /** The open flow's detail read; empty while no flow tab is active. */
+  detail: GuardFlowDetailState;
   tabs: GuardTabsState;
   /** The mapped interface catalog, for the diagrams a test drives; null = unmapped. */
   interfaces?: GuardInterfaceRow[] | null;
   /** scenarioId → the spec section it binds to (the inventory join). */
   binds?: ReadonlyMap<string, GuardTestBinds>;
-  reloadKey?: number;
   /**
    * The stored dismissals, the flow detail's "don't test this flow" ruling
    * and its undo, plus the read-only note on a claim already dismissed. Omitted
@@ -68,11 +64,7 @@ export function GuardFlowsPane({
    */
   onOpenExternals?: (service?: string) => void;
 }) {
-  const { activeId } = tabs;
-  const flows = view?.flows ?? [];
-
-  const activeFlowId = tabFlowId(activeId);
-  const { detail, loading: detailLoading } = useGuardFlowDetail(repoId, activeFlowId, reloadKey);
+  const activeFlowId = tabFlowId(tabs.activeId);
 
   const content = (() => {
     if (activeFlowId) {
@@ -107,34 +99,7 @@ export function GuardFlowsPane({
       );
     }
 
-    if (loading && flows.length === 0) {
-      return (
-        <Centered>
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </Centered>
-      );
-    }
-    if (error && flows.length === 0) {
-      return (
-        <Centered>
-          <p className="max-w-sm px-6 text-center text-sm text-muted-foreground">{error}</p>
-        </Centered>
-      );
-    }
-    if (flows.length === 0) {
-      return (
-        <EmptyState
-          icon={FlaskConical}
-          title="No tests yet"
-          body={
-            <>Flow generation synthesizes this repository's flows and writes their tests.</>
-          }
-        />
-      );
-    }
-    return (
-      <EmptyState icon={FlaskConical} title="Select a test" body="" />
-    );
+    return <EmptyState icon={FlaskConical} title="Select a test" body="" />;
   })();
 
   return (
