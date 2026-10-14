@@ -23,12 +23,12 @@ import { dashboardActivity } from '../../services/dashboard-activity.service.js'
  * ran there is stored as a run of that commit, beside the tests themselves, so
  * every such generate leaves one.
  *
- * A generate that produced a scenario set chains into the BASELINE RUN — the
- * last link of onboarding — so every connected repository ends up with a run
- * on record, not just a set of scenarios. A generate that settled no flow and
- * had no prior set to fall back on produced NOTHING to run, so it ends the
- * chain with a warning naming the reason rather than handing the run an empty
- * scenario set to fail on.
+ * A generate that produced a scenario set, or kept a flow test, chains into the
+ * BASELINE RUN — the last link of onboarding — so every connected repository
+ * ends up with a run on record at the commit, not just a set of tests. A
+ * generate that settled no flow and had no prior set to fall back on produced
+ * NOTHING to run, so it ends the chain with a warning naming the reason rather
+ * than handing the run an empty scenario set to fail on.
  *
  * A generate that carries a pull request is its check's second link: it starts
  * from the scenario set stored at the pull request's base, over the bundle the
@@ -115,8 +115,8 @@ export interface GuardGenerateJobResult {
    * `nothing-written` — the generate ran but settled no flow, and no earlier
    * scenario set stands behind it. Not a failure (the report is the record of
    * why) and not a success either: there is nothing to run, so the chain stops.
-   * `tests-written` — a product-world generate stored its flow tests. Running
-   * stored flow tests is not a link of this chain, so the chain stops here.
+   * `tests-written` — a product-world generate stored its flow tests, and
+   * chains into the run of them as `ok` chains into the run of its scenarios.
    */
   status: 'ok' | 'open-conflicts' | 'nothing-written' | 'tests-written';
   /** Scenarios authored this run (0 when nothing changed). */
@@ -354,7 +354,7 @@ export function createRepoGuardGenerateTask(
               // How the tests ran at this commit, as a run of it.
               if (flowTestRun) {
                 try {
-                  await persistFlowTestRun(ref, tree.dir, flowTestRun, provenance);
+                  await persistFlowTestRun(ref, tree.dir, flowTestRun, { provenance });
                 } catch (cause) {
                   throw new UserFacingError("Generation finished, but we couldn't save how its tests ran.", { cause });
                 }
@@ -511,9 +511,9 @@ export function createRepoGuardGenerateTask(
   /**
    * Chain the run a finished generate owes: `chained`, `ended` when there is
    * nothing to run, or `failed-to-chain` when the enqueue itself failed. Only a
-   * generate that left a scenario set has anything to run: a blocked corpus
-   * and a generate that settled no flow end the chain here (their
-   * notifications already say why), and so does a failure or a cancel. An
+   * generate that left a scenario set or a kept flow test has anything to run:
+   * a blocked corpus and a generate that settled no flow end the chain here
+   * (their notifications already say why), and so does a failure or a cancel. An
    * unchanged set still runs — the code under it may have moved, and the
    * baseline run is what says so.
    */
@@ -524,7 +524,8 @@ export function createRepoGuardGenerateTask(
     commitSha: string | null,
   ): Promise<'chained' | 'ended' | 'failed-to-chain'> {
     if (outcome !== 'succeeded') return 'ended';
-    if ((result as { status?: string } | undefined)?.status !== 'ok') return 'ended';
+    const status = (result as Partial<GuardGenerateJobResult> | undefined)?.status;
+    if (status !== 'ok' && status !== 'tests-written') return 'ended';
     try {
       // Pinned to the chain's commit, so the run works the tree the scenarios were authored on.
       await deps.chainGuardRun(nextLinkRequest(payload, commitSha));

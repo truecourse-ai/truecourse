@@ -14,6 +14,7 @@ import { bindRealizes, scenarioFullFlowDefect, type GuardFlowProgress } from '@t
  * on `@truecourse/core`.
  */
 
+import fs from 'node:fs'
 import path from 'node:path'
 import yaml from 'js-yaml'
 import {
@@ -444,17 +445,18 @@ export async function readGuardRunFlowSummary(
 
 /**
  * The FLOW SUMMARY of a run derived from the WORKING TREE the run left — its
- * manifest, scenarios, flow corpus and generate report, with `latest`'s
- * outcomes — rather than from the store. What a pull request's check reads:
- * its tree is the head's, and what the head generated lives under the pull
- * request's scope, which the store's reads by commit do not look in. The same
- * derivation as {@link readGuardRunFlowSummary}, over files.
+ * manifest, scenarios, flow corpus, flow tests and generate report, with
+ * `latest`'s outcomes — rather than from the store. What a pull request's
+ * check reads: its tree is the head's, and what the head generated lives under
+ * the pull request's scope, which the store's reads by commit do not look in.
+ * The same derivation as {@link readGuardRunFlowSummary}, over files.
  */
 export function readGuardRunFlowSummaryFromTree(treeDir: string, latest: GuardLatest): GuardRunFlowSummary | null {
   const manifest = readTreeManifest(treeDir)
   const flowsFile = readTreeFlowsCorpus(treeDir)
   const scenarios = loadTreeScenarios(treeDir).scenarios
-  if (!manifest && !flowsFile && scenarios.length === 0) return null
+  const tests = readTreeFlowTestRecords(treeDir)
+  if (!manifest && !flowsFile && scenarios.length === 0 && tests.size === 0) return null
   const result = readTreeGuardResult(treeDir)
   const decisions = readTreeGuardDecisions(treeDir)
   const view: FlowViewSources = {
@@ -470,8 +472,7 @@ export function readGuardRunFlowSummaryFromTree(treeDir: string, latest: GuardLa
     latest,
     result,
     scenarios,
-    // A run's summary counts what the run executed, which is scenarios.
-    tests: new Map(),
+    tests: testsAfterRun(tests, latest),
     dismissals: new Map(decisions.dismissedFlows.map((d) => [d.flowId, d])),
     claimDismissals: new Map(decisions.dismissedClaims.map((d) => [d.claimId, d])),
     claims: readTreeClaimsCorpus(treeDir),
@@ -1085,9 +1086,19 @@ export async function readGuardFlowsFile(
  * Playwright test proved. Empty for a repository whose flows are proven by
  * scenarios, and for a set written before any test was.
  */
-async function readFlowTestRecords(repoKey: string, commit?: string): Promise<Map<string, FlowTestRecord>> {
+export async function readFlowTestRecords(repoKey: string, commit?: string): Promise<Map<string, FlowTestRecord>> {
   const rel = path.relative(repoKey, flowTestsIndexPath(repoKey)).split(path.sep).join('/')
-  const raw = await readScenarioFile(repoKey, rel, at(commit))
+  return flowTestRecordsOf(await readScenarioFile(repoKey, rel, at(commit)))
+}
+
+/** The flow tests a work tree holds, by flow id; empty when it has no tests index. */
+export function readTreeFlowTestRecords(treeDir: string): Map<string, FlowTestRecord> {
+  const file = flowTestsIndexPath(treeDir)
+  return flowTestRecordsOf(fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : null)
+}
+
+/** A tests index's records by flow id; empty for none, or for one that does not parse. */
+function flowTestRecordsOf(raw: string | null): Map<string, FlowTestRecord> {
   if (raw == null) return new Map()
   let parsed: unknown
   try {

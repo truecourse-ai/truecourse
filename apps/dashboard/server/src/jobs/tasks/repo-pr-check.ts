@@ -24,19 +24,15 @@
 import { CURATE_STEPS } from '@truecourse/core/commands/spec-in-process';
 import { getWorkspaceDecisions } from '@truecourse/core/commands/spec-in-process';
 import { workspaceContextScanInProcess } from '@truecourse/core/commands/context-scan';
-import {
-  listGuardVersions,
-  loadGuardSetupBundle,
-  readGuardRunForCommit,
-  readManifest,
-} from '@truecourse/core/lib/guard-store';
-import { contextBindings, listContextDocuments } from '@truecourse/core/lib/context-store';
+import { listGuardVersions, loadGuardSetupBundle, readGuardRunForCommit } from '@truecourse/core/lib/guard-store';
+import { hasStoredScenarioSet } from '@truecourse/core/lib/guard-read-tree';
+import { contextBindings, listContextDocuments, readContextBody } from '@truecourse/core/lib/context-store';
 import { loadWorkspaceSpec } from '@truecourse/core/lib/spec-store';
 import { emitRepoLifecycle } from '@truecourse/core/lib/repo-lifecycle';
 import { log } from '@truecourse/core/lib/logger';
-import { parseContextDocRef } from '@truecourse/core/lib/context-ref';
+import { contextDocRef, parseContextDocRef } from '@truecourse/core/lib/context-ref';
 import { repositoryDocumentsIn, sliceCorpus } from '@truecourse/core/services/context';
-import { conflictsCreated } from '@truecourse/core/services/pr-check/compare';
+import { conflictsCreated, rulingBeforeEdit, sentencesChanged } from '@truecourse/core/services/pr-check/compare';
 import { splitRepo, type OctokitClient } from '@truecourse/github-app';
 import {
   conflictSides,
@@ -46,6 +42,7 @@ import {
   pullRequestWorkspaceScope,
   sentencesByKey,
   type CorpusConflict,
+  type DocSentence,
   type NotificationLevel,
   type PullRequestCheckConclusion,
   type PullRequestCheckReason,
@@ -55,7 +52,7 @@ import {
   type RepositoryStore,
   CHECK_CONCLUSION_OF_REASON,
 } from '@truecourse/shared';
-import type { CuratedCorpus } from '@truecourse/spec-consolidator';
+import type { CuratedCorpus, DecisionsFile } from '@truecourse/spec-consolidator';
 import type { JobDefinition, JobOutcomeStatus, JobPayload } from '@truecourse/jobs';
 import { repositoryContextSource } from '../../services/context-lifecycle.service.js';
 import { workspaceRepositories } from '../../services/context-scan.service.js';
@@ -175,6 +172,7 @@ export function createRepoPullRequestCheckTask(
           run: null,
           specHalf: 'not-a-source',
           codeHalf: 'not-run',
+          build: null,
           ...parts,
         });
         await deps.pulls.updateCheck(opened.id, { mergeBaseSha: mergeBase, baseCommitSha: base });
@@ -229,17 +227,21 @@ export function createRepoPullRequestCheckTask(
 
           // The conflicts: created against the workspace, and open in this
           // repository's slice, which stops the code half as it does on main.
+          // The head's corpus holds only the conflicts on sentences it changed,
+          // so the slice's open conflicts are the workspace's and the head's.
           const defaultCorpus = await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId }, 'corpus');
           const decisions = await getWorkspaceDecisions(workspaceOrgId);
-          const corpus = spec.corpus ?? defaultCorpus;
           const created = spec.corpus ? conflictsCreated(defaultCorpus, openConflicts(spec.corpus, decisions), decisions) : [];
           const sourceIds = await contextBindings(workspaceOrgId, repoFullName);
-          const slice = corpus ? sliceCorpus(corpus, sourceIds) : null;
-          const sliceOpen = slice ? openConflicts(slice, decisions) : [];
+          const openInSlice = (corpus: CuratedCorpus | null) => {
+            const slice = corpus ? sliceCorpus(corpus, sourceIds) : null;
+            return slice ? openConflicts(slice, decisions) : [];
+          };
+          const sliceOpen = [...openInSlice(defaultCorpus), ...openInSlice(spec.corpus)];
           const repos = await workspaceRepositories(workspaceOrgId);
           const report = emptyReport({
             specHalf: spec.half,
-            conflictsCreated: created.map((c) => reportConflict(c, spec, repos)),
+            conflictsCreated: created.map((c) => reportConflict(c, spec, repos, decisions.conflictResolutions ?? [])),
             repositoriesAffected: spec.corpus
               ? repos
                   .filter((r) => r.repoFullName !== repoFullName && sliceChanged(defaultCorpus, spec.corpus!, r.sourceIds))
@@ -356,15 +358,18 @@ async function resolveMergeBase(
   return data.merge_base_commit.sha;
 }
 
-/** Whether everything a check starts from is stored at `commit` in the default scope. */
+/**
+ * Whether everything a check starts from is stored at `commit` in the default
+ * scope: a scenario set (scenarios or flow tests), a setup bundle and a run.
+ */
 async function hasStoredBase(repoFullName: string, commit: string): Promise<boolean> {
   const at = { commitSha: commit };
-  const [manifest, bundle, run] = await Promise.all([
-    readManifest(repoFullName, at),
+  const [set, bundle, run] = await Promise.all([
+    hasStoredScenarioSet(repoFullName, at),
     loadGuardSetupBundle(repoFullName, at),
     readGuardRunForCommit(repoFullName, commit),
   ]);
-  return manifest !== null && bundle !== null && run !== null;
+  return set && bundle !== null && run !== null;
 }
 
 /** The newest default-branch commit that has everything a check starts from. */
@@ -391,6 +396,8 @@ interface HeadScan {
   documents: Map<string, string>;
   /** The documents of that source the pull request changed, by path at the head. */
   changed: Set<string>;
+  /** The sentences the head changed against the workspace's documents, by doc ref. */
+  changedSentences: Map<string, Set<string>>;
 }
 
 /**
@@ -412,7 +419,14 @@ async function scanHead(input: {
     sourceId: string,
   ) => Promise<{ corpus: CuratedCorpus }>;
 }): Promise<HeadScan> {
-  const none: HeadScan = { half: 'not-a-source', corpus: null, source: null, documents: new Map(), changed: new Set() };
+  const none: HeadScan = {
+    half: 'not-a-source',
+    corpus: null,
+    source: null,
+    documents: new Map(),
+    changed: new Set(),
+    changedSentences: new Map(),
+  };
   const source = await repositoryContextSource(input.workspaceOrgId, input.pr.repoFullName);
   if (!source) return none;
   const config = source.config as RepositorySourceConfig;
@@ -421,7 +435,8 @@ async function scanHead(input: {
 
   const documents = repositoryDocumentsIn(input.tree, config);
   const headPaths = new Set(documents.map((d) => d.docPath));
-  const ledgerPaths = new Set((await listContextDocuments(input.workspaceOrgId, source.id)).map((d) => d.docPath));
+  const ledger = new Map((await listContextDocuments(input.workspaceOrgId, source.id)).map((d) => [d.docPath, d] as const));
+  const ledgerPaths = new Set(ledger.keys());
   const files = await input.octokit.paginate(input.octokit.pulls.listFiles, {
     ...splitRepo(input.pr.repoFullName),
     pull_number: input.pr.number,
@@ -442,20 +457,33 @@ async function scanHead(input: {
   if (changed.size === 0) return { ...none, half: 'no-documents-changed', source: sourceOf, documents: bodies };
 
   const { corpus } = await input.run(documents, source.id);
-  return { half: 'ran', corpus, source: sourceOf, documents: bodies, changed };
+  // What the head changed in each document, against the workspace's version of it.
+  const changedSentences = new Map<string, Set<string>>();
+  for (const path of changed) {
+    const head = bodies.get(path);
+    if (head === undefined) continue;
+    const known = ledger.get(path);
+    const before = known ? await readContextBody(input.workspaceOrgId, known.contentHash) : null;
+    const ref = contextDocRef(source.id, path);
+    changedSentences.set(ref, sentencesChanged(ref, before, head));
+  }
+  return { half: 'ran', corpus, source: sourceOf, documents: bodies, changed, changedSentences };
 }
 
 /**
  * One created conflict as the report carries it: the doc pair — this
  * repository's own document first when one side is one (the one the pull
  * request changed, when both are), with its path and the line of its disputed
- * sentence at the head, which is where the check's annotation goes — and the
- * repositories whose slices read either side.
+ * sentence at the head, which is where the check's annotation goes — the
+ * repositories whose slices read either side, both sentences where a developer
+ * finds them, and the ruling the workspace had made before the head edited a
+ * side.
  */
 function reportConflict(
   conflict: CorpusConflict,
-  scan: Pick<HeadScan, 'source' | 'documents' | 'changed'>,
+  scan: Pick<HeadScan, 'source' | 'documents' | 'changed' | 'changedSentences'>,
   repos: readonly { repoFullName: string; sourceIds: string[] }[],
+  rulings: DecisionsFile['conflictResolutions'],
 ): PullRequestCheckReport['conflictsCreated'][number] {
   const { source, documents } = scan;
   const [sideA, sideB] = conflictSides(conflict.a, conflict.b, conflict.sections);
@@ -473,6 +501,27 @@ function reportConflict(
   const sourcesOf = new Set(
     [conflict.a, conflict.b].map((doc) => parseContextDocRef(doc)?.sourceId).filter((id): id is string => !!id),
   );
+  // The head's own documents are at hand; another source's are the workspace's, which the head left alone.
+  const headSentences = (doc: string): Map<string, DocSentence> | null => {
+    const parsed = parseContextDocRef(doc);
+    const body = parsed && source && parsed.sourceId === source.id ? documents.get(parsed.docPath) : undefined;
+    return body === undefined ? null : sentencesByKey(parseDocTree(parsed!.docPath, body));
+  };
+  const sides = conflict.sections.map((side) => {
+    const found = headSentences(side.doc)?.get(side.sentence);
+    return {
+      doc: side.doc,
+      sentence: side.sentence,
+      edited: scan.changedSentences.get(side.doc)?.has(side.sentence) ?? false,
+      shown: {
+        path: parseContextDocRef(side.doc)?.docPath ?? side.doc,
+        line: found?.startLine ?? null,
+        sentence: found?.text ?? side.quote ?? '',
+      },
+    };
+  });
+  const ruling = rulingBeforeEdit(sides, rulings, (doc, sentence) => headSentences(doc)?.has(sentence) ?? true);
+  const pathOf = (doc: string): string => parseContextDocRef(doc)?.docPath ?? doc;
   return {
     docs,
     note: conflict.note,
@@ -480,6 +529,13 @@ function reportConflict(
     path,
     line,
     blocksRepositories: repos.filter((r) => r.sourceIds.some((id) => sourcesOf.has(id))).map((r) => r.repoFullName),
+    sides: sides.map(({ shown, edited }) => ({ ...shown, edited })),
+    ruling: ruling
+      ? {
+          at: ruling.resolvedAt,
+          right: ruling.verdict === 'a' ? pathOf(ruling.docA) : ruling.verdict === 'b' ? pathOf(ruling.docB) : null,
+        }
+      : null,
   };
 }
 

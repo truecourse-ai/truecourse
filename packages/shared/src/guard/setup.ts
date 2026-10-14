@@ -279,6 +279,8 @@ export const GuardSetupReportSchema = z
     status: z.enum(['ok', 'failed']),
     /** For `failed`: the user-facing reason (step 0, 0.5, or the recipe gate). */
     reason: z.string().optional(),
+    /** A product world that did not build: how many builds failed, and what the last one printed. */
+    build: z.object({ failures: z.number().int().positive(), output: z.string() }).strict().optional(),
     /**
      * THE STEP SPINE: one row per taxonomy step this run reached, in run order.
      * A run that fails at the recipe gate carries only the rows up to it. Old

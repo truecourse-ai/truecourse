@@ -17,7 +17,9 @@
  * boot of those scripts (`@truecourse/guard-runner`'s `product-world.ts`), the
  * same call every later run makes. An outcome is accepted only when that
  * passed on the scripts as they stand, so what the session reports and what a
- * run will get cannot differ.
+ * run will get cannot differ. The one exception is a product that does not
+ * build: after {@link WORLD_BUILD_ATTEMPTS} failed builds `verify_world` stops
+ * building, and an outcome is accepted with no world behind it.
  *
  * A tree whose scripts held at an earlier commit and fail at this one is not
  * a tree without scripts: the session is told the stage that failed and what
@@ -61,7 +63,14 @@ const WORLD_REL = path.relative(path.sep, worldDir(path.sep));
 export const WORLD_SESSION_BUDGET = { turns: 150, maxResumes: 1, tokenCeiling: 2_000_000 } as const;
 
 /** The session's whole wall clock: installs and builds of real products are slow. */
-export const WORLD_SESSION_TIMEOUT_MS = 2 * 60 * 60_000;
+export const WORLD_SESSION_TIMEOUT_MS = 30 * 60_000;
+
+/**
+ * How many builds may fail before the session stops trying, the engine's own
+ * run of scripts that already existed included. A head that does not compile
+ * fails every build, however the scripts are changed.
+ */
+export const WORLD_BUILD_ATTEMPTS = 5;
 
 export const WorldSessionOutcomeSchema = z.object({
   /** What the product is and how the scripts run it, in a few sentences. */
@@ -107,12 +116,17 @@ interface Verified {
 export interface WorldSessionState {
   /** The world the last passing `verify_world` reported, when the scripts have not changed since. */
   verified(): ProductWorld | undefined;
+  /** Once no build is left: how many failed, and what the last one printed. */
+  outOfBuilds(): { failures: number; output: string } | undefined;
 }
 
 export function worldSessionDef(input: WorldSessionInput): { def: SessionDef<WorldSessionOutcome>; state: WorldSessionState } {
   let verified: Verified | undefined;
   const standing = (): ProductWorld | undefined =>
     verified && verified.scripts === scriptsHash(input.repoRoot) ? verified.world : undefined;
+  const engineBuildFailed = input.failed?.stage === 'build';
+  const builds: FailedBuilds = { failed: engineBuildFailed ? 1 : 0, output: engineBuildFailed ? input.failed!.output : '' };
+  const outOfBuilds = (): boolean => builds.failed >= WORLD_BUILD_ATTEMPTS;
 
   const def: SessionDef<WorldSessionOutcome> = {
     ...WORLD_SESSION,
@@ -128,7 +142,7 @@ export function worldSessionDef(input: WorldSessionInput): { def: SessionDef<Wor
       env: worldScriptEnv(input.repoRoot, input.slot),
     },
     tools: [
-      verifyWorldTool(input, (result) => {
+      verifyWorldTool(input, builds, (result) => {
         verified = result;
       }),
     ],
@@ -139,11 +153,17 @@ export function worldSessionDef(input: WorldSessionInput): { def: SessionDef<Wor
         'Outcome refused: `verify_world` has not run in this session. It is the engine building and booting your scripts exactly as every later run will. Run it, fix what it reports, then give the outcome.',
     },
     validateOutcome: () =>
-      standing()
+      standing() || outOfBuilds()
         ? undefined
         : 'Outcome refused: the scripts are not the ones `verify_world` last passed (it failed, or they changed since). Run `verify_world` on them as they are now.',
   };
-  return { def, state: { verified: standing } };
+  return {
+    def,
+    state: {
+      verified: standing,
+      outOfBuilds: () => (outOfBuilds() ? { failures: builds.failed, output: builds.output } : undefined),
+    },
+  };
 }
 
 /** One hash over the three scripts as they are on disk; a missing one counts. */
@@ -171,10 +191,24 @@ const VERIFY_WORLD = defineToolSpec({
   inputSchema: z.object({}).strict(),
 });
 
-function verifyWorldTool(input: WorldSessionInput, record: (verified: Verified | undefined) => void): SessionTool {
+/** The builds that failed so far, and what the last one printed. */
+interface FailedBuilds {
+  failed: number;
+  output: string;
+}
+
+/** What `verify_world` says once no build is left: the outcome is all that remains. */
+const OUT_OF_BUILDS = `The build has failed ${WORLD_BUILD_ATTEMPTS} times, counting the engine's own run of the scripts that were there. No build is left: give the outcome now, saying in its summary what stops the build. It is accepted, and setup ends with the product not brought up.`;
+
+function verifyWorldTool(
+  input: WorldSessionInput,
+  builds: FailedBuilds,
+  record: (verified: Verified | undefined) => void,
+): SessionTool {
   return VERIFY_WORLD.bind({
     async execute(_args, ctx) {
       record(undefined);
+      if (builds.failed >= WORLD_BUILD_ATTEMPTS) return { content: OUT_OF_BUILDS, isError: true };
       const missing = missingWorldScripts(input.repoRoot);
       if (missing.length > 0) {
         return { content: `Not written yet: ${missing.map((s) => `${WORLD_REL}/${s}.sh`).join(', ')}.`, isError: true };
@@ -182,8 +216,14 @@ function verifyWorldTool(input: WorldSessionInput, record: (verified: Verified |
       const scripts = scriptsHash(input.repoRoot);
       const build = await buildProductWorld(input.repoRoot, { slot: input.slot, signal: ctx.signal });
       if (!build.ok) {
+        builds.failed += 1;
+        builds.output = build.output;
         const how = build.timedOut ? 'did not finish in time' : `exited ${build.exitCode ?? 'without a code'}`;
-        return { content: `FAILED at build: world/build.sh ${how}.\n\n${build.output}`, isError: true };
+        const left =
+          builds.failed >= WORLD_BUILD_ATTEMPTS
+            ? OUT_OF_BUILDS
+            : `${WORLD_BUILD_ATTEMPTS - builds.failed} of ${WORLD_BUILD_ATTEMPTS} builds left.`;
+        return { content: `FAILED at build: world/build.sh ${how}. ${left}\n\n${build.output}`, isError: true };
       }
       const boot = await bootProductWorld(input.repoRoot, { slot: input.slot, signal: ctx.signal });
       if (!boot.ok) return { content: `FAILED at ${boot.stage}: ${boot.reason}`, isError: true };
@@ -315,4 +355,4 @@ JSON, written by \`up.sh\` to \`$TC_WORLD_FILE\` once the product answers:
 4. Stop what you started by hand, then call \`verify_world\`. It is the engine building and booting your scripts exactly as every later run will, and it reports the stage that failed with that script's own output. Fix and repeat until it passes.
 5. Give the outcome: what the product is and how the scripts run it, and anything that is not running.
 
-An outcome is accepted only when \`verify_world\` passed on the scripts as they are at that moment. If, after real effort, the product cannot be brought up, do not fake it with a stand-in server: there is no outcome to give, and the session ending without one is the honest result.`;
+An outcome is accepted only when \`verify_world\` passed on the scripts as they are at that moment. If, after real effort, the product cannot be brought up, do not fake it with a stand-in server: there is no outcome to give, and the session ending without one is the honest result. The one exception is a build that keeps failing: after ${WORLD_BUILD_ATTEMPTS} failed builds \`verify_world\` stops building, and the outcome you give then, saying what stops the build, is accepted.`;

@@ -268,6 +268,7 @@ async function worldSetupInProcess(
       ranAt: new Date().toISOString(),
       status: result.status,
       ...(reason ? { reason } : {}),
+      ...(result.status === 'failed' && result.build ? { build: result.build } : {}),
       // The step rows are the recipe spine's own; a product world has none of
       // those steps, and its one result is the report's own status and reason.
       steps: [],

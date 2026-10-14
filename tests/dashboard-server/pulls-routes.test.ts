@@ -70,6 +70,7 @@ const report = (over: Partial<PullRequestCheckReport> = {}): PullRequestCheckRep
     fixed: [],
     newlyBlocked: [],
     newlyCovered: [],
+    rewritten: [],
   },
   specHalf: 'no-documents-changed',
   codeHalf: 'ran',

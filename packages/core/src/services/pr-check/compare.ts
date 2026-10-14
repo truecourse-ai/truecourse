@@ -1,7 +1,8 @@
 /**
  * THE COMPARISON a pull request check is judged by: the head's run against the
- * base's, the head's corpus against the workspace's, the head's manifest
- * against the base's. Pure — every input is a stored artifact the job read
+ * base's, the head's corpus against the workspace's, the head's flow bindings
+ * and flow tests against the base's, and which conflicts the head's changed
+ * sentences can have made. Pure — every input is a stored artifact the job read
  * before, so a control run or a rerun can be put in front of it later without
  * touching it.
  */
@@ -9,11 +10,14 @@
 import {
   conflictKey,
   openConflicts,
+  parseDocTree,
+  sentencesByKey,
+  type ConflictLike,
   type CorpusConflict,
   type CorpusLike,
   type DecisionsLike,
   type GuardCoveragePlainStatus,
-  type GuardManifest,
+  type GuardFlowBinding,
   type GuardRunFlowSummary,
 } from '@truecourse/shared';
 
@@ -52,7 +56,7 @@ export function compareFlows(base: GuardRunFlowSummary, head: GuardRunFlowSummar
 }
 
 /** A flow a run proved: it succeeded, with or without healing around a renamed control. */
-const proven = (status: GuardCoveragePlainStatus | null): boolean =>
+export const proven = (status: GuardCoveragePlainStatus | null): boolean =>
   status === 'succeeded' || status === 'partially-succeeded';
 
 function deltaKind(
@@ -88,29 +92,93 @@ export function conflictsCreated<O extends CorpusConflict>(
   return prConflicts.filter((c) => !known.has(conflictKey(c.a, c.b, c.sections)));
 }
 
+/**
+ * The sentences a head changed in one document, by key: those of its body at
+ * the head that its body before did not hold. A document new at the head
+ * changed every sentence it has.
+ */
+export function sentencesChanged(doc: string, before: string | null, head: string): Set<string> {
+  const held = before === null ? new Set<string>() : new Set(sentencesByKey(parseDocTree(doc, before)).keys());
+  return new Set([...sentencesByKey(parseDocTree(doc, head)).keys()].filter((key) => !held.has(key)));
+}
+
+/**
+ * Whether a pull request can have made a conflict: it has a side on a sentence
+ * the head changed (`changed`, keys by doc ref). Two sentences the workspace
+ * already held disagreed before the pull request, whether or not an earlier
+ * scan said so, so such a conflict is the workspace's, settled or open there.
+ */
+export function onChangedSentence(conflict: ConflictLike, changed: ReadonlyMap<string, ReadonlySet<string>>): boolean {
+  return conflict.sections.some((side) => changed.get(side.doc)?.has(side.sentence) ?? false);
+}
+
+/** A ruling as the decisions ledger keeps it: each side a doc and a sentence key, and the verdict. */
+export interface RulingLike {
+  docA: string;
+  sentenceA: string;
+  docB: string;
+  sentenceB: string;
+  verdict: 'a' | 'b' | 'dismissed';
+  resolvedAt: string;
+}
+
+/**
+ * The ruling the workspace had made on a conflict before the pull request
+ * edited a side of it: one on the same two documents, on the same sentence of
+ * every side the head left alone, and on a sentence of each edited side the
+ * head no longer holds (`held`). Null when the conflict is new, or no side of
+ * it was edited.
+ */
+export function rulingBeforeEdit<R extends RulingLike>(
+  sides: readonly { doc: string; sentence: string; edited: boolean }[],
+  rulings: readonly R[],
+  held: (doc: string, sentence: string) => boolean,
+): R | null {
+  if (sides.length !== 2 || !sides.some((side) => side.edited)) return null;
+  const covers = (ruling: R, [a, b]: readonly [string, string]): boolean =>
+    [
+      { side: sides[0]!, doc: ruling.docA, sentence: a },
+      { side: sides[1]!, doc: ruling.docB, sentence: b },
+    ].every(({ side, doc, sentence }) =>
+      doc === side.doc && (side.edited ? sentence !== side.sentence && !held(doc, sentence) : sentence === side.sentence),
+    );
+  // A ruling may name the two documents in either order.
+  return (
+    rulings.find((ruling) => covers(ruling, [ruling.sentenceA, ruling.sentenceB])) ??
+    rulings.find((ruling) => covers({ ...ruling, docA: ruling.docB, docB: ruling.docA }, [ruling.sentenceB, ruling.sentenceA])) ??
+    null
+  );
+}
+
 export interface DocMoved {
   doc: string;
   /** The flows bound to the document at the head whose bound sentences moved. */
   flowIds: string[];
 }
 
+/** One flow's document bindings, as a manifest entry or a flow of the flow corpus carries them. */
+export interface FlowBindings {
+  flowId: string;
+  bindings: readonly GuardFlowBinding[];
+}
+
 /**
- * The documents both manifests bind where a head flow's bound sentences differ
+ * The documents both sides bind where a head flow's bound sentences differ
  * from every sentence set the base bound in that document — the documents the
  * pull request changed under a flow — each with the flows that read it, which
  * go stale with it.
  */
-export function docsMoved(base: GuardManifest | null, head: GuardManifest | null): DocMoved[] {
+export function docsMoved(base: readonly FlowBindings[], head: readonly FlowBindings[]): DocMoved[] {
   // Every sentence set the base bound a document under: two base flows can hold
   // the same document at different sentences.
   const before = new Map<string, Set<string>>();
-  for (const flow of base?.flows ?? []) {
+  for (const flow of base) {
     for (const binding of flow.bindings) {
       before.set(binding.doc, (before.get(binding.doc) ?? new Set()).add(sentenceSetKey(binding.sentences)));
     }
   }
   const moved = new Map<string, DocMoved>();
-  for (const flow of head?.flows ?? []) {
+  for (const flow of head) {
     for (const binding of flow.bindings) {
       const was = before.get(binding.doc);
       if (was === undefined || was.has(sentenceSetKey(binding.sentences))) continue;
@@ -120,6 +188,22 @@ export function docsMoved(base: GuardManifest | null, head: GuardManifest | null
     }
   }
   return [...moved.values()].sort((a, b) => a.doc.localeCompare(b.doc));
+}
+
+/**
+ * The flows whose test held at the base and holds at the head with a spec or
+ * seed the head rewrote. A rewrite that fits a test to a changed product hides
+ * the regression it would have caught, so the check lists these for a person
+ * to read. `base` and `head` are each flow's test sources (spec and seed).
+ */
+export function testsRewritten(
+  deltas: readonly FlowDelta[],
+  base: ReadonlyMap<string, string>,
+  head: ReadonlyMap<string, string>,
+): string[] {
+  return deltas
+    .filter((d) => proven(d.base) && proven(d.head) && base.has(d.flowId) && head.get(d.flowId) !== base.get(d.flowId))
+    .map((d) => d.flowId);
 }
 
 const sentenceSetKey = (sentences: readonly string[]): string => [...sentences].sort().join('\0');

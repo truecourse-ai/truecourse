@@ -15,14 +15,24 @@
  * a supersede, which settled it first.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { log } from '@truecourse/core/lib/logger';
 import {
+  forEachScenarioFile,
   readGuardRunFlows,
   readGuardRunForCommit,
   readManifest,
 } from '@truecourse/core/lib/guard-store';
-import { readGuardRunFlowSummary } from '@truecourse/core/commands/guard-read';
-import { compareFlows, docsMoved } from '@truecourse/core/services/pr-check/compare';
+import {
+  readFlowTestRecords,
+  readGuardFlowsFile,
+  readGuardRunFlowSummary,
+  readGuardRunFlowSummaryFromTree,
+  readTreeFlowTestRecords,
+} from '@truecourse/core/commands/guard-read';
+import { parseContextDocRef } from '@truecourse/core/lib/context-ref';
+import { compareFlows, docsMoved, proven, testsRewritten, type FlowBindings } from '@truecourse/core/services/pr-check/compare';
 import { PAUSED_CHECK_OUTPUT, renderCheckOutput, updateCheck, type OctokitClient } from '@truecourse/github-app';
 import {
   isWorldBootFailure,
@@ -32,6 +42,13 @@ import {
 } from '@truecourse/guard-runner';
 import {
   CHECK_CONCLUSION_OF_REASON,
+  parseDocTree,
+  sentencesByKey,
+  type DocTree,
+  type FlowTestCopyDrift,
+  type FlowTestRecord,
+  type GuardFlow,
+  type GuardFlowsFile,
   type GuardLatest,
   type GuardManifest,
   type GuardRunFlowSummary,
@@ -39,8 +56,10 @@ import {
   type PullRequestCheckReason,
   type PullRequestCheckRecord,
   type PullRequestCheckReport,
+  type PullRequestDocSentence,
   type PullRequestStore,
 } from '@truecourse/shared';
+import { flowTestsDir } from '@truecourse/shared/work-tree';
 import type { PullRequestLink } from './tasks/onboarding.js';
 
 /** What the links reach the check through. */
@@ -248,10 +267,26 @@ export function worldNeverBooted(latest: GuardLatest): boolean {
 }
 
 /**
- * The head's run compared flow by flow with the base's, and the sections the
- * head's scenario set moved: the run's half of the report and the reason it
+ * The head's flows as its run left them, read from the head's tree. A flow
+ * test whose seed did not hold at the head could not run there, so its flow
+ * reads blocked, where a run of the default branch keeps the status it was
+ * accepted on.
+ */
+export function headFlowSummary(treeDir: string, latest: GuardLatest): GuardRunFlowSummary {
+  const flows = readGuardRunFlowSummaryFromTree(treeDir, latest) ?? {};
+  for (const id of seedFailedFlows(latest)) if (id in flows) flows[id] = 'blocked';
+  return flows;
+}
+
+const seedFailedFlows = (latest: GuardLatest): Set<string> =>
+  new Set((latest.flowTests ?? []).filter((t) => t.outcome === 'seed-failed').map((t) => t.flowId));
+
+/**
+ * The head's run compared flow by flow with the base's, and the documents the
+ * head moved under its flows: the run's half of the report and the reason it
  * settles on. A new failure fails the check; else a conflict the head created
- * (already on the row) does; else it is clean.
+ * (already on the row) does; else it is clean. A run of flow tests also lists
+ * the tests the head rewrote to keep passing.
  */
 export async function compareWithBase(input: {
   repoFullName: string;
@@ -260,17 +295,34 @@ export async function compareWithBase(input: {
   latest: GuardLatest;
   headFlows: GuardRunFlowSummary;
   conflictsCreated: number;
+  /** An earlier run of the same commit (generate's own run of the tests), whose passes mark a failure as possibly flaky. */
+  earlier?: GuardLatest | null;
 }): Promise<CheckOutcome> {
   const { repoFullName, link, treeDir, latest } = input;
+  const flowTests = latest.flowTests !== undefined;
   const baseRun = await readGuardRunForCommit(repoFullName, link.baseCommit);
   const baseFlows = baseRun ? await baseFlowSummary(repoFullName, baseRun) : {};
   const deltas = compareFlows(baseFlows, input.headFlows);
-  const titles = new Map((readGuardFlowsCorpus(treeDir)?.flows ?? []).map((f) => [f.id, f.title]));
+  const flows = new Map((readGuardFlowsCorpus(treeDir)?.flows ?? []).map((f) => [f.id, f]));
+  const titles = new Map([...flows.values()].map((f) => [f.id, f.title]));
   const of = (kind: (typeof deltas)[number]['kind']) =>
     deltas.filter((d) => d.kind === kind).map((d) => ({ id: d.flowId, title: titles.get(d.flowId) ?? d.flowId }));
   const headManifest = readTreeManifest(treeDir);
-  const scenarioIds = scenarioIdsByFlow(headManifest);
-  const newFailures = of('new-failure').map((f) => ({ ...f, scenarioIds: scenarioIds.get(f.id) ?? [] }));
+  const headTests = flowTests ? [...readTreeFlowTestRecords(treeDir).values()] : [];
+  // What a new failure names: its scenarios, or its flow test's spec.
+  const runOf: Map<string, string[]> = flowTests
+    ? new Map(headTests.flatMap((t) => (t.file ? [[t.flowId, [t.file]]] : [])))
+    : scenarioIdsByFlow(headManifest);
+  const headTestOf = new Map(headTests.map((t) => [t.flowId, t]));
+  const newFailures = of('new-failure').map((f) => ({
+    ...f,
+    scenarioIds: runOf.get(f.id) ?? [],
+    ...(flowTests ? failureDetail(treeDir, f.id, flows.get(f.id), headTestOf.get(f.id), latest, input.earlier ?? null) : {}),
+  }));
+  const seedFailed = seedFailedFlows(latest);
+  const rewritten = flowTests
+    ? testsRewritten(deltas, await storedFlowTestSources(repoFullName, link.baseCommit), treeFlowTestSources(treeDir, headTests))
+    : [];
   const run: NonNullable<PullRequestCheckReport['run']> = {
     runId: latest.run.runId,
     counts: {
@@ -281,23 +333,34 @@ export async function compareWithBase(input: {
       newlyCovered: of('newly-covered').length,
       added: of('added').length,
       retired: of('retired').length,
+      held: Object.values(input.headFlows).filter(proven).length,
     },
     newFailures,
     preExisting: of('pre-existing'),
     fixed: of('fixed'),
     newlyBlocked: of('newly-blocked').map((f) => ({
       ...f,
-      why: link.fork ? 'the registered instances are not provided to a fork' : 'could not run at the head',
+      why: link.fork
+        ? 'the registered instances are not provided to a fork'
+        : seedFailed.has(f.id)
+          ? 'its seed did not hold at the head'
+          : 'could not run at the head',
     })),
     newlyCovered: of('newly-covered'),
+    rewritten: rewritten.map((id) => ({
+      id,
+      title: titles.get(id) ?? id,
+      copyDrift: renames(treeDir, flows.get(id), headTestOf.get(id)?.copyDrift ?? []),
+    })),
   };
-  const baseManifest = await readManifest(repoFullName, { commitSha: link.baseCommit });
-  const moved = baseManifest
-    ? docsMoved(baseManifest, headManifest).map((d) => ({
-        doc: d.doc,
-        flows: d.flowIds.map((id) => ({ id, title: titles.get(id) ?? id })),
-      }))
-    : [];
+  // Scenarios bind through the manifest; flow tests through the flow corpus.
+  const [baseBindings, headBindings] = flowTests
+    ? [corpusBindings(await readGuardFlowsFile(repoFullName, link.baseCommit)), corpusBindings(readGuardFlowsCorpus(treeDir))]
+    : [(await readManifest(repoFullName, { commitSha: link.baseCommit }))?.flows ?? [], headManifest?.flows ?? []];
+  const moved = docsMoved(baseBindings, headBindings).map((d) => ({
+    doc: parseContextDocRef(d.doc)?.docPath ?? d.doc,
+    flows: d.flowIds.map((id) => ({ id, title: titles.get(id) ?? id })),
+  }));
   const reason: PullRequestCheckReason =
     newFailures.length > 0 ? 'new-failures' : input.conflictsCreated > 0 ? 'conflict' : 'clean';
   return { reason, report: { docsMoved: moved, run, codeHalf: 'ran' }, guardRunId: latest.run.runId };
@@ -312,4 +375,133 @@ async function baseFlowSummary(repoFullName: string, run: GuardLatest): Promise<
 
 function scenarioIdsByFlow(manifest: GuardManifest | null): Map<string, string[]> {
   return new Map((manifest?.flows ?? []).map((f) => [f.flowId, f.scenarios.map((s) => s.id)]));
+}
+
+const corpusBindings = (corpus: GuardFlowsFile | null): FlowBindings[] =>
+  (corpus?.flows ?? []).map((f) => ({ flowId: f.id, bindings: f.bindings }));
+
+/** One flow's test sources as one string: its spec, then its seed. */
+const testSource = (spec: string | null, seed: string | null): string => `${spec ?? ''}\0${seed ?? ''}`;
+
+/** Each flow test's sources in the head's tree, by flow id. */
+function treeFlowTestSources(treeDir: string, tests: readonly FlowTestRecord[]): Map<string, string> {
+  const read = (file: string | undefined): string | null => {
+    const abs = file ? path.join(flowTestsDir(treeDir), file) : null;
+    return abs && fs.existsSync(abs) ? fs.readFileSync(abs, 'utf-8') : null;
+  };
+  return new Map(tests.flatMap((t) => (t.file ? [[t.flowId, testSource(read(t.file), read(t.seed))] as const] : [])));
+}
+
+/** Each flow test's sources in the set stored at `commit`, by flow id. */
+async function storedFlowTestSources(repoFullName: string, commit: string): Promise<Map<string, string>> {
+  const tests = [...(await readFlowTestRecords(repoFullName, commit)).values()];
+  // Store paths are tree-relative; any root spells them the same.
+  const fileRel = (file: string): string =>
+    path.relative(repoFullName, path.join(flowTestsDir(repoFullName), file)).split(path.sep).join('/');
+  const bodies = new Map<string, string>();
+  const files = tests.flatMap((t) => [t.file, t.seed]).flatMap((f) => (f ? [fileRel(f)] : []));
+  await forEachScenarioFile(repoFullName, files, { commitSha: commit }, (rel, body) => {
+    bodies.set(rel, body);
+  });
+  const body = (file: string | undefined): string | null => (file ? (bodies.get(fileRel(file)) ?? null) : null);
+  return new Map(tests.flatMap((t) => (t.file ? [[t.flowId, testSource(body(t.file), body(t.seed))] as const] : [])));
+}
+
+/**
+ * What a developer needs to see of one new failure of a flow test: the step it
+ * failed at, the documented sentence that step proves, what the product did
+ * instead, and how long before an earlier run of the same commit passed it.
+ */
+function failureDetail(
+  treeDir: string,
+  flowId: string,
+  flow: GuardFlow | undefined,
+  record: FlowTestRecord | undefined,
+  latest: GuardLatest,
+  earlier: GuardLatest | null,
+): Pick<NonNullable<PullRequestCheckReport['run']>['newFailures'][number], 'step' | 'documented' | 'observed' | 'passedEarlierSeconds'> {
+  const ran = latest.flowTests?.find((t) => t.flowId === flowId);
+  const steps = ran?.run.steps ?? [];
+  const failed = steps.find((step) => step.outcome === 'failed');
+  const documented = failed ? milestoneSentence(treeDir, flow, failed.order) : null;
+  // A test accepted failing at the head says in its own words what the product does; a test that
+  // was passing only has its assertion.
+  const observed = record?.status === 'failing' && record.disagreement ? record.disagreement.observed : assertionOf(ran?.run.error);
+  const passedEarlier = earlier?.flowTests?.find((t) => t.flowId === flowId && t.outcome === 'pass');
+  const seconds = passedEarlier
+    ? Math.max(0, Math.round((Date.parse(latest.run.ranAt) - Date.parse(earlier!.run.ranAt)) / 1000))
+    : undefined;
+  return {
+    ...(failed ? { step: { order: failed.order, of: steps.length, title: failed.title } } : {}),
+    ...(documented ? { documented } : {}),
+    ...(observed ? { observed } : {}),
+    ...(seconds !== undefined ? { passedEarlierSeconds: seconds } : {}),
+  };
+}
+
+/** A document of the head's tree, by its ref; null when the tree does not hold it. */
+function treeDoc(treeDir: string, doc: string): DocTree | null {
+  const file = path.join(treeDir, ...doc.split('/'));
+  return fs.existsSync(file) ? parseDocTree(doc, fs.readFileSync(file, 'utf-8')) : null;
+}
+
+/** Where a developer finds some sentences of a document. */
+const shownAt = (doc: string, sentences: readonly { startLine: number; text: string }[]): PullRequestDocSentence => ({
+  path: parseContextDocRef(doc)?.docPath ?? doc,
+  line: sentences[0]!.startLine,
+  sentence: sentences.map((s) => s.text).join(' '),
+});
+
+/** The sentences a flow's milestone at `order` is read from, as the head's tree holds them. */
+function milestoneSentence(treeDir: string, flow: GuardFlow | undefined, order: number): PullRequestDocSentence | null {
+  const milestone = flow?.milestones.find((m) => m.order === order);
+  if (!milestone) return null;
+  const tree = treeDoc(treeDir, milestone.doc);
+  const byKey = tree ? sentencesByKey(tree) : new Map<string, DocTree['sentences'][number]>();
+  const found = milestone.sentences.flatMap((key) => byKey.get(key) ?? []);
+  if (found.length === 0) return { path: parseContextDocRef(milestone.doc)?.docPath ?? milestone.doc, line: null, sentence: milestone.claimTitle };
+  return shownAt(milestone.doc, found);
+}
+
+/**
+ * A rewritten test's renames, each name once, placed at the sentence that says
+ * the documented name: one of the sentences of the step it was met in first,
+ * then any sentence of the flow's documents. A name no sentence says has no place.
+ */
+function renames(
+  treeDir: string,
+  flow: GuardFlow | undefined,
+  drifts: readonly FlowTestCopyDrift[],
+): NonNullable<PullRequestCheckReport['run']>['rewritten'][number]['copyDrift'] {
+  const seen = new Set<string>();
+  return drifts.flatMap((drift) => {
+    const name = `${drift.documented}\u0000${drift.observed}`;
+    if (seen.has(name)) return [];
+    seen.add(name);
+    return [{ documented: drift.documented, observed: drift.observed, at: sentenceSaying(treeDir, flow, drift.step, drift.documented) }];
+  });
+}
+
+function sentenceSaying(treeDir: string, flow: GuardFlow | undefined, step: number, words: string): PullRequestDocSentence | null {
+  if (!flow) return null;
+  const says = (s: { text: string }): boolean => s.text.includes(words);
+  const milestone = flow.milestones.find((m) => m.order === step);
+  if (milestone) {
+    const tree = treeDoc(treeDir, milestone.doc);
+    const byKey = tree ? sentencesByKey(tree) : new Map<string, DocTree['sentences'][number]>();
+    const own = milestone.sentences.flatMap((key) => byKey.get(key) ?? []).find(says);
+    if (own) return shownAt(milestone.doc, [own]);
+  }
+  for (const doc of new Set([...(milestone ? [milestone.doc] : []), ...flow.milestones.map((m) => m.doc)])) {
+    const found = treeDoc(treeDir, doc)?.sentences.find(says);
+    if (found) return shownAt(doc, [found]);
+  }
+  return null;
+}
+
+/** What a failed assertion says it expected and received, else the error's first line. */
+function assertionOf(error: string | undefined): string | undefined {
+  const lines = (error ?? '').split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
+  const said = lines.filter((line) => /^(Expected|Received)\b/.test(line)).slice(0, 2);
+  return (said.length > 0 ? said.join(' · ') : lines[0])?.slice(0, 300);
 }

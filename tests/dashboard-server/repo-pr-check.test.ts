@@ -22,9 +22,11 @@ import { JobStore, PgGuardStore, PgRepositoryStore, RepositoriesRegistryStore } 
 import { resetRegistryStore, setRegistryStore } from '@truecourse/core/config/registry';
 import { registerJob, type JobTask, type StartWorker } from '@truecourse/jobs';
 import { manifestPath, scenariosDir, dependenciesLocalPath, API_SERVER_BOOT_EXPECTED } from '@truecourse/guard-runner';
+import { flowSeedFileName, flowTestFileName, flowTestsDir, flowTestsIndexPath } from '@truecourse/shared/work-tree';
 import {
   GUARD_FORMAT_VERSION,
   sentenceKey,
+  type FlowTestRecord,
   type GuardGenerateReport,
   type GuardLatest,
   type PullRequestCheckRecord,
@@ -86,6 +88,7 @@ let engines: {
   setup: NonNullable<RepoGuardSetupTaskDeps['runSetup']>;
   generate: NonNullable<RepoGuardGenerateTaskDeps['runGenerate']>;
   run: NonNullable<RepoGuardRunTaskDeps['runGuard']>;
+  runFlowTests: NonNullable<RepoGuardRunTaskDeps['runFlowTests']>;
   scan: NonNullable<RepoPullRequestCheckTaskDeps['runScan']>;
 };
 /** What each engine saw of the tree when it ran. */
@@ -94,6 +97,8 @@ let seen: { setupHadOverlays: boolean | null; scanned: boolean };
 let cancelledChecks: number[];
 /** The mode the check's own LLM runs in. */
 let checkLlmMode: WorkspaceLlm['mode'];
+/** The mode setup's LLM runs in: on Claude Code it brings up a product world. */
+let setupLlmMode: WorkspaceLlm['mode'];
 
 const testLlm = {
   mode: 'api',
@@ -216,6 +221,90 @@ async function storeBase(commit = BASE): Promise<void> {
   await writeGuardRunCoverage(REPO, { runId: run.run.runId, ranAt: run.run.ranAt, commit, claims: {}, flows: { f1: 'succeeded' } });
 }
 
+/** The one sentence of the fixture's `docs/orgs.md`, which every flow binds. */
+const ORGS = [sentenceKey('An org can be created.')];
+
+/**
+ * A set whose flows are proven by Playwright tests, written into `dir`: the
+ * flow corpus, and per flow a passing test with its spec (`specs[id]`) and a
+ * seed. `binds` overrides a flow's bound sentences. Answers the tests index.
+ */
+function writeFlowTestSet(dir: string, specs: Record<string, string>, binds: Record<string, string[]> = {}): FlowTestRecord[] {
+  fs.mkdirSync(flowTestsDir(dir), { recursive: true });
+  const flows = Object.keys(specs).map((id) => ({
+    id,
+    title: `Flow ${id}`,
+    goal: 'An org is set up.',
+    fingerprint: `sha256:${id}`,
+    milestones: [{ order: 1, doc: 'docs/orgs.md', claimId: `claim-${id}`, claimTitle: 'An org can be created.', sentences: binds[id] ?? ORGS }],
+    bindings: [{ doc: 'docs/orgs.md', sentences: binds[id] ?? ORGS }],
+    composedOf: [],
+    synthesisInputsHash: 'sha256:inputs',
+  }));
+  fs.writeFileSync(path.join(path.dirname(manifestPath(dir)), 'flows.json'), JSON.stringify({ version: 1, generatedAt: '', flows }) + '\n');
+  const tests: FlowTestRecord[] = Object.entries(specs).map(([id, spec]) => {
+    fs.writeFileSync(path.join(flowTestsDir(dir), flowTestFileName(id)), spec);
+    fs.writeFileSync(path.join(flowTestsDir(dir), flowSeedFileName(id)), `// seeds ${id}\n`);
+    return {
+      flowId: id,
+      flowFingerprint: `sha256:${id}`,
+      status: 'passing',
+      file: flowTestFileName(id),
+      seed: flowSeedFileName(id),
+      summary: `Flow ${id} holds.`,
+      run: { ranAt: '2026-09-01T09:00:00.000Z', durationMs: 1, steps: [] },
+    };
+  });
+  fs.writeFileSync(flowTestsIndexPath(dir), JSON.stringify({ version: 1, generatedAt: '', tests }) + '\n');
+  return tests;
+}
+
+/** A run of the stored flow tests, each flow's test at its outcome; a failing one fails its one step. */
+function flowTestLatest(
+  runId: string,
+  commit: string,
+  outcomes: Record<string, 'pass' | 'fail' | 'seed-failed'>,
+  ranAt = '2026-09-01T10:00:00.000Z',
+): GuardLatest {
+  const results = Object.entries(outcomes);
+  const count = (o: string) => results.filter(([, outcome]) => outcome === o).length;
+  return {
+    run: { runId, ranAt, branch: 'main', commit, recipeFingerprint: 'product-world' },
+    summary: { total: results.length, pass: count('pass'), fail: count('fail'), stale: 0, orphaned: 0, error: 0 },
+    scenarios: [],
+    flowTests: results.map(([flowId, outcome]) => ({
+      flowId,
+      file: flowTestFileName(flowId),
+      authored: 'passing',
+      outcome,
+      run:
+        outcome === 'fail'
+          ? {
+              ranAt,
+              durationMs: 1,
+              steps: [{ order: 1, title: 'An org can be created.', outcome: 'failed' }],
+              error: 'Error: expect(received).toBe(expected)\n\nExpected: 3\nReceived: 2',
+            }
+          : { ranAt, durationMs: 1, steps: [] },
+    })),
+  } as GuardLatest;
+}
+
+/** The base at `commit` as Claude Code leaves it: a flow-test set, a bundle, a report and a passing run of the tests. */
+async function storeFlowTestBase(specs: Record<string, string>, commit = BASE): Promise<void> {
+  const dir = fs.mkdtempSync(path.join(home, 'base-'));
+  writeFlowTestSet(dir, specs);
+  const ref = { repoKey: REPO, commitSha: commit };
+  await saveScenarios(ref, scenariosDir(dir));
+  await writeGuardResult(ref, report());
+  await saveGuardSetupBundle(ref, { '.truecourse/world/up.sh': '#!/bin/sh\n' });
+  const outcomes = Object.fromEntries(Object.keys(specs).map((id) => [id, 'pass' as const]));
+  const run = flowTestLatest(`run-${commit}`, commit, outcomes);
+  await writeGuardLatest(REPO, run);
+  const flows = Object.fromEntries(Object.keys(specs).map((id) => [id, 'succeeded' as const]));
+  await writeGuardRunCoverage(REPO, { runId: run.run.runId, ranAt: run.run.ranAt, commit, claims: {}, flows });
+}
+
 function pr(over: Partial<PullRequestRecord> = {}): PullRequestRecord {
   return {
     repoFullName: REPO,
@@ -282,9 +371,13 @@ function mountJobs(): JobsMount {
     hub,
     repos,
     startWorker: laneWorker,
-    guardSetup: { startLlm: async () => testLlm, runSetup: (root, opts) => engines.setup(root, opts) },
+    guardSetup: { startLlm: async () => ({ ...testLlm, mode: setupLlmMode }), runSetup: (root, opts) => engines.setup(root, opts) },
     guardGenerate: { startLlm: async () => testLlm, runGenerate: (root, opts) => engines.generate(root, opts) },
-    guardRun: { startLlm: async () => testLlm, runGuard: (root, opts) => engines.run(root, opts) },
+    guardRun: {
+      startLlm: async () => testLlm,
+      runGuard: (root, opts) => engines.run(root, opts),
+      runFlowTests: (root, opts) => engines.runFlowTests(root, opts),
+    },
     pullRequestCheck: {
       pulls,
       repos,
@@ -322,6 +415,7 @@ beforeEach(async () => {
   seen = { setupHadOverlays: null, scanned: false };
   cancelledChecks = [];
   checkLlmMode = 'api';
+  setupLlmMode = 'api';
   engines = {
     setup: async (repoRoot) => {
       seen.setupHadOverlays = fs.existsSync(dependenciesLocalPath(repoRoot));
@@ -329,6 +423,9 @@ beforeEach(async () => {
     },
     generate: async () => ({ guard: report() }) as never,
     run: async () => ({ status: 'ok', latest: latestOf('run-head', HEAD, 'pass') }) as never,
+    runFlowTests: async () => {
+      throw new Error('this set has no flow tests');
+    },
     scan: async () => {
       seen.scanned = true;
       return { corpus: { version: 6, generatedAt: '', docs: [], areas: [], skippedDocs: [] } } as never;
@@ -448,6 +545,87 @@ describe('the pull request check', () => {
     expect(lastGithubUpdate()).toMatchObject({ conclusion: 'failure', details_url: 'https://app/repos/widgets/runs/run-head' });
   });
 
+  it('checks a head whose flows are proven by Playwright tests against the tests stored at its base', async () => {
+    await storeFlowTestBase({ 'log-in': '// v1\n', export: '// v1\n', invite: '// v1\n' });
+    let generateSawBaseTests = false;
+    engines.generate = async (root) => {
+      generateSawBaseTests = fs.readFileSync(flowTestsIndexPath(root), 'utf-8').includes('"invite"');
+      // The head rewrote log-in's test around a renamed control, and moved export's sentences.
+      const written = writeFlowTestSet(root, { 'log-in': '// v2\n', export: '// v1\n', invite: '// v1\n' }, { export: [...ORGS, 'billing'] });
+      const tests = written.map((t) =>
+        t.flowId === 'log-in'
+          ? {
+              ...t,
+              // The same rename met twice, and a name no sentence of the documents says.
+              copyDrift: [
+                { step: 1, documented: 'org', observed: 'team' },
+                { step: 1, documented: 'org', observed: 'team' },
+                { step: 1, documented: 'Widget', observed: 'Gadget' },
+              ],
+            }
+          : t,
+      );
+      fs.writeFileSync(flowTestsIndexPath(root), JSON.stringify({ version: 1, generatedAt: '', tests }) + '\n');
+      return {
+        guard: report(),
+        // Generate's own run of the tests at this commit, which passed export.
+        flowTestRun: flowTestLatest('run-generate', HEAD, { 'log-in': 'pass', export: 'pass' }, '2026-09-01T09:59:41.000Z'),
+        flowTests: {
+          status: 'ok',
+          tests,
+          authored: 1,
+          unsettled: [],
+          moved: [],
+          judged: { read: 0, flagged: 0, unavailable: 0 },
+          spent: { sessions: 1, turns: 1, tokens: 1, costUsd: 0 },
+        },
+      } as never;
+    };
+    let worldKey: string | undefined;
+    engines.runFlowTests = async (_root, opts) => {
+      worldKey = opts.worldKey;
+      return { status: 'ok', latest: flowTestLatest('run-head', HEAD, { 'log-in': 'pass', export: 'fail', invite: 'seed-failed' }) } as never;
+    };
+
+    const settled = await check();
+
+    expect(settled).toMatchObject({ conclusion: 'failure', reason: 'new-failures', baseCommitSha: BASE, guardRunId: 'run-head' });
+    const orgs = { path: 'docs/orgs.md', line: 3, sentence: 'An org can be created.' };
+    expect(settled.report?.run).toMatchObject({
+      counts: { newFailures: 1, newlyBlocked: 1, held: 1 },
+      newFailures: [
+        {
+          id: 'export',
+          title: 'Flow export',
+          scenarioIds: [flowTestFileName('export')],
+          documented: orgs,
+          step: { order: 1, of: 1, title: 'An org can be created.' },
+          observed: 'Expected: 3 · Received: 2',
+          passedEarlierSeconds: 19,
+        },
+      ],
+      newlyBlocked: [{ id: 'invite', why: 'its seed did not hold at the head' }],
+      rewritten: [
+        {
+          id: 'log-in',
+          title: 'Flow log-in',
+          copyDrift: [
+            { documented: 'org', observed: 'team', at: orgs },
+            { documented: 'Widget', observed: 'Gadget', at: null },
+          ],
+        },
+      ],
+    });
+    expect(settled.report?.docsMoved).toEqual([{ doc: 'docs/orgs.md', flows: [{ id: 'export', title: 'Flow export' }] }]);
+    // Generate started from the base's tests, and the run is the chain's last link, on the head's own world.
+    expect(generateSawBaseTests).toBe(true);
+    expect(await jobTypes()).toEqual(['repo.pr-check', 'repo.guard-setup', 'repo.guard-generate', 'repo.guard-run']);
+    expect(worldKey).toBe(`${ORG}/${REPO}#7`);
+    const prRuns = (await readGuardHistory(REPO, { scope: 'pr/7' })).runs;
+    expect(prRuns.find((r) => r.runId === 'run-head')?.pullRequest).toBe(7);
+    expect(lastGithubUpdate()).toMatchObject({ conclusion: 'failure', details_url: 'https://app/repos/widgets/runs/run-head' });
+  });
+
   it('skips a head whose merge-base has nothing stored, naming the newest commit that has, with no link', async () => {
     await storeBase();
     mergeBase = 'base-9';
@@ -470,6 +648,39 @@ describe('the pull request check', () => {
     expect(await jobTypes()).toEqual(['repo.pr-check', 'repo.guard-setup']);
     const [setupRun] = await listStoredSessionRuns(REPO, 'guard-setup');
     expect(lastGithubUpdate()!.details_url).toBe(`https://app/agent/${setupRun!.runId}`);
+  });
+
+  it('a product that did not build at the head is the pull request’s failure, quoting the build', async () => {
+    await storeBase();
+    setupLlmMode = 'claude-code';
+    engines.setup = async () =>
+      ({
+        report: {
+          ranAt: '',
+          status: 'failed',
+          reason: 'the product did not build: 5 builds failed.',
+          build: { failures: 5, output: 'pnpm install\n./lib/store.ts:1:23\nError: Expression expected' },
+          steps: [],
+        },
+        reportPath: '',
+        sessionsRunDirs: [],
+      }) as never;
+    const settled = await check();
+    expect(settled).toMatchObject({ conclusion: 'failure', reason: 'build-failed' });
+    expect(settled.report?.build).toEqual({ failures: 5, output: 'pnpm install\n./lib/store.ts:1:23\nError: Expression expected' });
+    expect(lastGithubUpdate()!.output).toMatchObject({ title: "The project doesn't build at this commit" });
+    expect(await jobTypes()).toEqual(['repo.pr-check', 'repo.guard-setup']);
+  });
+
+  it('a product world the head could not otherwise bring up is an error, not the pull request’s failure', async () => {
+    await storeBase();
+    setupLlmMode = 'claude-code';
+    engines.setup = async () =>
+      ({ report: { ranAt: '', status: 'failed', reason: 'the product was not brought up: the session timed out', steps: [] }, reportPath: '', sessionsRunDirs: [] }) as never;
+    const settled = await check();
+    // Whether the head or the session is at fault is not known.
+    expect(settled).toMatchObject({ conclusion: 'neutral', reason: 'error' });
+    expect(settled.report?.build).toBeNull();
   });
 
   it('a generate that breaks is an error, linked to that generate', async () => {
@@ -563,12 +774,17 @@ describe('the pull request check', () => {
         path: 'docs/orgs.md',
         line: 3,
         blocksRepositories: [REPO],
+        sides: [
+          { path: 'docs/orgs.md', line: 3, sentence: 'An org can be created.', edited: true },
+          { path: 'docs/other.md', line: null, sentence: 'Only one org.', edited: false },
+        ],
+        ruling: null,
       },
     ]);
     // The conflict is annotated on the line of the changed document's disputed
     // sentence, and the check links to Context's conflicts filtered to the pull request.
     expect((lastGithubUpdate()!.output as { annotations: unknown[] }).annotations).toEqual([
-      { path: 'docs/orgs.md', start_line: 3, end_line: 3, annotation_level: 'failure', message: expect.stringContaining('one org vs many') },
+      { path: 'docs/orgs.md', start_line: 3, end_line: 3, annotation_level: 'failure', message: 'Disagrees with docs/other.md: "Only one org."' },
     ]);
     expect(lastGithubUpdate()!.details_url).toBe('https://app/context/conflicts?pr=acme%2Fwidgets%237');
     // Nothing of the code half ran.
@@ -615,9 +831,40 @@ describe('the pull request check', () => {
           skippedDocs: [],
         },
       }) as never;
+    // The workspace had ruled on this pair, on the sentence the head has since rewritten.
+    await saveWorkspaceSpec({ workspaceOrgId: ORG }, 'decisions', {
+      version: 2,
+      manualIncludes: [],
+      manualExcludes: [],
+      manualAreas: [],
+      instructions: [],
+      scopeVerdicts: [],
+      conflictResolutions: [
+        {
+          docA: other,
+          sentenceA: sentenceKey('Only one org.'),
+          docB: orgs,
+          sentenceB: sentenceKey('An org can be founded.'),
+          verdict: 'a',
+          resolvedAt: '2026-10-08T11:35:26.333Z',
+        },
+      ],
+    } as never);
 
     const settled = await check();
-    expect(settled.report?.conflictsCreated).toMatchObject([{ docs: [orgs, other], path: 'docs/orgs.md', line: 3 }]);
+    expect(settled.report?.conflictsCreated).toMatchObject([
+      {
+        docs: [orgs, other],
+        path: 'docs/orgs.md',
+        line: 3,
+        // The head's own document is read at the head; the other side keeps the quote the scan took.
+        sides: [
+          { path: 'docs/other.md', line: null, sentence: 'Only one org.', edited: false },
+          { path: 'docs/orgs.md', line: 3, sentence: 'An org can be created.', edited: true },
+        ],
+        ruling: { at: '2026-10-08T11:35:26.333Z', right: 'docs/other.md' },
+      },
+    ]);
     expect((lastGithubUpdate()!.output as { annotations: { path: string }[] }).annotations.map((a) => a.path)).toEqual([
       'docs/orgs.md',
     ]);

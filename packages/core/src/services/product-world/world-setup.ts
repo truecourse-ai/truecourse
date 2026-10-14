@@ -57,7 +57,13 @@ export type WorldSetupResult =
       notRunning: string[];
       spent: { sessions: number; turns: number; tokens: number; costUsd: number };
     }
-  | { status: 'failed'; reason: string; spent: { sessions: number; turns: number; tokens: number; costUsd: number } };
+  | {
+      status: 'failed';
+      reason: string;
+      /** When the product did not build: how many builds failed, and what the last one printed. */
+      build?: { failures: number; output: string };
+      spent: { sessions: number; turns: number; tokens: number; costUsd: number };
+    };
 
 export async function runWorldSetup(input: WorldSetupInput): Promise<WorldSetupResult> {
   const { repoRoot } = input;
@@ -107,8 +113,17 @@ export async function runWorldSetup(input: WorldSetupInput): Promise<WorldSetupR
       return { status: 'failed', reason: `the product was not brought up: ${describeSessionFailure(outcome.failure)}`, spent };
     }
     const world = state.verified();
-    // The outcome check already refused anything else; this is the type saying so.
-    if (!world) return { status: 'failed', reason: 'the world session ended without scripts the engine had verified', spent };
+    // The outcome check refused anything else but a build that kept failing.
+    if (!world) {
+      const build = state.outOfBuilds();
+      if (!build) return { status: 'failed', reason: 'the world session ended without scripts the engine had verified', spent };
+      return {
+        status: 'failed',
+        reason: `the product did not build: ${build.failures} builds failed. ${outcome.output.summary}`,
+        build,
+        spent,
+      };
+    }
     return { status: 'ok', outcome: 'written', world, summary: outcome.output.summary, notRunning: outcome.output.notRunning, spent };
   } finally {
     releaseWorldSlot(slot);

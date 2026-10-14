@@ -10,6 +10,10 @@ import {
   compareFlows,
   conflictsCreated,
   docsMoved,
+  onChangedSentence,
+  rulingBeforeEdit,
+  sentencesChanged,
+  testsRewritten,
 } from '../../packages/core/src/services/pr-check/compare';
 import { buildCorpusConflicts, sentenceKey } from '../../packages/shared/src/spec/conflict-resolution';
 
@@ -155,11 +159,82 @@ describe('docsMoved', () => {
       // A document the base never bound is new, not moved.
       { id: 'f3', bindings: [['docs/b.md', 'Welcome.']] },
     ]);
-    expect(docsMoved(base, head)).toEqual([{ doc: 'docs/a.md', flowIds: ['f1', 'f2'] }]);
+    expect(docsMoved(base.flows, head.flows)).toEqual([{ doc: 'docs/a.md', flowIds: ['f1', 'f2'] }]);
   });
 
-  it('answers nothing without both manifests', () => {
-    expect(docsMoved(null, manifest([{ id: 'f', bindings: [['d', 'x']] }]))).toEqual([]);
-    expect(docsMoved(manifest([{ id: 'f', bindings: [['d', 'x']] }]), null)).toEqual([]);
+  it('answers nothing without both sides', () => {
+    expect(docsMoved([], manifest([{ id: 'f', bindings: [['d', 'x']] }]).flows)).toEqual([]);
+    expect(docsMoved(manifest([{ id: 'f', bindings: [['d', 'x']] }]).flows, [])).toEqual([]);
+  });
+});
+
+describe('testsRewritten', () => {
+  it('names the flows proven at both sides whose test the head rewrote', () => {
+    const deltas = compareFlows(
+      { same: 'succeeded', edited: 'succeeded', drifted: 'succeeded', broke: 'succeeded', wasFailing: 'failed' },
+      { same: 'succeeded', edited: 'succeeded', drifted: 'partially-succeeded', broke: 'failed', wasFailing: 'succeeded', added: 'succeeded' },
+    );
+    const base = new Map([['same', 'a'], ['edited', 'b'], ['drifted', 'c'], ['broke', 'd'], ['wasFailing', 'e']]);
+    const head = new Map([['same', 'a'], ['edited', 'b2'], ['drifted', 'c2'], ['broke', 'd2'], ['wasFailing', 'e2'], ['added', 'f']]);
+    // A failure and a fix are already in the report; a flow new at the head had nothing to rewrite.
+    expect(testsRewritten(deltas, base, head)).toEqual(['drifted', 'edited']);
+  });
+});
+
+describe('sentencesChanged', () => {
+  it('names the head’s sentences the document did not hold before, and every sentence of a new one', () => {
+    const before = '# Setup\n\nThe server runs on port 3000. Logs go to stdout.\n';
+    const head = '# Setup\n\nThe server runs on port 8080. Logs go to stdout.\n';
+    expect(sentencesChanged('d.md', before, head)).toEqual(new Set([sentenceKey('The server runs on port 8080.')]));
+    expect(sentencesChanged('d.md', before, before)).toEqual(new Set());
+    expect(sentencesChanged('d.md', null, head).size).toBe(2);
+  });
+});
+
+describe('onChangedSentence', () => {
+  const conflict = (a: string, b: string) => ({
+    docs: ['a.md', 'b.md'] as const,
+    sections: [
+      { doc: 'a.md', sentence: a },
+      { doc: 'b.md', sentence: b },
+    ],
+  });
+  it('holds when either side is a sentence the head changed, in that side’s document', () => {
+    const changed = new Map([['b.md', new Set(['new'])]]);
+    expect(onChangedSentence(conflict('old', 'new'), changed)).toBe(true);
+    expect(onChangedSentence(conflict('old', 'old'), changed)).toBe(false);
+    // The same key in another document is another sentence.
+    expect(onChangedSentence(conflict('new', 'old'), changed)).toBe(false);
+  });
+});
+
+describe('rulingBeforeEdit', () => {
+  const ruling = (sentenceA: string, sentenceB: string) => ({
+    docA: 'a.md',
+    sentenceA,
+    docB: 'b.md',
+    sentenceB,
+    verdict: 'a' as const,
+    resolvedAt: '2026-10-08T00:00:00.000Z',
+  });
+  const sides = [
+    { doc: 'a.md', sentence: 'kept', edited: false },
+    { doc: 'b.md', sentence: 'rewritten', edited: true },
+  ];
+  const held = (_doc: string, sentence: string) => sentence === 'kept' || sentence === 'rewritten' || sentence === 'still-here';
+
+  it('finds the ruling on the same pair, on the sentence the head no longer holds', () => {
+    expect(rulingBeforeEdit(sides, [ruling('kept', 'old')], held)).toMatchObject({ sentenceB: 'old' });
+    // Named the other way round.
+    expect(rulingBeforeEdit(sides, [{ ...ruling('old', 'kept'), docA: 'b.md', docB: 'a.md' }], held)).toMatchObject({ sentenceA: 'old' });
+  });
+
+  it('ignores a ruling on another sentence the head still holds, or on another sentence of the unedited side', () => {
+    expect(rulingBeforeEdit(sides, [ruling('kept', 'still-here')], held)).toBeNull();
+    expect(rulingBeforeEdit(sides, [ruling('other', 'old')], held)).toBeNull();
+  });
+
+  it('has nothing to find when the head edited no side', () => {
+    expect(rulingBeforeEdit(sides.map((s) => ({ ...s, edited: false })), [ruling('kept', 'old')], held)).toBeNull();
   });
 });
