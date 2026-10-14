@@ -1491,8 +1491,26 @@ function flowListItem(
  */
 export async function listGuardFlows(repoKey: string, ref?: string): Promise<GuardFlowsView> {
   const view = await loadFlowView(repoKey, ref)
-  if (!view) return emptyFlowsView()
+  return view ? composeFlowsView(repoKey, view) : emptyFlowsView()
+}
 
+/**
+ * A repository's Claims and Flows payloads from ONE view: what a surface
+ * showing both reads, where {@link readGuardClaims} and {@link listGuardFlows}
+ * side by side would build the view twice.
+ */
+export async function readGuardClaimsAndFlows(
+  repoKey: string,
+  ref?: string,
+): Promise<{ claims: GuardClaimsView; flows: GuardFlowsView }> {
+  const view = await loadFlowView(repoKey, ref)
+  return view
+    ? { claims: composeClaimsView(view), flows: await composeFlowsView(repoKey, view) }
+    : { claims: EMPTY_CLAIMS_VIEW, flows: emptyFlowsView() }
+}
+
+/** The Flows payload of a built view. */
+async function composeFlowsView(repoKey: string, view: FlowViewSources): Promise<GuardFlowsView> {
   const flows = allFlowIds(view)
     .map((id) => flowListItem(id, view))
     .sort(

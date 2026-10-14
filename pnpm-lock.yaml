@@ -288,6 +288,9 @@ importers:
       jose:
         specifier: ^6.2.1
         version: 6.2.1
+      p-limit:
+        specifier: ^7.3.0
+        version: 7.3.0
       posthog-node:
         specifier: ^5.52.4
         version: 5.52.4

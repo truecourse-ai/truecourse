@@ -127,14 +127,13 @@ router.get('/:id/guard/status', async (req: Request, res: Response, next: NextFu
     // With `?ref=<commit>`: the run is the one stored at that commit and never
     // the baseline; the generate-side inputs (manifest / result) fall back to
     // the baseline set when that commit stored none.
-    res.json(
-      composeGuardStatus(
-        await readManifestForView(repo.path, ref),
-        await readGuardRunForView(repo.path, ref),
-        await readGuardResultForView(repo.path, ref),
-        await readGuardClaimTotals(repo.path, ref),
-      ),
-    );
+    const [manifest, latest, result, claimTotals] = await Promise.all([
+      readManifestForView(repo.path, ref),
+      readGuardRunForView(repo.path, ref),
+      readGuardResultForView(repo.path, ref),
+      readGuardClaimTotals(repo.path, ref),
+    ]);
+    res.json(composeGuardStatus(manifest, latest, result, claimTotals));
   } catch (e) {
     next(e);
   }
