@@ -140,11 +140,12 @@ const COMPONENTS: Components = {
     <a href={href} id={id} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">{children}</a>
   ),
   img: ({ node, ...props }) => <img {...props} className="inline-block max-w-full" />,
-  // The sentence a conflict points at, in place.
+  // The sentence a conflict points at, in place. A code span inside it takes
+  // the highlight's tint, a shade deeper, rather than painting grey over it.
   mark: ({ node, children }) => (
     <mark
       data-sentence={node?.properties?.[SENTENCE_MARK]}
-      className="box-decoration-clone rounded-sm bg-amber-500/20 px-0.5 text-foreground ring-1 ring-amber-500/50"
+      className="box-decoration-clone rounded-sm bg-amber-500/20 px-0.5 text-foreground ring-1 ring-amber-500/50 [&_code]:bg-amber-500/20"
     >
       {children}
     </mark>
