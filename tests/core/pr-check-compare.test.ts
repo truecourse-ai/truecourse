@@ -10,6 +10,8 @@ import {
   compareFlows,
   conflictsCreated,
   docsMoved,
+  onChangedSentence,
+  sentencesChanged,
   testsRewritten,
 } from '../../packages/core/src/services/pr-check/compare';
 import { buildCorpusConflicts, sentenceKey } from '../../packages/shared/src/spec/conflict-resolution';
@@ -175,5 +177,32 @@ describe('testsRewritten', () => {
     const head = new Map([['same', 'a'], ['edited', 'b2'], ['drifted', 'c2'], ['broke', 'd2'], ['wasFailing', 'e2'], ['added', 'f']]);
     // A failure and a fix are already in the report; a flow new at the head had nothing to rewrite.
     expect(testsRewritten(deltas, base, head)).toEqual(['drifted', 'edited']);
+  });
+});
+
+describe('sentencesChanged', () => {
+  it('names the head’s sentences the document did not hold before, and every sentence of a new one', () => {
+    const before = '# Setup\n\nThe server runs on port 3000. Logs go to stdout.\n';
+    const head = '# Setup\n\nThe server runs on port 8080. Logs go to stdout.\n';
+    expect(sentencesChanged('d.md', before, head)).toEqual(new Set([sentenceKey('The server runs on port 8080.')]));
+    expect(sentencesChanged('d.md', before, before)).toEqual(new Set());
+    expect(sentencesChanged('d.md', null, head).size).toBe(2);
+  });
+});
+
+describe('onChangedSentence', () => {
+  const conflict = (a: string, b: string) => ({
+    docs: ['a.md', 'b.md'] as const,
+    sections: [
+      { doc: 'a.md', sentence: a },
+      { doc: 'b.md', sentence: b },
+    ],
+  });
+  it('holds when either side is a sentence the head changed, in that side’s document', () => {
+    const changed = new Map([['b.md', new Set(['new'])]]);
+    expect(onChangedSentence(conflict('old', 'new'), changed)).toBe(true);
+    expect(onChangedSentence(conflict('old', 'old'), changed)).toBe(false);
+    // The same key in another document is another sentence.
+    expect(onChangedSentence(conflict('new', 'old'), changed)).toBe(false);
   });
 });

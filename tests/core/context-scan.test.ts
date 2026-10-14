@@ -396,6 +396,58 @@ describe('a pull request’s scan', () => {
 });
 
 describe('a pull request’s scan', () => {
+  it('keeps only the conflicts with a side on a sentence the head changed', async () => {
+    await context.createSource(ORG, {
+      id: REPO_SOURCE,
+      kind: 'repository',
+      title: 'acme/widgets',
+      config: { repoFullName: 'acme/widgets', installationId: 11, include: [], exclude: [], branch: 'main' },
+    });
+    // Two documents that already disagree in the workspace, about the port.
+    await context.writeDocuments(ORG, REPO_SOURCE, {
+      documents: [
+        doc('docs/a.md', '# A\nThe dev server runs on port 3000.\n', '2026-02-01T00:00:00.000Z'),
+        doc('docs/b.md', '# B\nThe dev server runs on port 8080.\n', '2026-02-01T00:00:00.000Z'),
+      ],
+      removed: [],
+    });
+    await setStoredDecisions(covered([REPO_SOURCE]));
+    // Every sentence about the port is one claim on one subject, and any two of them disagree.
+    const portConflicts = (call: StubCall) => {
+      if (call.kind === 'spec-scan.extract-claims') {
+        return record(call, (sentence) => (sentence.line.includes('port') ? { subject: 'dev server port', statement: sentence.line } : null));
+      }
+      if (call.kind === 'spec-scan.compare-claims') return compare(call, (a, b) => a.doc < b.doc);
+      return keepEverything(call);
+    };
+    const pairsOf = (corpus: CuratedCorpus) =>
+      [...new Set(corpus.areas.flatMap((area) => area.conflicts.map((c) => c.docs.map((d) => d.split('/').pop()).join(' vs '))))].sort();
+    // The workspace's own scan flags a against b.
+    const workspace = await workspaceContextScanInProcess({ workspaceOrgId: ORG, driver: stubDriver(portConflicts).driver });
+    expect(pairsOf(workspace.corpus)).toEqual(['a.md vs b.md']);
+
+    const result = await workspaceContextScanInProcess({
+      workspaceOrgId: ORG,
+      driver: stubDriver(portConflicts).driver,
+      pullRequest: {
+        repoFullName: 'acme/widgets',
+        number: 8,
+        headSha: 'head-8',
+        scope: 'pr/acme/widgets#8',
+        sourceId: REPO_SOURCE,
+        documents: [
+          { docPath: 'docs/a.md', body: '# A\nThe dev server runs on port 3000.\n' },
+          { docPath: 'docs/b.md', body: '# B\nThe dev server runs on port 8080.\n' },
+          // The head adds a third answer.
+          { docPath: 'docs/c.md', body: '# C\nThe dev server runs on port 9090.\n' },
+        ],
+      },
+    });
+
+    // a and b disagreed before the pull request; only the pairs with c are its.
+    expect(pairsOf(result.corpus)).toEqual(['a.md vs c.md', 'b.md vs c.md']);
+  });
+
   it('refuses a source the workspace does not have, and stores nothing', async () => {
     await seedTwoSources();
     await setStoredDecisions(covered([REPO_SOURCE, SITE_SOURCE]));

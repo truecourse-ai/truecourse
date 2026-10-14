@@ -1,7 +1,8 @@
 /**
  * THE COMPARISON a pull request check is judged by: the head's run against the
  * base's, the head's corpus against the workspace's, the head's flow bindings
- * and flow tests against the base's. Pure — every input is a stored artifact the job read
+ * and flow tests against the base's, and which conflicts the head's changed
+ * sentences can have made. Pure — every input is a stored artifact the job read
  * before, so a control run or a rerun can be put in front of it later without
  * touching it.
  */
@@ -9,6 +10,9 @@
 import {
   conflictKey,
   openConflicts,
+  parseDocTree,
+  sentencesByKey,
+  type ConflictLike,
   type CorpusConflict,
   type CorpusLike,
   type DecisionsLike,
@@ -86,6 +90,26 @@ export function conflictsCreated<O extends CorpusConflict>(
     ),
   );
   return prConflicts.filter((c) => !known.has(conflictKey(c.a, c.b, c.sections)));
+}
+
+/**
+ * The sentences a head changed in one document, by key: those of its body at
+ * the head that its body before did not hold. A document new at the head
+ * changed every sentence it has.
+ */
+export function sentencesChanged(doc: string, before: string | null, head: string): Set<string> {
+  const held = before === null ? new Set<string>() : new Set(sentencesByKey(parseDocTree(doc, before)).keys());
+  return new Set([...sentencesByKey(parseDocTree(doc, head)).keys()].filter((key) => !held.has(key)));
+}
+
+/**
+ * Whether a pull request can have made a conflict: it has a side on a sentence
+ * the head changed (`changed`, keys by doc ref). Two sentences the workspace
+ * already held disagreed before the pull request, whether or not an earlier
+ * scan said so, so such a conflict is the workspace's, settled or open there.
+ */
+export function onChangedSentence(conflict: ConflictLike, changed: ReadonlyMap<string, ReadonlySet<string>>): boolean {
+  return conflict.sections.some((side) => changed.get(side.doc)?.has(side.sentence) ?? false);
 }
 
 export interface DocMoved {

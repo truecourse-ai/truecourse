@@ -55,6 +55,7 @@ import {
   saveWorkspaceSpecDocs,
 } from '../lib/spec-store.js';
 import type { DocOrigin } from '../services/spec-scan/curate-doc.js';
+import { onChangedSentence, sentencesChanged } from '../services/pr-check/compare.js';
 import type { ScopeSourceView } from '../services/spec-scan/orchestrate.js';
 import {
   curateInProcess,
@@ -98,7 +99,8 @@ export interface WorkspaceContextScanResult {
  * by what the pull request's head holds. What it produces is the pull
  * request's corpus, stored under the pull request's scope and never promoted:
  * the workspace's corpus, decisions and staleness are left exactly as they
- * were, and the judge's recommendations are applied nowhere.
+ * were, and the judge's recommendations are applied nowhere. Its conflicts
+ * are only those with a side on a sentence the head changed.
  */
 export interface PullRequestScan {
   repoFullName: string;
@@ -215,7 +217,19 @@ export async function workspaceContextScanInProcess(
 
       // The stamp is the artifact's own record of where a document came from,
       // so nothing downstream has to re-derive it from a ref.
-      const corpus = stampCorpusSources(curate.corpus, sources);
+      const stamped = stampCorpusSources(curate.corpus, sources);
+      // A pull request's corpus holds only the conflicts the head can have
+      // made. One between two sentences the workspace already held is the
+      // workspace's, however this scan happened to pair them.
+      const corpus = pullRequest
+        ? {
+            ...stamped,
+            areas: stamped.areas.map((area) => ({
+              ...area,
+              conflicts: area.conflicts.filter((c) => onChangedSentence(c, materialized.changedSentences)),
+            })),
+          }
+        : stamped;
       // The versions this scan writes say which run wrote them and on which
       // model. A pull request's land under its own scope, naming the head,
       // and its decisions are not the workspace's to keep.
@@ -299,6 +313,8 @@ interface MaterializedWorkspace {
   facts: WorkspaceScanSourceFact[];
   origins: Map<string, DocOrigin>;
   bodies: Map<string, string>;
+  /** A pull request's: the sentences the head changed against the workspace's documents, by doc ref. */
+  changedSentences: Map<string, Set<string>>;
 }
 
 /**
@@ -318,6 +334,7 @@ async function materializeWorkspaceDocuments(
   const perSource = new Map<string, number>();
   const origins = new Map<string, DocOrigin>();
   const bodies = new Map<string, string>();
+  const changedSentences = new Map<string, Set<string>>();
   let count = 0;
 
   const place = (source: ContextSource, docPath: string, body: string, updatedAt: string | null): void => {
@@ -356,8 +373,13 @@ async function materializeWorkspaceDocuments(
     );
     for (const doc of pullRequest.documents) {
       const known = ledger.get(doc.docPath);
-      const unchanged = known !== undefined && (await readContextBody(org, known.contentHash)) === doc.body;
+      const before = known !== undefined ? await readContextBody(org, known.contentHash) : null;
+      const unchanged = known !== undefined && before === doc.body;
       place(prSource, doc.docPath, doc.body, unchanged ? known.updatedAt : null);
+      if (!unchanged) {
+        const docRef = contextDocRef(prSource.id, doc.docPath);
+        changedSentences.set(docRef, sentencesChanged(docRef, before, doc.body));
+      }
     }
   }
 
@@ -368,7 +390,7 @@ async function materializeWorkspaceDocuments(
       documents: perSource.get(source.id) ?? 0,
     }))
     .sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0));
-  return { count, perSource, facts, origins, bodies };
+  return { count, perSource, facts, origins, bodies, changedSentences };
 }
 
 /** "<source title>: N documents", one line per source, in title order. */

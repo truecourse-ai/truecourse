@@ -225,13 +225,17 @@ export function createRepoPullRequestCheckTask(
 
           // The conflicts: created against the workspace, and open in this
           // repository's slice, which stops the code half as it does on main.
+          // The head's corpus holds only the conflicts on sentences it changed,
+          // so the slice's open conflicts are the workspace's and the head's.
           const defaultCorpus = await loadWorkspaceSpec<CuratedCorpus>({ workspaceOrgId }, 'corpus');
           const decisions = await getWorkspaceDecisions(workspaceOrgId);
-          const corpus = spec.corpus ?? defaultCorpus;
           const created = spec.corpus ? conflictsCreated(defaultCorpus, openConflicts(spec.corpus, decisions), decisions) : [];
           const sourceIds = await contextBindings(workspaceOrgId, repoFullName);
-          const slice = corpus ? sliceCorpus(corpus, sourceIds) : null;
-          const sliceOpen = slice ? openConflicts(slice, decisions) : [];
+          const openInSlice = (corpus: CuratedCorpus | null) => {
+            const slice = corpus ? sliceCorpus(corpus, sourceIds) : null;
+            return slice ? openConflicts(slice, decisions) : [];
+          };
+          const sliceOpen = [...openInSlice(defaultCorpus), ...openInSlice(spec.corpus)];
           const repos = await workspaceRepositories(workspaceOrgId);
           const report = emptyReport({
             specHalf: spec.half,
