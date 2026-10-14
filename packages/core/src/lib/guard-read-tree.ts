@@ -96,6 +96,15 @@ function writeFile(file: string, body: string): void {
 }
 
 /**
+ * Which parts of the stored state a read tree holds. The scenario set (the
+ * manifest, the scenario files, the flow corpus and the flow tests) is the bulk
+ * of it, so a reader that never opens it, like the externals index, leaves it out.
+ */
+export interface GuardReadTreeParts {
+  scenarioSet?: boolean;
+}
+
+/**
  * Materialize the repo's stored guard state into `treeDir`. `ref` pins a commit
  * for the bundle and the scenario set; without one the newest of each answers.
  */
@@ -103,16 +112,19 @@ export async function materializeGuardReadTree(
   repoKey: string,
   treeDir: string,
   ref?: string,
+  { scenarioSet = true }: GuardReadTreeParts = {},
 ): Promise<void> {
   const at = versionAt(ref);
   const bundle = await loadGuardSetupBundle(repoKey, at);
   if (bundle) materializeGuardSetupBundle(treeDir, bundle);
 
-  const manifest = await readManifest(repoKey, at);
-  if (manifest) writeFile(manifestPath(treeDir), JSON.stringify(manifest, null, 2) + '\n');
-  const setFiles = await storedScenarioSetFiles(repoKey, treeDir, at);
-  for (const rel of setFiles) assertSafeRel(rel);
-  await forEachScenarioFile(repoKey, setFiles, at, (rel, body) => writeFile(safeJoin(treeDir, rel), body));
+  if (scenarioSet) {
+    const manifest = await readManifest(repoKey, at);
+    if (manifest) writeFile(manifestPath(treeDir), JSON.stringify(manifest, null, 2) + '\n');
+    const setFiles = await storedScenarioSetFiles(repoKey, treeDir, at);
+    for (const rel of setFiles) assertSafeRel(rel);
+    await forEachScenarioFile(repoKey, setFiles, at, (rel, body) => writeFile(safeJoin(treeDir, rel), body));
+  }
 
   const report = await readGuardResult(repoKey, at);
   if (report) writeTreeGuardResult(treeDir, report);
@@ -130,10 +142,11 @@ export async function withGuardReadTree<T>(
   repoKey: string,
   ref: string | undefined,
   fn: (treeDir: string) => Promise<T> | T,
+  parts?: GuardReadTreeParts,
 ): Promise<T> {
   const treeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-read-'));
   try {
-    await materializeGuardReadTree(repoKey, treeDir, ref);
+    await materializeGuardReadTree(repoKey, treeDir, ref, parts);
     return await fn(treeDir);
   } finally {
     fs.rmSync(treeDir, { recursive: true, force: true });

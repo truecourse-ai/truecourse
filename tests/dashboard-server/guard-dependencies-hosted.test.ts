@@ -1,4 +1,5 @@
 import { guardExternalSetupIndexForView } from '@truecourse/core/commands/guard-read';
+import { readGuardExternalSetupIndex } from '@truecourse/core/commands/guard-externals';
 import { withGuardReadTree } from '@truecourse/core/lib/guard-read-tree';
 import { loadRecipe, recipePath, resolvePrerequisites, externalsInjectEnv } from '@truecourse/guard-runner';
 /**
@@ -11,6 +12,9 @@ import { loadRecipe, recipePath, resolvePrerequisites, externalsInjectEnv } from
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import request from 'supertest';
 import type { Express } from 'express';
 import { PGlite } from '@electric-sql/pglite';
@@ -29,7 +33,7 @@ vi.mock('../../apps/dashboard/server/src/socket/handlers', async (importOriginal
 });
 
 import { PgGuardStore, PgGuardOverlayStore } from '../../packages/data-store/src/index';
-import { setGuardStore, resetGuardStore, saveGuardSetupBundle } from '@truecourse/core/lib/guard-store';
+import { setGuardStore, resetGuardStore, saveGuardSetupBundle, saveScenarios } from '@truecourse/core/lib/guard-store';
 import {
   setGuardOverlayStore,
   resetGuardOverlayStore,
@@ -160,6 +164,42 @@ describe('Guard dependencies routes — hosted', () => {
     expect(await guardExternalSetupIndexForView(repoKey)).toMatchObject({ anthropic: 'unprovided' });
     await writeGuardOverlays(repoKey, { dependencies: { anthropic: { env: { ANTHROPIC_BASE_URL: 'https://provider.test', ANTHROPIC_API_KEY: 'registered-secret' } } }, externals: {} });
     expect(await guardExternalSetupIndexForView(repoKey)).toMatchObject({ anthropic: 'provided' });
+  });
+
+  it('the setup index reads the same without the stored scenario set in its tree', async () => {
+    await bundle({
+      '.truecourse/scenarios/dependencies.json': { dependencies: [ACCOUNT] },
+      '.truecourse/scenarios/recipe.json': {
+        ...RECIPE,
+        api: {
+          ...RECIPE.api,
+          seed: { command: 'sh scripts/seed.sh', script: 'scripts/seed.sh', provides: { fixtures: { user: ['id'] } } },
+        },
+      },
+      'scripts/seed.sh': 'echo seeded',
+    });
+    const setDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-guard-set-'));
+    try {
+      const scenarios = path.join(setDir, '.truecourse', 'scenarios');
+      fs.mkdirSync(path.join(scenarios, 'core'), { recursive: true });
+      fs.writeFileSync(path.join(scenarios, 'flows.json'), '{"version":1,"flows":[]}');
+      fs.writeFileSync(path.join(scenarios, 'claims.json'), '{"version":1,"claims":[]}');
+      fs.writeFileSync(path.join(scenarios, 'core', 'help.yaml'), 'id: s1\n');
+      await saveScenarios({ repoKey, commitSha: 'setup-commit' }, scenarios);
+    } finally {
+      fs.rmSync(setDir, { recursive: true, force: true });
+    }
+    await writeGuardOverlays(repoKey, {
+      dependencies: { anthropic: { env: { ANTHROPIC_BASE_URL: 'https://provider.test', ANTHROPIC_API_KEY: 'k' } } },
+      externals: {},
+    });
+
+    const fromFullTree = await withGuardReadTree(repoKey, undefined, (tree) =>
+      readGuardExternalSetupIndex(tree, { env: {} }),
+    );
+    expect(fromFullTree).toMatchObject({ anthropic: 'provided', stripe: 'unprovided' });
+    expect(Object.keys(fromFullTree)).toHaveLength(3); // plus the seed's missing-data key
+    expect(await guardExternalSetupIndexForView(repoKey)).toEqual(fromFullTree);
   });
 
   it('GET reads a host-path registration as unregistrable here, with the reason', async () => {

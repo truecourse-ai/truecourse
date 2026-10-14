@@ -215,9 +215,10 @@ async function resolveGuardScope(repoKey: string, ref?: string): Promise<GuardRe
 
 /** Resolve named setup actions against the same account state as execution. The
  * read materializes the repository's stored overlay and never borrows the
- * server env. */
+ * server env. It reads the setup state alone (recipe, catalog, report,
+ * decisions, overlays), so the tree leaves the scenario set out. */
 export async function guardExternalSetupIndexForView(repoKey: string, ref?: string): Promise<GuardExternalSetupIndex> {
-  return withGuardReadTree(repoKey, ref, tree => readGuardExternalSetupIndex(tree, { env: {} }))
+  return withGuardReadTree(repoKey, ref, tree => readGuardExternalSetupIndex(tree, { env: {} }), { scenarioSet: false })
 }
 
 // ---------------------------------------------------------------------------
